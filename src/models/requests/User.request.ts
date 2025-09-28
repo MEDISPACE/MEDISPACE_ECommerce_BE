@@ -1,0 +1,73 @@
+import { JwtPayload } from 'jsonwebtoken'
+import { TokenType, UserStatus } from '~/constants/enum'
+import { ParamsDictionary } from 'express-serve-static-core'
+import User from '../schemas/User.schema'
+
+export interface Address {
+  address: string
+  ward: string
+  city: string
+  isDefault: boolean
+}
+
+export interface MedicalProfile {
+  bloodType?: string
+  height?: number
+  weight?: number
+  allergies?: string[]
+  chronicConditions?: string[]
+}
+
+export interface LoginReqBody {
+  email: string
+  password: string
+}
+export interface RegisterReqBody {
+  firstName: string
+  lastName: string
+  email: string
+  password: string
+  confirm_password: string
+  phoneNumber: string
+  gender: number
+}
+export interface TokenPayload extends JwtPayload {
+  userId: string
+  tokenType: TokenType
+  verify: UserStatus
+}
+export interface LogoutReqBody {
+  refreshToken: string
+}
+export interface RefreshTokenReqBody {
+  refreshToken: string
+}
+export interface VerifyEmailReqBody {
+  emailVerifyToken: string
+}
+export interface ForgotPasswordReqBody {
+  email: string
+}
+export interface VerifyForgotPasswordTokenReqBody {
+  forgotPasswordToken: string
+}
+export interface ResetPasswordReqBody {
+  forgotPasswordToken: string
+  password: string
+  confirm_password: string
+}
+export interface UpdateMeReqBody {
+  firstName?: string
+  lastName?: string
+  phoneNumber?: string
+  dateOfBirth?: string
+  gender?: number
+  avatar?: string
+  address?: Address
+  lisenseNumber?: string
+}
+export interface ChangePasswordReqBody {
+  currentPassword: string
+  password: string
+  confirmPassword: string
+}
