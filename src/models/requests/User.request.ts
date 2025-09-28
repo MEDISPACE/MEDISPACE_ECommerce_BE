@@ -32,51 +32,42 @@ export interface RegisterReqBody {
   gender: number
 }
 export interface TokenPayload extends JwtPayload {
-  user_id: string
-  token_type: TokenType
+  userId: string
+  tokenType: TokenType
   verify: UserStatus
 }
 export interface LogoutReqBody {
-  refresh_token: string
+  refreshToken: string
 }
 export interface RefreshTokenReqBody {
-  refresh_token: string
+  refreshToken: string
 }
 export interface VerifyEmailReqBody {
-  email_verify_token: string
+  emailVerifyToken: string
 }
 export interface ForgotPasswordReqBody {
   email: string
 }
 export interface VerifyForgotPasswordTokenReqBody {
-  forgot_password_token: string
+  forgotPasswordToken: string
 }
 export interface ResetPasswordReqBody {
-  forgot_password_token: string
+  forgotPasswordToken: string
   password: string
   confirm_password: string
 }
 export interface UpdateMeReqBody {
-  name?: string
-  date_of_birth?: string
-  bio?: string
-  location?: string
-  website?: string
+  firstName?: string
+  lastName?: string
+  phoneNumber?: string
+  dateOfBirth?: string
+  gender?: number
   avatar?: string
-  cover_photo?: string
-  username?: string
-}
-export interface GetProfileReqParams {
-  username: string
-}
-export interface FollowUserReqBody {
-  follow_user_id: string
-}
-export interface UnFollowUserReqParams extends ParamsDictionary {
-  user_id: string
+  address?: Address
+  lisenseNumber?: string
 }
 export interface ChangePasswordReqBody {
-  current_password: string
+  currentPassword: string
   password: string
-  confirm_password: string
+  confirmPassword: string
 }

@@ -86,5 +86,15 @@ export const USERS_MESSAGES = {
   FILE_IS_EMPTY: 'File is empty',
   UPLOAD_VIDEO_SUCCESS: 'Video uploaded successfully',
   REQUIRE_RANGE_HEADER: 'Requires Range header',
-  REFRESH_TOKEN_SUCCESS: 'Refresh token successful'
+  REFRESH_TOKEN_SUCCESS: 'Refresh token successful',
+  PHONE_NUMBER_MUST_BE_STRING: 'Phone number must be a string',
+  PHONE_NUMBER_LENGTH_INVALID: 'Phone number must be between 10 and 15 characters',
+  GENDER_INVALID: 'Gender must be 0 or 1',
+  ADDRESS_MUST_BE_OBJECT: 'Address must be an object',
+  ADDRESS_INVALID: 'Address is invalid',
+  WARD_INVALID: 'Ward is invalid',
+  CITY_INVALID: 'City is invalid',
+  IS_DEFAULT_INVALID: 'Is default must be boolean',
+  LISENSE_NUMBER_MUST_BE_STRING: 'License number must be a string',
+  LISENSE_NUMBER_LENGTH_INVALID: 'License number must be between 1 and 50 characters'
 } as const

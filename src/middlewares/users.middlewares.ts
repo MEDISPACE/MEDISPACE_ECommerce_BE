@@ -69,12 +69,12 @@ const forgotPasswordTokenSchema: ParamSchema = {
         })
       }
       try {
-        const decoded_forgot_password_token = await verifyToken({
+        const decodedForgotPasswordToken = await verifyToken({
           token: value,
           secretOrPublicKey: process.env.JWT_SECRET_FORGOT_PASSWORD_TOKEN as string
         })
-        const { user_id } = decoded_forgot_password_token
-        const user = await databaseService.users.findOne({ _id: new ObjectId(user_id) })
+        const { userId } = decodedForgotPasswordToken
+        const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
         if (!user) {
           throw new ErrorWithStatus({
             message: USERS_MESSAGES.USER_NOT_FOUND,
@@ -90,7 +90,7 @@ const forgotPasswordTokenSchema: ParamSchema = {
             status: HTTP_STATUS.UNAUTHORIZED
           })
         }
-        req.decoded_forgot_password_token = decoded_forgot_password_token
+        req.decodedForgotPasswordToken = decodedForgotPasswordToken
       } catch (error) {
         throw new ErrorWithStatus({
           message: USERS_MESSAGES.INVALID_FORGOT_PASSWORD_TOKEN,
@@ -153,8 +153,8 @@ const userIdSchema: ParamSchema = {
           status: HTTP_STATUS.NOT_FOUND
         })
       }
-      const { user_id } = req.decoded_authorization as TokenPayload
-      if (value === user_id) {
+      const { userId } = req.decoded_authorization as TokenPayload
+      if (value === userId) {
         throw new ErrorWithStatus({
           message: USERS_MESSAGES.CANNOT_FOLLOW_OR_UNFOLLOW_YOURSELF,
           status: HTTP_STATUS.FORBIDDEN
@@ -266,7 +266,7 @@ export const accessTokenValidator = validate(
 export const refreshTokenValidator = validate(
   checkSchema(
     {
-      refresh_token: {
+      refreshToken: {
         trim: true,
         custom: {
           options: async (value: string, { req }) => {
@@ -277,17 +277,17 @@ export const refreshTokenValidator = validate(
               })
             }
             try {
-              const [decoded_refresh_token, refresh_token] = await Promise.all([
+              const [decodedRefreshToken, refreshToken] = await Promise.all([
                 verifyToken({ token: value, secretOrPublicKey: process.env.JWT_SECRET_REFRESH_TOKEN as string }),
                 databaseService.refreshTokens.findOne({ token: value })
               ])
-              if (refresh_token === null) {
+              if (refreshToken === null) {
                 throw new ErrorWithStatus({
                   message: USERS_MESSAGES.USED_REFRESH_TOKEN_OR_NOT_EXISTS,
                   status: HTTP_STATUS.UNAUTHORIZED
                 })
               }
-              ;(req as Request).decoded_refresh_token = decoded_refresh_token
+              ;(req as Request).decodedRefreshToken = decodedRefreshToken
             } catch (error) {
               if (error instanceof JsonWebTokenError) {
                 throw new ErrorWithStatus({
@@ -308,7 +308,7 @@ export const refreshTokenValidator = validate(
 export const emailVerifyTokenValidator = validate(
   checkSchema(
     {
-      email_verify_token: {
+      emailVerifyToken: {
         trim: true,
         custom: {
           options: async (value: string, { req }) => {
@@ -319,11 +319,11 @@ export const emailVerifyTokenValidator = validate(
               })
             }
             try {
-              const decoded_email_verify_token = await verifyToken({
+              const decodedEmailVerifyToken = await verifyToken({
                 token: value,
                 secretOrPublicKey: process.env.JWT_SECRET_EMAIL_VERIFY_TOKEN as string
               })
-              ;(req as Request).decoded_email_verify_token = decoded_email_verify_token
+              ;(req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
             } catch (error) {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,
@@ -365,7 +365,131 @@ export const forgotPasswordValidator = validate(
 export const verifyForgotPasswordTokenValidator = validate(
   checkSchema(
     {
-      forgot_password_token: forgotPasswordTokenSchema
+      forgotPasswordToken: forgotPasswordTokenSchema
+    },
+    ['body']
+  )
+)
+export const resetPasswordValidator = validate(
+  checkSchema(
+    {
+      password: passwordSchema,
+      confirmPassword: confirmPasswordSchema,
+      forgotPasswordToken: forgotPasswordTokenSchema
+    },
+    ['body']
+  )
+)
+export const verifiedUserValidator = (req: Request, res: Response, next: NextFunction) => {
+  // lấy trạng thái verify từ access token, không lấy từ database vì làm chậm, giảm hiệu suất
+  // nhưng như vậy cũng có khả năng không đảm bảo nếu user verify email ở thiết bị khác thì thiết bị hiện tại vẫn chưa được verify
+  const { status } = req.decoded_authorization as TokenPayload
+  if (status === UserStatus.Unverified) {
+    return next(
+      new ErrorWithStatus({
+        message: USERS_MESSAGES.USER_NOT_VERIFIED,
+        status: HTTP_STATUS.FORBIDDEN
+      })
+    )
+  }
+  next()
+}
+export const changePasswordValidator = validate(
+  checkSchema(
+    {
+      currentPassword: {
+        ...passwordSchema,
+        custom: {
+          options: async (value: string, { req }) => {
+            const { userId } = req.decoded_authorization as TokenPayload
+            const user = await databaseService.users.findOne({
+              _id: new ObjectId(userId),
+              password: hashPassword(value)
+            })
+            if (!user) {
+              throw new Error(USERS_MESSAGES.CURRENT_PASSWORD_IS_INCORRECT)
+            }
+            return true
+          }
+        }
+      },
+      password: passwordSchema,
+      confirmPassword: confirmPasswordSchema
+    },
+    ['body']
+  )
+)
+export const updateMeValidator = validate(
+  checkSchema(
+    {
+      firstName: {
+        ...nameSchema,
+        optional: true,
+        notEmpty: undefined
+      },
+      lastName: {
+        ...nameSchema,
+        optional: true,
+        notEmpty: undefined
+      },
+      phoneNumber: {
+        optional: true,
+        isString: {
+          errorMessage: USERS_MESSAGES.PHONE_NUMBER_MUST_BE_STRING
+        },
+        trim: true,
+        isLength: {
+          options: { min: 10, max: 15 },
+          errorMessage: USERS_MESSAGES.PHONE_NUMBER_LENGTH_INVALID
+        }
+      },
+      dateOfBirth: {
+        ...dateOfBirthSchema,
+        optional: true,
+        notEmpty: undefined
+      },
+      gender: {
+        optional: true,
+        isIn: {
+          options: [[0, 1]],
+          errorMessage: USERS_MESSAGES.GENDER_INVALID
+        }
+      },
+      avatar: imageUrlSchema,
+      address: {
+        optional: true,
+        isObject: {
+          errorMessage: USERS_MESSAGES.ADDRESS_MUST_BE_OBJECT
+        },
+        custom: {
+          options: (value) => {
+            if (value.address && typeof value.address !== 'string') {
+              throw new Error(USERS_MESSAGES.ADDRESS_INVALID)
+            }
+            if (value.ward && typeof value.ward !== 'string') {
+              throw new Error(USERS_MESSAGES.WARD_INVALID)
+            }
+            if (value.city && typeof value.city !== 'string') {
+              throw new Error(USERS_MESSAGES.CITY_INVALID)
+            }
+            if (value.isDefault !== undefined && typeof value.isDefault !== 'boolean') {
+              throw new Error(USERS_MESSAGES.IS_DEFAULT_INVALID)
+            }
+            return true
+          }
+        }
+      },
+      lisenseNumber: {
+        optional: true,
+        isString: {
+          errorMessage: USERS_MESSAGES.LISENSE_NUMBER_MUST_BE_STRING
+        },
+        trim: true,
+        isLength: {
+          options: { min: 1, max: 50 },
+          errorMessage: USERS_MESSAGES.LISENSE_NUMBER_LENGTH_INVALID
+        }
+      }
     },
     ['body']
   )

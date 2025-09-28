@@ -7,26 +7,24 @@ import {
   resendVerifyEmailController,
   forgotPasswordController,
   verifyForgotPasswordTokenController,
-  //   resetPasswordController,
-  //   getMeController,
-  //   updateMeController,
-  //   getProfileController,
-  //   changePasswordController,
+  resetPasswordController,
+  getMeController,
+  updateMeController,
+  changePasswordController,
   //   oauthController,
   refreshTokenController
 } from '~/controllers/users.controllers'
 import {
   accessTokenValidator,
-  //   changePasswordValidator,
+  changePasswordValidator,
   emailVerifyTokenValidator,
   forgotPasswordValidator,
   loginValidator,
   refreshTokenValidator,
   registerValidator,
-  //   resetPasswordValidator,
-  //   unFollowValidator,
-  //   updateMeValidator,
-  //   verifiedUserValidator,
+  resetPasswordValidator,
+  updateMeValidator,
+  verifiedUserValidator,
   verifyForgotPasswordTokenValidator
 } from '~/middlewares/users.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
@@ -58,7 +56,7 @@ usersRouter.post('/register', registerValidator, wrapRequestHandler(registerCont
  * Path: /logout
  * Method: POST
  * Header: { Authorization: Bearer <access_token> }
- * Body: { refresh_token: string }
+ * Body: { refreshToken: string }
  */
 usersRouter.post('/logout', accessTokenValidator, refreshTokenValidator, wrapRequestHandler(logoutController))
 /**
@@ -72,7 +70,7 @@ usersRouter.post('/verify-email', emailVerifyTokenValidator, wrapRequestHandler(
  * Refresh Token
  * Path: /refresh-token
  * Method: POST
- * Body: { refresh_token: string }
+ * Body: { refreshToken: string }
  */
 usersRouter.post('/refresh-token', refreshTokenValidator, wrapRequestHandler(refreshTokenController))
 /**
@@ -94,59 +92,54 @@ usersRouter.post('/forgot-password', forgotPasswordValidator, wrapRequestHandler
  * Verify email when user click link in email
  * Path: /verify-forgot-password
  * Method: POST
- * Body: { forgot_password_token: string }
+ * Body: { forgotPasswordToken: string }
  */
 usersRouter.post(
   '/verify-forgot-password',
   verifyForgotPasswordTokenValidator,
   wrapRequestHandler(verifyForgotPasswordTokenController)
 )
-// /**
-//  * Reset password
-//  * Path: /reset-password
-//  * Method: POST
-//  * Body: { forgot_password_token: string, password: string, confirm_password: string }
-//  */
-// usersRouter.post('/reset-password', resetPasswordValidator, wrapRequestHandler(resetPasswordController))
-// /**
-//  * Get my profile
-//  * Path: /me
-//  * Method: GET
-//  * Header: { Authorization: Bearer <access_token> }
-//  */
-// usersRouter.get('/me', accessTokenValidator, wrapRequestHandler(getMeController))
-// /**
-//  * Update my profile
-//  * Path: /me
-//  * Method: PATCH
-//  * Header: { Authorization: Bearer <access_token> }
-//  * Body: userschema
-//  */
-// usersRouter.patch(
-//   '/me',
-//   accessTokenValidator,
-//   verifiedUserValidator,
-//   updateMeValidator,
-//   wrapRequestHandler(updateMeController)
-// )
-// /**
-//  * Get user profile
-//  * Path: /:username
-//  * Method: GET
-//  */
-// usersRouter.get('/:username', wrapRequestHandler(getProfileController))
-// /**
-//  * Change password
-//  * Path: /change-password
-//  * Method: PUT
-//  * Header: { Authorization: Bearer <access_token> }
-//  * Body: { current_password: string; password: string; confirm_password: string }
-//  */
-// usersRouter.put(
-//   '/change-password',
-//   accessTokenValidator,
-//   verifiedUserValidator,
-//   changePasswordValidator,
-//   wrapRequestHandler(changePasswordController)
-// )
+/**
+ * Reset password
+ * Path: /reset-password
+ * Method: POST
+ * Body: { forgotPasswordToken: string, password: string, confirm_password: string }
+ */
+usersRouter.post('/reset-password', resetPasswordValidator, wrapRequestHandler(resetPasswordController))
+/**
+ * Change password
+ * Path: /change-password
+ * Method: PUT
+ * Header: { Authorization: Bearer <access_token> }
+ * Body: { current_password: string; password: string; confirm_password: string }
+ */
+usersRouter.put(
+  '/change-password',
+  accessTokenValidator,
+  verifiedUserValidator,
+  changePasswordValidator,
+  wrapRequestHandler(changePasswordController)
+)
+/**
+ * Get my profile
+ * Path: /me
+ * Method: GET
+ * Header: { Authorization: Bearer <access_token> }
+ */
+usersRouter.get('/me', accessTokenValidator, wrapRequestHandler(getMeController))
+/**
+ * Update my profile
+ * Path: /me
+ * Method: PATCH
+ * Header: { Authorization: Bearer <access_token> }
+ * Body: userschema
+ */
+usersRouter.patch(
+  '/me',
+  accessTokenValidator,
+  verifiedUserValidator,
+  updateMeValidator,
+  wrapRequestHandler(updateMeController)
+)
+
 export default usersRouter

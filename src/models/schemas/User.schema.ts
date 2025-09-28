@@ -36,27 +36,27 @@ export default class User {
   password: string
   role: UserRole
   status: UserStatus
-  created_by: ObjectId
+  created_by?: ObjectId
 
   firstName: string
   lastName: string
-  phoneNumber: string
-  dateOfBirth: Date
-  gender: UserGender
-  avatar: string
+  phoneNumber?: string
+  dateOfBirth?: Date
+  gender?: UserGender
+  avatar?: string
 
-  address: Address
+  address?: Address
 
-  medicalProfile: MedicalProfile
+  medicalProfile?: MedicalProfile
 
-  lisenseNumber: string
-  isOnline: boolean
+  lisenseNumber?: string
+  isOnline?: boolean
 
-  emailVerifyToken: string
-  forgotPasswordToken: string
+  emailVerifyToken?: string
+  forgotPasswordToken?: string
 
-  createdAt: Date
-  updatedAt: Date
+  createdAt?: Date
+  updatedAt?: Date
 
   constructor(user: UserType) {
     const date = new Date()
