@@ -1,4 +1,5 @@
 import express from 'express'
+import cors from 'cors'
 import databaseService from './services/database.services'
 import { config } from 'dotenv'
 import usersRouter from './routes/users.routes'
@@ -7,6 +8,16 @@ config()
 
 const app = express()
 databaseService.connect()
+
+// CORS configuration - Allow frontend to connect
+app.use(
+  cors({
+    origin: ['http://localhost:3001', 'http://localhost:5173'], // Frontend URLs
+    credentials: true, // Allow cookies/auth headers
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  })
+)
 
 app.use(express.json())
 app.use('/users', usersRouter)
