@@ -2,6 +2,9 @@ import { MongoClient, Db, Collection } from 'mongodb'
 import { config } from 'dotenv'
 import User from '~/models/schemas/User.schema'
 import RefreshToken from '~/models/schemas/RefreshToken.schema'
+import Category from '~/models/schemas/Category.schema'
+import Brand from '~/models/schemas/Brand.schema'
+import Product from '~/models/schemas/Product.schema'
 config()
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
@@ -28,6 +31,15 @@ class DatabaseService {
   }
   get refreshTokens(): Collection<RefreshToken> {
     return this.db.collection(process.env.DB_REFRESH_TOKENS_COLLECTION as string)
+  }
+  get categories(): Collection<Category> {
+    return this.db.collection(process.env.DB_CATEGORIES_COLLECTION as string)
+  }
+  get brands(): Collection<Brand> {
+    return this.db.collection(process.env.DB_BRANDS_COLLECTION as string)
+  }
+  get products(): Collection<Product> {
+    return this.db.collection(process.env.DB_PRODUCTS_COLLECTION as string)
   }
 }
 
