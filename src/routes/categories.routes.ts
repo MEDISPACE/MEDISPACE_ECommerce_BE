@@ -5,6 +5,7 @@ import {
   getCategoriesController,
   getCategoryTreeController,
   getCategoryByIdController,
+  getCategoryBySlugController,
   getCategoryBreadcrumbController,
   getCategoryChildrenController,
   updateCategoryController,
@@ -54,6 +55,14 @@ categoriesRouter.get('/tree', wrapRequestHandler(getCategoryTreeController))
  * Params: { categoryId: string }
  */
 categoriesRouter.get('/:categoryId', categoryIdValidator, wrapRequestHandler(getCategoryByIdController))
+
+/**
+ * Description: Get category by slug
+ * Path: /categories/slug/:slug
+ * Method: GET
+ * Params: { slug: string }
+ */
+categoriesRouter.get('/slug/:slug', wrapRequestHandler(getCategoryBySlugController))
 
 /**
  * Description: Get category breadcrumb
