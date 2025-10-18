@@ -47,6 +47,15 @@ export const getCategoryByIdController = async (req: Request<{ categoryId: strin
   })
 }
 
+// Get category by slug
+export const getCategoryBySlugController = async (req: Request<{ slug: string }>, res: Response) => {
+  const result = await categoriesService.getCategoryBySlug(req.params.slug)
+  return res.status(HTTP_STATUS.OK).json({
+    message: CATEGORIES_MESSAGES.GET_CATEGORY_SUCCESS,
+    result
+  })
+}
+
 // Get category breadcrumb
 export const getCategoryBreadcrumbController = async (req: Request<{ categoryId: string }>, res: Response) => {
   const result = await categoriesService.getCategoryBreadcrumb(req.params.categoryId)
