@@ -7,7 +7,7 @@ import categoriesRouter from './routes/categories.routes'
 import brandsRouter from './routes/brands.routes'
 import productsRouter from './routes/products.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
-import cors from 'cors'
+
 config()
 
 const app = express()
@@ -16,7 +16,7 @@ databaseService.connect()
 // CORS configuration - Allow frontend to connect
 app.use(
   cors({
-    origin: ['http://localhost:3001', 'http://localhost:5173'], // Frontend URLs
+    origin: process.env.FRONTEND_URLS, // Frontend URL from env
     credentials: true, // Allow cookies/auth headers
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
