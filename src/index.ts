@@ -7,6 +7,7 @@ import usersRouter from './routes/users.routes'
 import categoriesRouter from './routes/categories.routes'
 import brandsRouter from './routes/brands.routes'
 import productsRouter from './routes/products.routes'
+import cartsRouter from './routes/carts.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 config()
@@ -32,7 +33,7 @@ app.use('/users', usersRouter)
 app.use('/categories', categoriesRouter)
 app.use('/brands', brandsRouter)
 app.use('/products', productsRouter)
-app.use('/brands', brandsRouter)
+app.use('/cart', cartsRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)

@@ -108,7 +108,7 @@ export const CATEGORIES_MESSAGES = {
   CANNOT_DELETE_CATEGORY_WITH_PRODUCTS: 'Cannot delete category that contains products',
   INVALID_PARENT_CATEGORY: 'Invalid parent category - would create circular reference',
   MAX_LEVEL_EXCEEDED: 'Maximum category level exceeded (max 3 levels)',
-  
+
   // Field validation messages
   NAME_IS_REQUIRED: 'Category name is required',
   NAME_MUST_BE_STRING: 'Category name must be a string',
@@ -132,7 +132,7 @@ export const CATEGORIES_MESSAGES = {
   LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
   LEVEL_INVALID: 'Level must be between 0 and 10',
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
-  
+
   // Success messages
   CREATE_CATEGORY_SUCCESS: 'Category created successfully',
   UPDATE_CATEGORY_SUCCESS: 'Category updated successfully',
@@ -147,7 +147,7 @@ export const CATEGORIES_MESSAGES = {
 
 export const PRODUCTS_MESSAGES = {
   VALIDATION_ERROR: 'Validation error',
-  
+
   // Product Messages
   PRODUCT_NOT_FOUND: 'Product not found',
   PRODUCT_ALREADY_EXISTS: 'Product with this name or SKU already exists',
@@ -158,7 +158,7 @@ export const PRODUCTS_MESSAGES = {
   INSUFFICIENT_STOCK: 'Insufficient stock quantity',
   PRODUCT_DETAIL_NOT_FOUND: 'Product detail not found',
   PRODUCT_MEDIA_NOT_FOUND: 'Product media not found',
-  
+
   // Validation Messages
   NAME_IS_REQUIRED: 'Product name is required',
   NAME_MUST_BE_STRING: 'Product name must be a string',
@@ -188,7 +188,7 @@ export const PRODUCTS_MESSAGES = {
   FEATURED_IMAGE_MUST_BE_STRING: 'Featured image must be a string',
   FEATURED_IMAGE_URL_INVALID: 'Featured image must be a valid URL',
   PRODUCT_ID_INVALID: 'Product ID must be a valid ObjectId',
-  
+
   // Product Detail Validation
   DOSAGE_FORM_IS_REQUIRED: 'Dosage form is required',
   DOSAGE_FORM_INVALID: 'Dosage form must be tablet, capsule, syrup, injection, cream, or drops',
@@ -210,7 +210,7 @@ export const PRODUCTS_MESSAGES = {
   STRENGTH_LENGTH_INVALID: 'Strength must be up to 100 characters',
   INDICATIONS_MUST_BE_STRING: 'Indications must be a string',
   INDICATIONS_LENGTH_INVALID: 'Indications must be up to 1000 characters',
-  
+
   // Query Validation
   PAGE_INVALID: 'Page must be a positive integer',
   LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
@@ -220,7 +220,7 @@ export const PRODUCTS_MESSAGES = {
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
   MIN_STOCK_INVALID: 'Min stock must be a non-negative number',
   MAX_STOCK_INVALID: 'Max stock must be a non-negative number',
-  
+
   // Success Messages
   CREATE_PRODUCT_SUCCESS: 'Product created successfully',
   UPDATE_PRODUCT_SUCCESS: 'Product updated successfully',
@@ -238,12 +238,37 @@ export const PRODUCTS_MESSAGES = {
   DELETE_PRODUCT_MEDIA_SUCCESS: 'Product media deleted successfully'
 } as const
 
+export const CARTS_MESSAGES = {
+  VALIDATION_ERROR: 'Validation error',
+
+  // Cart operations
+  GET_CART_SUCCESS: 'Get cart successfully',
+  ADD_TO_CART_SUCCESS: 'Add to cart successfully',
+  UPDATE_CART_ITEM_SUCCESS: 'Update cart item successfully',
+  REMOVE_CART_ITEM_SUCCESS: 'Remove cart item successfully',
+  CLEAR_CART_SUCCESS: 'Clear cart successfully',
+  GET_CHECKOUT_DATA_SUCCESS: 'Get checkout data successfully',
+
+  // Validation messages
+  PRODUCT_ID_IS_REQUIRED: 'Product ID is required',
+  PRODUCT_ID_INVALID: 'Product ID must be a valid ObjectId',
+  QUANTITY_IS_REQUIRED: 'Quantity is required',
+  QUANTITY_INVALID: 'Quantity must be a positive number',
+  QUANTITY_MUST_BE_BETWEEN_1_AND_10: 'Quantity must be between 1 and 10',
+  PRODUCT_NOT_FOUND: 'Product not found',
+  INSUFFICIENT_STOCK: 'Insufficient stock quantity',
+  CART_ITEM_NOT_FOUND: 'Cart item not found',
+  INVALID_SESSION_ID: 'Invalid session ID',
+  CART_NOT_FOUND: 'Cart not found',
+  ITEM_NOT_FOUND_IN_CART: 'Item not found in cart'
+} as const
+
 export const BRANDS_MESSAGES = {
   VALIDATION_ERROR: 'Validation error',
   BRAND_NOT_FOUND: 'Brand not found',
   BRAND_ALREADY_EXISTS: 'Brand with this name or slug already exists',
   CANNOT_DELETE_BRAND_WITH_PRODUCTS: 'Cannot delete brand that has products',
-  
+
   // Validation Messages
   NAME_IS_REQUIRED: 'Brand name is required',
   NAME_MUST_BE_STRING: 'Brand name must be a string',
@@ -268,7 +293,7 @@ export const BRANDS_MESSAGES = {
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
   SORT_BY_INVALID: 'Sort by must be name, createdAt, or productCount',
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
-  
+
   // Success Messages
   CREATE_BRAND_SUCCESS: 'Brand created successfully',
   UPDATE_BRAND_SUCCESS: 'Brand updated successfully',
