@@ -210,6 +210,18 @@ class CategoriesService {
     return category
   }
 
+  // Lấy chi tiết category theo slug
+  async getCategoryBySlug(slug: string) {
+    const category = await databaseService.categories.findOne({ slug })
+    if (!category) {
+      throw new ErrorWithStatus({
+        message: CATEGORIES_MESSAGES.CATEGORY_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+    return category
+  }
+
   // Lấy breadcrumb
   async getCategoryBreadcrumb(categoryId: string) {
     const category = await this.getCategoryById(categoryId)

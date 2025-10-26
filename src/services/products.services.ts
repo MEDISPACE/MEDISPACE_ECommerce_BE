@@ -37,7 +37,7 @@ class ProductsService {
     const query: { $or: Array<{ name?: string; sku?: string; barcode?: string }>; _id?: { $ne: ObjectId } } = {
       $or: [{ name }, { sku }]
     }
-    
+
     if (barcode) {
       query.$or.push({ barcode })
     }
@@ -84,7 +84,7 @@ class ProductsService {
   // Validate brand exists and is active (if provided)
   private async validateBrand(brandId?: string) {
     if (!brandId) return null
-    
+
     const brand = await brandsService.getBrandById(brandId)
     if (!brand.isActive) {
       throw new ErrorWithStatus({
@@ -154,7 +154,13 @@ class ProductsService {
     const filter: Record<string, unknown> = {}
 
     if (query.categoryId) {
-      filter.categoryId = new ObjectId(query.categoryId)
+      // Accept either an ObjectId string or a category slug
+      if (ObjectId.isValid(query.categoryId)) {
+        filter.categoryId = new ObjectId(query.categoryId)
+      } else {
+        const category = await categoriesService.getCategoryBySlug(query.categoryId)
+        filter.categoryId = category._id
+      }
     }
 
     if (query.brandId) {
@@ -248,6 +254,46 @@ class ProductsService {
     const products = await databaseService.products
       .aggregate([
         { $match: { _id: new ObjectId(productId) } },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'categoryId',
+            foreignField: '_id',
+            as: 'category'
+          }
+        },
+        {
+          $lookup: {
+            from: 'brands',
+            localField: 'brandId',
+            foreignField: '_id',
+            as: 'brand'
+          }
+        },
+        {
+          $addFields: {
+            category: { $arrayElemAt: ['$category', 0] },
+            brand: { $arrayElemAt: ['$brand', 0] }
+          }
+        }
+      ])
+      .toArray()
+
+    if (!products.length) {
+      throw new ErrorWithStatus({
+        message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    return products[0]
+  }
+
+  // Get product by slug with populated category and brand data
+  async getProductBySlug(slug: string) {
+    const products = await databaseService.products
+      .aggregate([
+        { $match: { slug } },
         {
           $lookup: {
             from: 'categories',
