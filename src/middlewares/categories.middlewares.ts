@@ -107,7 +107,10 @@ const categoryIdParamSchema: ParamSchema = {
   in: ['params'],
   custom: {
     options: (value) => {
-      if (!ObjectId.isValid(value)) {
+      // Accept either a Mongo ObjectId or a human-friendly slug (lowercase letters, numbers and hyphens)
+      const isObjectId = ObjectId.isValid(value)
+      const isSlug = typeof value === 'string' && /^[a-z0-9-]+$/.test(value)
+      if (!isObjectId && !isSlug) {
         throw new Error(CATEGORIES_MESSAGES.CATEGORY_ID_INVALID)
       }
       return true
