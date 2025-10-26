@@ -9,7 +9,10 @@ import { validate } from '~/utils/validation'
 const productIdSchema = {
   custom: {
     options: async (value: string) => {
-      if (!ObjectId.isValid(value)) {
+      // Accept either an ObjectId or a slug (e.g. product slug like 'paracetamol-500mg')
+      const isObjectId = ObjectId.isValid(value)
+      const isSlug = typeof value === 'string' && /^[a-z0-9-]+$/.test(value)
+      if (!isObjectId && !isSlug) {
         throw new ErrorWithStatus({
           message: PRODUCTS_MESSAGES.PRODUCT_ID_INVALID,
           status: HTTP_STATUS.BAD_REQUEST
@@ -290,11 +293,16 @@ export const getProductsValidator = validate(
         optional: true,
         custom: {
           options: async (value: string) => {
-            if (value && !ObjectId.isValid(value)) {
-              throw new ErrorWithStatus({
-                message: PRODUCTS_MESSAGES.CATEGORY_ID_INVALID,
-                status: HTTP_STATUS.BAD_REQUEST
-              })
+            // Accept either an ObjectId or a category slug
+            if (value) {
+              const isObjectId = ObjectId.isValid(value)
+              const isSlug = typeof value === 'string' && /^[a-z0-9-]+$/.test(value)
+              if (!isObjectId && !isSlug) {
+                throw new ErrorWithStatus({
+                  message: PRODUCTS_MESSAGES.CATEGORY_ID_INVALID,
+                  status: HTTP_STATUS.BAD_REQUEST
+                })
+              }
             }
             return true
           }

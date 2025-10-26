@@ -1,4 +1,5 @@
 import { Request, Response } from 'express'
+import { ObjectId } from 'mongodb'
 import { ParamsDictionary } from 'express-serve-static-core'
 import categoriesService from '~/services/categories.services'
 import { CreateCategoryReqBody, UpdateCategoryReqBody, GetCategoriesQuery } from '~/models/requests/Category.request'
@@ -40,7 +41,10 @@ export const getCategoryTreeController = async (req: Request, res: Response) => 
 
 // Get category by ID
 export const getCategoryByIdController = async (req: Request<{ categoryId: string }>, res: Response) => {
-  const result = await categoriesService.getCategoryById(req.params.categoryId)
+  const param = req.params.categoryId
+  const result = ObjectId.isValid(param)
+    ? await categoriesService.getCategoryById(param)
+    : await categoriesService.getCategoryBySlug(param)
   return res.status(HTTP_STATUS.OK).json({
     message: CATEGORIES_MESSAGES.GET_CATEGORY_SUCCESS,
     result
@@ -58,7 +62,11 @@ export const getCategoryBySlugController = async (req: Request<{ slug: string }>
 
 // Get category breadcrumb
 export const getCategoryBreadcrumbController = async (req: Request<{ categoryId: string }>, res: Response) => {
-  const result = await categoriesService.getCategoryBreadcrumb(req.params.categoryId)
+  const param = req.params.categoryId
+  const category = ObjectId.isValid(param)
+    ? await categoriesService.getCategoryById(param)
+    : await categoriesService.getCategoryBySlug(param)
+  const result = await categoriesService.getCategoryBreadcrumb(category._id.toString())
   return res.status(HTTP_STATUS.OK).json({
     message: CATEGORIES_MESSAGES.GET_CATEGORY_BREADCRUMB_SUCCESS,
     result
@@ -67,7 +75,11 @@ export const getCategoryBreadcrumbController = async (req: Request<{ categoryId:
 
 // Get category children
 export const getCategoryChildrenController = async (req: Request<{ categoryId: string }>, res: Response) => {
-  const result = await categoriesService.getCategoryChildren(req.params.categoryId)
+  const param = req.params.categoryId
+  const category = ObjectId.isValid(param)
+    ? await categoriesService.getCategoryById(param)
+    : await categoriesService.getCategoryBySlug(param)
+  const result = await categoriesService.getCategoryChildren(category._id.toString())
   return res.status(HTTP_STATUS.OK).json({
     message: CATEGORIES_MESSAGES.GET_CATEGORY_CHILDREN_SUCCESS,
     result
@@ -76,7 +88,7 @@ export const getCategoryChildrenController = async (req: Request<{ categoryId: s
 
 // Update category
 export const updateCategoryController = async (
-  req: Request<{ categoryId: string }, any, UpdateCategoryReqBody>,
+  req: Request<{ categoryId: string }, unknown, UpdateCategoryReqBody>,
   res: Response
 ) => {
   const result = await categoriesService.updateCategory(req.params.categoryId, req.body)
@@ -88,7 +100,7 @@ export const updateCategoryController = async (
 
 // Toggle category status (active/inactive)
 export const toggleCategoryStatusController = async (
-  req: Request<{ categoryId: string }, any, { isActive: boolean }>,
+  req: Request<{ categoryId: string }, unknown, { isActive: boolean }>,
   res: Response
 ) => {
   const result = await categoriesService.toggleCategoryStatus(req.params.categoryId, req.body.isActive)
