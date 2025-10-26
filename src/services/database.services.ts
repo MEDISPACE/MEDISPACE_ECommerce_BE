@@ -5,6 +5,7 @@ import RefreshToken from '~/models/schemas/RefreshToken.schema'
 import Category from '~/models/schemas/Category.schema'
 import Brand from '~/models/schemas/Brand.schema'
 import Product from '~/models/schemas/Product.schema'
+import ProductMedia from '~/models/schemas/ProductMedia.schema'
 config()
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
@@ -40,6 +41,9 @@ class DatabaseService {
   }
   get products(): Collection<Product> {
     return this.db.collection(process.env.DB_PRODUCTS_COLLECTION as string)
+  }
+  get productMedia(): Collection<ProductMedia> {
+    return this.db.collection(process.env.DB_PRODUCT_MEDIA_COLLECTION as string)
   }
 }
 

@@ -12,6 +12,9 @@ interface ProductType {
   categoryId: ObjectId
   brandId?: ObjectId
 
+  // Pricing
+  price: number
+
   // Inventory Summary
   stockQuantity: number
   maxOrderQuantity: number
@@ -43,6 +46,9 @@ export default class Product {
   categoryId: ObjectId
   brandId?: ObjectId
 
+  // Pricing
+  price: number
+
   // Inventory Summary
   stockQuantity: number
   maxOrderQuantity: number
@@ -72,6 +78,8 @@ export default class Product {
     this.shortDescription = product.shortDescription
     this.categoryId = product.categoryId
     this.brandId = product.brandId
+
+    this.price = product.price
 
     this.stockQuantity = product.stockQuantity || 0
     this.maxOrderQuantity = product.maxOrderQuantity || 10
