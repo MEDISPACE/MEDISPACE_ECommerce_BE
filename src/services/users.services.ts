@@ -22,7 +22,15 @@ class UsersService {
       options: { expiresIn: '15m' }
     })
   }
-  private signRefreshToken({ userId, verify }: { userId: string; verify: UserStatus }) {
+  private signRefreshToken({
+    userId,
+    verify,
+    expiresIn = '30d'
+  }: {
+    userId: string
+    verify: UserStatus
+    expiresIn?: string | number
+  }) {
     return signToken({
       payload: {
         userId,
@@ -30,7 +38,7 @@ class UsersService {
         verify
       },
       privateKey: process.env.JWT_SECRET_REFRESH_TOKEN as string,
-      options: { expiresIn: '100d' }
+      options: { expiresIn: expiresIn as '30d' | '90d' }
     })
   }
   private signAccessAndRefreshToken({ userId, verify }: { userId: string; verify: UserStatus }) {
@@ -121,15 +129,7 @@ class UsersService {
     )
     return { accessToken, refreshToken }
   }
-  async refreshToken({
-    userId,
-    verify,
-    refreshToken
-  }: {
-    userId: string
-    verify: UserStatus
-    refreshToken: string
-  }) {
+  async refreshToken({ userId, verify, refreshToken }: { userId: string; verify: UserStatus; refreshToken: string }) {
     const [newAccessToken, newRefreshToken] = await Promise.all([
       this.signAccessToken({ userId, verify }),
       this.signRefreshToken({ userId, verify })
@@ -147,11 +147,20 @@ class UsersService {
     const user = await databaseService.users.findOne({ email })
     return !!user
   }
-  async login({ userId, userVerify }: { userId: string; userVerify: UserStatus }) {
-    const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
-      userId,
-      verify: userVerify
-    })
+  async login({
+    userId,
+    userVerify,
+    rememberMe = false
+  }: {
+    userId: string
+    userVerify: UserStatus
+    rememberMe?: boolean
+  }) {
+    const refreshTokenExpiresIn = rememberMe ? '90d' : '30d'
+    const [accessToken, refreshToken] = await Promise.all([
+      this.signAccessToken({ userId, verify: userVerify }),
+      this.signRefreshToken({ userId, verify: userVerify, expiresIn: refreshTokenExpiresIn })
+    ])
     await databaseService.refreshTokens.insertOne(
       new RefreshToken({
         userId: new ObjectId(userId),

@@ -7,6 +7,7 @@ export interface CreateProductReqBody {
   shortDescription: string
   categoryId: string
   brandId?: string
+  price?: number
   stockQuantity?: number
   maxOrderQuantity?: number
   status?: 'active' | 'discontinued' | 'out_of_stock'
@@ -23,6 +24,7 @@ export interface UpdateProductReqBody {
   shortDescription?: string
   categoryId?: string
   brandId?: string
+  price?: number
   stockQuantity?: number
   maxOrderQuantity?: number
   status?: 'active' | 'discontinued' | 'out_of_stock'

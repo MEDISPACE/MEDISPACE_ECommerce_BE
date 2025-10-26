@@ -118,6 +118,7 @@ class ProductsService {
       shortDescription: payload.shortDescription,
       categoryId: new ObjectId(payload.categoryId),
       brandId: payload.brandId ? new ObjectId(payload.brandId) : undefined,
+      price: payload.price || 0,
       stockQuantity: payload.stockQuantity || 0,
       maxOrderQuantity: payload.maxOrderQuantity || 10,
       status: payload.status || 'active',
@@ -147,7 +148,7 @@ class ProductsService {
   // Get products with pagination and filters
   async getProducts(query: GetProductsQuery) {
     const page = parseInt(query.page || '1')
-    const limit = parseInt(query.limit || '20')
+    const limit = parseInt(query.limit || '1000') // Increased default limit to get all products for frontend filtering
     const skip = (page - 1) * limit
 
     // Build filter

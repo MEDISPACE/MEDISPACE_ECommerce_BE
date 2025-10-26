@@ -91,7 +91,7 @@ const forgotPasswordTokenSchema: ParamSchema = {
           })
         }
         req.decodedForgotPasswordToken = decodedForgotPasswordToken
-      } catch (error) {
+      } catch {
         throw new ErrorWithStatus({
           message: USERS_MESSAGES.INVALID_FORGOT_PASSWORD_TOKEN,
           status: HTTP_STATUS.UNAUTHORIZED
@@ -144,33 +144,6 @@ const imageUrlSchema: ParamSchema = {
     errorMessage: USERS_MESSAGES.IMAGE_URL_MUST_BE_AT_MOST_400_CHARACTERS_LONG
   }
 }
-const userIdSchema: ParamSchema = {
-  custom: {
-    options: async (value: string, { req }) => {
-      if (!ObjectId.isValid(value)) {
-        throw new ErrorWithStatus({
-          message: USERS_MESSAGES.INVALID_USER_ID,
-          status: HTTP_STATUS.NOT_FOUND
-        })
-      }
-      const { userId } = req.decoded_authorization as TokenPayload
-      if (value === userId) {
-        throw new ErrorWithStatus({
-          message: USERS_MESSAGES.CANNOT_FOLLOW_OR_UNFOLLOW_YOURSELF,
-          status: HTTP_STATUS.FORBIDDEN
-        })
-      }
-      const followed_user = await databaseService.users.findOne({ _id: new ObjectId(value) })
-      if (!followed_user) {
-        throw new ErrorWithStatus({
-          message: USERS_MESSAGES.USER_NOT_FOUND,
-          status: HTTP_STATUS.NOT_FOUND
-        })
-      }
-      return true
-    }
-  }
-}
 export const registerValidator = validate(
   checkSchema(
     {
@@ -196,7 +169,7 @@ export const registerValidator = validate(
         }
       },
       password: passwordSchema,
-      confirm_password: confirmPasswordSchema,
+      confirm_password: confirmPasswordSchema
     },
     ['body']
   )
@@ -249,7 +222,7 @@ export const accessTokenValidator = validate(
                 secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
               })
               ;(req as Request).decoded_authorization = decoded_authorization
-            } catch (error) {
+            } catch {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_ACCESS_TOKEN,
                 status: HTTP_STATUS.UNAUTHORIZED
@@ -270,18 +243,21 @@ export const refreshTokenValidator = validate(
         trim: true,
         custom: {
           options: async (value: string, { req }) => {
-            if (!value) {
+            // Allow refresh token from body or cookie
+            const refreshToken = value || req.cookies?.refreshToken
+
+            if (!refreshToken) {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.REFRESH_TOKEN_IS_REQUIRED,
                 status: HTTP_STATUS.UNAUTHORIZED
               })
             }
             try {
-              const [decodedRefreshToken, refreshToken] = await Promise.all([
-                verifyToken({ token: value, secretOrPublicKey: process.env.JWT_SECRET_REFRESH_TOKEN as string }),
-                databaseService.refreshTokens.findOne({ token: value })
+              const [decodedRefreshToken, refreshTokenDoc] = await Promise.all([
+                verifyToken({ token: refreshToken, secretOrPublicKey: process.env.JWT_SECRET_REFRESH_TOKEN as string }),
+                databaseService.refreshTokens.findOne({ token: refreshToken })
               ])
-              if (refreshToken === null) {
+              if (refreshTokenDoc === null) {
                 throw new ErrorWithStatus({
                   message: USERS_MESSAGES.USED_REFRESH_TOKEN_OR_NOT_EXISTS,
                   status: HTTP_STATUS.UNAUTHORIZED
@@ -302,7 +278,7 @@ export const refreshTokenValidator = validate(
         }
       }
     },
-    ['body']
+    ['body', 'cookies']
   )
 )
 export const emailVerifyTokenValidator = validate(
@@ -324,7 +300,7 @@ export const emailVerifyTokenValidator = validate(
                 secretOrPublicKey: process.env.JWT_SECRET_EMAIL_VERIFY_TOKEN as string
               })
               ;(req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
-            } catch (error) {
+            } catch {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,
                 status: HTTP_STATUS.UNAUTHORIZED

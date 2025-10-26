@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import databaseService from './services/database.services'
 import { config } from 'dotenv'
 import usersRouter from './routes/users.routes'
@@ -12,6 +13,9 @@ config()
 
 const app = express()
 databaseService.connect()
+
+// Parse cookies
+app.use(cookieParser())
 
 // CORS configuration - Allow frontend to connect
 app.use(
