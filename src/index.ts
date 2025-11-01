@@ -2,18 +2,21 @@ import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import databaseService from './services/database.services'
+import cleanupService from './services/cleanup.services'
 import { config } from 'dotenv'
 import usersRouter from './routes/users.routes'
 import categoriesRouter from './routes/categories.routes'
 import brandsRouter from './routes/brands.routes'
 import productsRouter from './routes/products.routes'
 import cartsRouter from './routes/carts.routes'
+import ordersRouter from './routes/orders.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 config()
 
 const app = express()
 databaseService.connect()
+cleanupService.startCartCleanup()
 
 // Parse cookies
 app.use(cookieParser())
@@ -34,6 +37,7 @@ app.use('/categories', categoriesRouter)
 app.use('/brands', brandsRouter)
 app.use('/products', productsRouter)
 app.use('/cart', cartsRouter)
+app.use('/orders', ordersRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)

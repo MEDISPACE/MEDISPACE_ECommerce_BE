@@ -302,3 +302,28 @@ export const BRANDS_MESSAGES = {
   GET_BRAND_SUCCESS: 'Get brand successfully',
   TOGGLE_BRAND_STATUS_SUCCESS: 'Toggle brand status successfully'
 } as const
+
+export const ORDERS_MESSAGES = {
+  // Validation Messages
+  ORDER_NOT_FOUND: 'Order not found',
+  CART_EMPTY: 'Cart is empty',
+  PRESCRIPTION_REQUIRED: 'Prescription required for some items in cart',
+  INVALID_ORDER_STATUS: 'Invalid order status',
+  INVALID_PAYMENT_STATUS: 'Invalid payment status',
+  INVALID_PAYMENT_METHOD: 'Invalid payment method',
+  SHIPPING_ADDRESS_REQUIRED: 'Shipping address is required',
+  ORDER_NUMBER_EXISTS: 'Order number already exists',
+
+  // Success Messages
+  CREATE_ORDER_SUCCESS: 'Order created successfully',
+  GET_ORDERS_SUCCESS: 'Get orders successfully',
+  GET_ORDER_SUCCESS: 'Get order successfully',
+  UPDATE_ORDER_STATUS_SUCCESS: 'Order status updated successfully',
+  UPDATE_PAYMENT_STATUS_SUCCESS: 'Payment status updated successfully',
+  CANCEL_ORDER_SUCCESS: 'Order cancelled successfully',
+
+  // Error Messages
+  CREATE_ORDER_FAILED: 'Failed to create order',
+  UPDATE_ORDER_FAILED: 'Failed to update order',
+  CANCEL_ORDER_FAILED: 'Failed to cancel order'
+} as const
