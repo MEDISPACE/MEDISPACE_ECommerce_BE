@@ -1154,10 +1154,33 @@ async function seedDatabase() {
     await databaseService.connect()
 
     // Clear existing data
-    await databaseService.categories.deleteMany({})
-    await databaseService.brands.deleteMany({})
-    await databaseService.products.deleteMany({})
-    await databaseService.productMedia.deleteMany({})
+    try {
+      await databaseService.categories.deleteMany({})
+      console.log('Cleared categories')
+    } catch {
+      console.log('Categories collection might not exist, skipping delete')
+    }
+
+    try {
+      await databaseService.brands.deleteMany({})
+      console.log('Cleared brands')
+    } catch {
+      console.log('Brands collection might not exist, skipping delete')
+    }
+
+    try {
+      await databaseService.products.deleteMany({})
+      console.log('Cleared products')
+    } catch {
+      console.log('Products collection might not exist, skipping delete')
+    }
+
+    try {
+      await databaseService.productMedia.deleteMany({})
+      console.log('Cleared product media')
+    } catch {
+      console.log('Product media collection might not exist, skipping delete')
+    }
 
     // Insert categories with proper hierarchy
     const insertedCategories = []

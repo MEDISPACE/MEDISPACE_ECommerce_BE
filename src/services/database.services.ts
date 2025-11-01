@@ -7,7 +7,18 @@ import Brand from '~/models/schemas/Brand.schema'
 import Product from '~/models/schemas/Product.schema'
 import ProductMedia from '~/models/schemas/ProductMedia.schema'
 import Cart from '~/models/schemas/Cart.schema'
-config()
+import Order from '~/models/schemas/Order.schema'
+
+console.log('Loading .env file...')
+const result = config()
+console.log('Dotenv result:', result)
+console.log('Parsed env vars:', result.parsed)
+
+console.log('Environment variables loaded:')
+console.log('DB_PRODUCTS_COLLECTION:', process.env.DB_PRODUCTS_COLLECTION)
+console.log('DB_CATEGORIES_COLLECTION:', process.env.DB_CATEGORIES_COLLECTION)
+console.log('DB_BRANDS_COLLECTION:', process.env.DB_BRANDS_COLLECTION)
+console.log('DB_PRODUCT_MEDIA_COLLECTION:', process.env.DB_PRODUCT_MEDIA_COLLECTION)
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
 
@@ -48,6 +59,9 @@ class DatabaseService {
   }
   get carts(): Collection<Cart> {
     return this.db.collection(process.env.DB_CARTS_COLLECTION as string)
+  }
+  get orders(): Collection<Order> {
+    return this.db.collection(process.env.DB_ORDERS_COLLECTION as string)
   }
 }
 
