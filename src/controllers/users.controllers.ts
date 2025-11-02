@@ -59,6 +59,24 @@ export const loginController = async (req: Request<ParamsDictionary, unknown, Lo
     }
   })
 }
+
+export const oauthController = async (req: Request, res: Response) => {
+  const { code } = req.query as { code: string }
+  const result = await usersService.oauth(code)
+
+  // Set refresh token as httpOnly cookie (30 days for OAuth)
+  res.cookie('refreshToken', result.refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+  })
+
+  // Redirect to frontend with access token as URL parameter
+  const redirectUrl = `${process.env.CLIENT_REDIRECT_URI}?accessToken=${result.accessToken}`
+  return res.redirect(redirectUrl)
+}
+
 export const logoutController = async (req: Request<ParamsDictionary, unknown, LogoutReqBody>, res: Response) => {
   // Refresh token is now obtained from cookie in middleware, not from body
   const result = await usersService.logout(req.cookies?.refreshToken)

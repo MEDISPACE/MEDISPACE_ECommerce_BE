@@ -9,7 +9,9 @@ import { CARTS_MESSAGES } from '~/constants/message'
 
 // Optional authentication middleware for guest cart support
 export const optionalAuth = async (req: Request, res: Response, next: NextFunction) => {
+  console.log('🔍 optionalAuth middleware - Request:', req.method, req.url)
   const authHeader = req.headers.authorization
+  console.log('🔍 optionalAuth middleware - Auth header:', authHeader)
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const access_token = authHeader.split(' ')[1]
@@ -21,13 +23,16 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
           secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
         })
         ;(req as Request).decoded_authorization = decoded_authorization
-      } catch {
+        console.log('🔍 optionalAuth middleware - Token verified:', decoded_authorization)
+      } catch (error) {
         // Invalid token, treat as guest user
+        console.log('🔍 optionalAuth middleware - Token verification failed, treating as guest')
         ;(req as Request).decoded_authorization = undefined
       }
     }
   } else {
     // No token provided, treat as guest user
+    console.log('🔍 optionalAuth middleware - No auth header, treating as guest')
     ;(req as Request).decoded_authorization = undefined
   }
 

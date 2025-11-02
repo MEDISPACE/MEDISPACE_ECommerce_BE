@@ -8,14 +8,26 @@ import { CARTS_MESSAGES } from '~/constants/message'
 
 // Helper function to get userId and sessionId from request
 const getUserAndSession = (req: Request) => {
-  const userId = req.decoded_authorization?.userId ? new ObjectId(req.decoded_authorization.userId) : undefined
+  let userId: ObjectId | undefined = undefined
+
+  if (req.decoded_authorization?.userId) {
+    try {
+      userId = new ObjectId(req.decoded_authorization.userId)
+    } catch (error) {
+      console.error('❌ Invalid userId in token:', req.decoded_authorization.userId, error)
+      userId = undefined
+    }
+  }
+
   const sessionId = req.cookies?.sessionId || (req.headers['x-session-id'] as string)
   return { userId, sessionId }
 }
 
 // Get user's cart
 export const getCartController = async (req: Request, res: Response) => {
+  console.log('🔍 getCartController - decoded_authorization:', req.decoded_authorization)
   const { userId, sessionId } = getUserAndSession(req)
+  console.log('🔍 getCartController - userId:', userId?.toString(), 'sessionId:', sessionId)
   const result = await cartService.getCart(userId, sessionId)
 
   // Set session cookie for guest users

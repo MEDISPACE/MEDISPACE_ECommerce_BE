@@ -9,6 +9,7 @@ import { ObjectId } from 'mongodb'
 import { USERS_MESSAGES } from '~/constants/message'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
+import axios from 'axios'
 
 class UsersService {
   private signAccessToken({ userId, verify }: { userId: string; verify: UserStatus }) {
@@ -66,41 +67,7 @@ class UsersService {
       options: { expiresIn: '7d' }
     })
   }
-  // private async getOauthGoogleToken(code: string) {
-  //   const body = {
-  //     code,
-  //     client_id: process.env.GOOGLE_CLIENT_ID,
-  //     client_secret: process.env.GOOGLE_CLIENT_SECRET,
-  //     redirect_uri: process.env.GOOGLE_REDIRECT_URI,
-  //     grant_type: 'authorization_code'
-  //   }
-  //   const { data } = await axios.post('https://oauth2.googleapis.com/token', body, {
-  //     headers: {
-  //       'Content-Type': 'application/x-www-form-urlencoded'
-  //     }
-  //   })
-  //   return data as { id_token: string; access_token: string }
-  // }
-  // private async getGoogleUserInfo(access_token: string, id_token: string) {
-  //   const { data } = await axios.get(
-  //     `https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=${access_token}`,
-  //     {
-  //       headers: {
-  //         Authorization: `Bearer ${id_token}`
-  //       }
-  //     }
-  //   )
-  //   return data as {
-  //     id: string
-  //     email: string
-  //     verified_email: boolean
-  //     name: string
-  //     given_name: string
-  //     family_name: string
-  //     picture: string
-  //     locale: string
-  //   }
-  // }
+
   async register(payload: RegisterReqBody) {
     const userId = new ObjectId()
     const emailVerifyToken = await this.signEmailVerifyToken({
@@ -147,6 +114,44 @@ class UsersService {
     const user = await databaseService.users.findOne({ email })
     return !!user
   }
+
+  private async getOauthGoogleToken(code: string) {
+    const body = {
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: process.env.GOOGLE_REDIRECT_URI,
+      grant_type: 'authorization_code'
+    }
+    const { data } = await axios.post('https://oauth2.googleapis.com/token', body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    })
+    return data as { id_token: string; access_token: string }
+  }
+
+  private async getGoogleUserInfo(access_token: string, id_token: string) {
+    const { data } = await axios.get(
+      `https://www.googleapis.com/oauth2/v1/userinfo?alt=json&access_token=${access_token}`,
+      {
+        headers: {
+          Authorization: `Bearer ${id_token}`
+        }
+      }
+    )
+    return data as {
+      id: string
+      email: string
+      verified_email: boolean
+      name: string
+      given_name: string
+      family_name: string
+      picture: string
+      locale: string
+    }
+  }
+
   async login({
     userId,
     userVerify,
@@ -169,49 +174,57 @@ class UsersService {
     )
     return { accessToken, refreshToken }
   }
-  // async oauth(code: string) {
-  //   // Gọi Google API để lấy thông tin user
-  //   // Nếu email chưa tồn tại trong database thì tạo mới user
-  //   // Nếu email đã tồn tại trong database thì bỏ qua bước tạo mới user
-  //   // Trả về access token và refresh token cho client
-  //   const { id_token, access_token } = await this.getOauthGoogleToken(code)
-  //   const userInfo = await this.getGoogleUserInfo(access_token, id_token)
-  //   if (!userInfo.verified_email) {
-  //     throw new ErrorWithStatus({
-  //       message: USERS_MESSAGES.GMAIL_NOT_VERIFIED,
-  //       status: HTTP_STATUS.UNAUTHORIZED
-  //     })
-  //   }
-  //   const user = await databaseService.users.findOne({ email: userInfo.email })
-  //   if (user) {
-  //     const [access_token, refresh_token] = await this.signAccessAndRefreshToken({
-  //       user_id: user._id.toString(),
-  //       verify: user.verify
-  //     })
-  //     await databaseService.refreshTokens.insertOne(
-  //       new RefreshToken({
-  //         user_id: user._id,
-  //         token: refresh_token
-  //       })
-  //     )
-  //     return {
-  //       access_token,
-  //       refresh_token,
-  //       newUser: 0,
-  //       verify: user.verify
-  //     }
-  //   } else {
-  //     const randomPassword = Math.random().toString(36).slice(-8)
-  //     const data = await this.register({
-  //       name: userInfo.name,
-  //       email: userInfo.email,
-  //       password: randomPassword,
-  //       confirm_password: randomPassword,
-  //       date_of_birth: new Date().toISOString()
-  //     })
-  //     return { ...data, newUser: true }
-  //   }
-  // }
+  async oauth(code: string) {
+    // Gọi Google API để lấy thông tin user
+    // Nếu email chưa tồn tại trong database thì tạo mới user
+    // Nếu email đã tồn tại trong database thì bỏ qua bước tạo mới user
+    // Trả về access token và refresh token cho client
+    const { id_token, access_token } = await this.getOauthGoogleToken(code)
+    const userInfo = await this.getGoogleUserInfo(access_token, id_token)
+    // console.log(userInfo)
+    if (!userInfo.verified_email) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.GMAIL_NOT_VERIFIED,
+        status: HTTP_STATUS.UNAUTHORIZED
+      })
+    }
+
+    const user = await databaseService.users.findOne({ email: userInfo.email })
+    if (user) {
+      const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
+        userId: user._id.toString(),
+        verify: user.status
+      })
+      await databaseService.refreshTokens.insertOne(
+        new RefreshToken({
+          userId: user._id,
+          token: refreshToken
+        })
+      )
+      return {
+        accessToken,
+        refreshToken,
+        newUser: 0,
+        verify: user.status
+      }
+    } else {
+      const randomPassword = Math.random().toString(36).slice(-8)
+      const nameParts = userInfo.name.split(' ')
+      const firstName = nameParts[0] || ''
+      const lastName = nameParts.slice(1).join(' ') || ''
+      const data = await this.register({
+        firstName,
+        lastName,
+        email: userInfo.email,
+        password: randomPassword,
+        confirm_password: randomPassword,
+        phoneNumber: '',
+        gender: 0
+      })
+      return { ...data, newUser: true, verify: UserStatus.Unverified }
+    }
+  }
+
   async logout(refreshToken: string) {
     await databaseService.refreshTokens.deleteOne({ token: refreshToken })
     return {

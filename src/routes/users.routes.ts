@@ -11,7 +11,7 @@ import {
   getMeController,
   updateMeController,
   changePasswordController,
-  //   oauthController,
+  oauthController,
   refreshTokenController
 } from '~/controllers/users.controllers'
 import {
@@ -38,19 +38,23 @@ const usersRouter = Router()
  * Body: {name:string; email: string; password: string }
  */
 usersRouter.post('/login', loginValidator, wrapRequestHandler(loginController))
-// /**
-//  * Login with Google OAuth
-//  * Path: /oauth/google
-//  * Method: GET
-//  */
-// usersRouter.get('/oauth/google', wrapRequestHandler(oauthController))
-// /**
-//  * User registration
-//  * Path: /register
-//  * Method: POST
-//  * Body: {name:string; email: string; password: string }
-//  */
+
+/**
+ * Login with Google OAuth
+ * Path: /oauth/google
+ * Method: GET
+ * Query: { code: string }
+ */
+usersRouter.get('/oauth/google', wrapRequestHandler(oauthController))
+
+/**
+ * User registration
+ * Path: /register
+ * Method: POST
+ * Body: {name:string; email: string; password: string }
+ */
 usersRouter.post('/register', registerValidator, wrapRequestHandler(registerController))
+
 /**
  * User logout
  * Path: /logout
