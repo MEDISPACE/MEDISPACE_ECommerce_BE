@@ -17,7 +17,7 @@ interface UserType {
   gender?: UserGender
   avatar?: string
 
-  address?: Address
+  addresses?: Address[]
 
   medicalProfile?: MedicalProfile
 
@@ -45,7 +45,7 @@ export default class User {
   gender?: UserGender
   avatar?: string
 
-  address?: Address
+  addresses?: Address[]
 
   medicalProfile?: MedicalProfile
 
@@ -73,7 +73,7 @@ export default class User {
     this.dateOfBirth = user.dateOfBirth || new Date()
     this.gender = user.gender || 1
     this.avatar = user.avatar || ''
-    this.address = user.address || { address: '', ward: '', city: '', isDefault: true }
+    this.addresses = user.addresses || []
     this.medicalProfile = user.medicalProfile || {}
     this.lisenseNumber = user.lisenseNumber || ''
     this.isOnline = user.isOnline || false

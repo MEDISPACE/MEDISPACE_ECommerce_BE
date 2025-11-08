@@ -2,9 +2,14 @@ import { JwtPayload } from 'jsonwebtoken'
 import { TokenType, UserStatus } from '~/constants/enum'
 
 export interface Address {
-  address: string
+  id?: string
+  name: string
+  phone: string
+  province: string
+  district: string
   ward: string
-  city: string
+  address: string
+  type: 'home' | 'office' | 'other'
   isDefault: boolean
 }
 
@@ -62,7 +67,7 @@ export interface UpdateMeReqBody {
   dateOfBirth?: string
   gender?: number
   avatar?: string
-  address?: Address
+  addresses?: Address[]
   lisenseNumber?: string
 }
 export interface ChangePasswordReqBody {
