@@ -82,9 +82,6 @@ const forgotPasswordTokenSchema: ParamSchema = {
           })
         }
         if (user.forgotPasswordToken !== value) {
-          console.log('User forgot password token in DB:', user.forgotPasswordToken)
-          console.log('Provided forgot password token:', value)
-          console.log('Forgot password token is invalid')
           throw new ErrorWithStatus({
             message: USERS_MESSAGES.INVALID_FORGOT_PASSWORD_TOKEN,
             status: HTTP_STATUS.UNAUTHORIZED

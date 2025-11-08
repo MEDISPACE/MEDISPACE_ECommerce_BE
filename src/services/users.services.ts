@@ -181,7 +181,6 @@ class UsersService {
     // Trả về access token và refresh token cho client
     const { id_token, access_token } = await this.getOauthGoogleToken(code)
     const userInfo = await this.getGoogleUserInfo(access_token, id_token)
-    // console.log(userInfo)
     if (!userInfo.verified_email) {
       throw new ErrorWithStatus({
         message: USERS_MESSAGES.GMAIL_NOT_VERIFIED,

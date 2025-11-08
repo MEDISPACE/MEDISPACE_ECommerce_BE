@@ -1150,267 +1150,209 @@ const generateProducts = () => {
 const productsData = generateProducts()
 
 async function seedDatabase() {
+  await databaseService.connect()
+
+  // Clear existing data
   try {
-    await databaseService.connect()
-
-    // Clear existing data
-    try {
-      await databaseService.categories.deleteMany({})
-      console.log('Cleared categories')
-    } catch {
-      console.log('Categories collection might not exist, skipping delete')
-    }
-
-    try {
-      await databaseService.brands.deleteMany({})
-      console.log('Cleared brands')
-    } catch {
-      console.log('Brands collection might not exist, skipping delete')
-    }
-
-    try {
-      await databaseService.products.deleteMany({})
-      console.log('Cleared products')
-    } catch {
-      console.log('Products collection might not exist, skipping delete')
-    }
-
-    try {
-      await databaseService.productMedia.deleteMany({})
-      console.log('Cleared product media')
-    } catch {
-      console.log('Product media collection might not exist, skipping delete')
-    }
-
-    // Insert categories with proper hierarchy
-    const insertedCategories = []
-
-    // First, insert level 1 categories
-    const level1Categories = categoriesData.filter((cat) => cat.level === 1)
-    for (const cat of level1Categories) {
-      const category = new Category({
-        name: cat.name,
-        slug: cat.slug,
-        description: cat.description,
-        isActive: cat.isActive,
-        level: cat.level,
-        path: cat.path,
-        productCount: 0,
-        sortOrder: cat.sortOrder
-      })
-      const result = await databaseService.categories.insertOne(category)
-      insertedCategories.push({ ...category, _id: result.insertedId })
-    }
-
-    // Then, insert level 2 categories with parentId
-    const level2Categories = categoriesData.filter((cat) => cat.level === 2)
-    for (const cat of level2Categories) {
-      // Find parent category based on path prefix
-      const parentPath = cat.path.split('/').slice(0, -1).join('/')
-      const parent: Category | undefined = insertedCategories.find((c) => c.path === parentPath)
-
-      if (!parent) {
-        console.log(`Parent not found for category ${cat.name}`)
-        continue
-      }
-
-      const category: Category = new Category({
-        name: cat.name,
-        slug: cat.slug,
-        description: cat.description,
-        parentId: parent._id,
-        isActive: cat.isActive,
-        level: cat.level,
-        path: cat.path,
-        productCount: 0,
-        sortOrder: cat.sortOrder
-      })
-      const result = await databaseService.categories.insertOne(category)
-      insertedCategories.push({ ...category, _id: result.insertedId })
-    }
-
-    console.log('Inserted categories:', insertedCategories.length)
-
-    // Insert brands
-    const insertedBrands = []
-    for (const br of brandsData) {
-      const brand = new Brand({
-        name: br.name,
-        slug: br.slug,
-        description: br.description,
-        logo: br.logo,
-        country: br.country,
-        isActive: br.isActive,
-        productCount: 0
-      })
-      const result = await databaseService.brands.insertOne(brand)
-      insertedBrands.push({ ...brand, _id: result.insertedId })
-    }
-    console.log('Inserted brands:', insertedBrands.length)
-
-    // Insert products
-    const insertedProducts = []
-    for (const prod of productsData) {
-      const category = insertedCategories.find((c) => c.slug === prod.categorySlug)
-      const brand = insertedBrands.find((b) => b.slug === prod.brandSlug)
-
-      if (!category || !brand) {
-        console.log(`Skipping product ${prod.name}: category or brand not found`)
-        continue
-      }
-
-      const product = new Product({
-        name: prod.name,
-        slug: prod.slug,
-        sku: prod.sku,
-        shortDescription: prod.shortDescription,
-        categoryId: category._id,
-        brandId: brand._id,
-        price: prod.price,
-        stockQuantity: prod.stockQuantity,
-        maxOrderQuantity: prod.maxOrderQuantity,
-        status: prod.status,
-        isActive: prod.isActive,
-        requiresPrescription: prod.requiresPrescription,
-        featuredImage: prod.featuredImage,
-        createdBy: new ObjectId() // Placeholder
-      })
-
-      const result = await databaseService.products.insertOne(product)
-      insertedProducts.push({ ...product, _id: result.insertedId })
-    }
-    console.log('Inserted products:', insertedProducts.length)
-
-    // Debug: Check first few products and their categories
-    console.log('Checking first few products and their categories...')
-    for (let i = 0; i < 5; i++) {
-      const product = insertedProducts[i]
-      const category = await databaseService.categories.findOne({ _id: product.categoryId })
-      console.log(
-        `Product ${product.name}: categoryId ${product.categoryId}, category found: ${!!category}, category name: ${category?.name}`
-      )
-    }
-
-    // Update productCount for categories
-    console.log('Updating productCount for categories...')
-    for (const category of insertedCategories) {
-      const productCount = insertedProducts.filter((p) => p.categoryId.toString() === category._id.toString()).length
-      await databaseService.categories.updateOne({ _id: category._id }, { $set: { productCount } })
-    }
-
-    // Update insertedCategories with the new productCount
-    for (const category of insertedCategories) {
-      const dbCategory = await databaseService.categories.findOne({ _id: category._id })
-      category.productCount = dbCategory?.productCount || 0
-    }
-
-    // Aggregate productCount for parent categories
-    console.log('Aggregating productCount for parent categories...')
-    const categoriesMap = new Map(insertedCategories.map((c) => [c._id.toString(), c]))
-
-    // Sort by level descending to update parents after children
-    const sortedCategories = insertedCategories.sort((a, b) => b.level - a.level)
-
-    for (const category of sortedCategories) {
-      if (category.parentId) {
-        const parent = categoriesMap.get(category.parentId.toString())
-        console.log(
-          `Processing ${category.name} (level ${category.level}), parentId: ${category.parentId}, parent found: ${!!parent}, parent name: ${parent?.name}`
-        )
-        if (parent) {
-          const currentCount = parent.productCount || 0
-          const childCount = category.productCount || 0
-          console.log(`Updating parent ${parent.name} from ${currentCount} to ${currentCount + childCount}`)
-          await databaseService.categories.updateOne(
-            { _id: parent._id },
-            { $set: { productCount: currentCount + childCount } }
-          )
-          // Update the map
-          parent.productCount = currentCount + childCount
-        }
-      }
-    }
-
-    console.log('Updated productCount for all categories')
-
-    // Debug: Check final productCount for level 1 categories
-    console.log('Checking final productCount for level 1 categories...')
-    for (const category of insertedCategories.filter((c) => c.level === 1)) {
-      const cat = await databaseService.categories.findOne({ _id: category._id })
-      console.log(`${category.name}: ${cat?.productCount}`)
-    }
-
-    console.log('Checking productCount for level 2 categories...')
-    for (const category of insertedCategories.filter((c) => c.level === 2)) {
-      const cat = await databaseService.categories.findOne({ _id: category._id })
-      console.log(`${category.name}: ${cat?.productCount}`)
-    }
-
-    // Update productCount for brands
-    console.log('Updating productCount for brands...')
-    for (const brand of insertedBrands) {
-      const productCount = insertedProducts.filter(
-        (p) => p.brandId && p.brandId.toString() === brand._id.toString()
-      ).length
-      await databaseService.brands.updateOne({ _id: brand._id }, { $set: { productCount } })
-    }
-    console.log('Updated productCount for all brands')
-
-    // Insert product media
-    for (const product of insertedProducts) {
-      // Generate realistic image URLs based on product type
-      const images = []
-      // Main product image
-      images.push({
-        url: `https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=400&fit=crop&crop=center&q=80`,
-        alt: `${product.name} - Hình ảnh chính`,
-        type: 'main' as const,
-        sortOrder: 1
-      })
-
-      // Gallery images (2-3 additional images)
-      const galleryUrls = [
-        `https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=400&h=400&fit=crop&crop=center&q=80`,
-        `https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&h=400&fit=crop&crop=center&q=80`,
-        `https://images.unsplash.com/photo-1550572017-edd951aa8ca9?w=400&h=400&fit=crop&crop=center&q=80`
-      ]
-
-      galleryUrls.slice(0, Math.floor(Math.random() * 3) + 1).forEach((url, index) => {
-        images.push({
-          url,
-          alt: `${product.name} - Hình ảnh ${index + 2}`,
-          type: 'gallery' as const,
-          sortOrder: index + 2
-        })
-      })
-
-      // Packaging image
-      if (Math.random() > 0.5) {
-        images.push({
-          url: `https://images.unsplash.com/photo-1594736797933-d0401ba2fe65?w=400&h=400&fit=crop&crop=center&q=80`,
-          alt: `${product.name} - Hình ảnh bao bì`,
-          type: 'packaging' as const,
-          sortOrder: images.length + 1
-        })
-      }
-
-      const productMedia = new ProductMedia({
-        productId: product._id,
-        images,
-        videos: [],
-        documents: []
-      })
-
-      await databaseService.productMedia.insertOne(productMedia)
-    }
-    console.log('Inserted product media')
-
-    console.log('Seeding completed successfully!')
-  } catch (error) {
-    console.error('Seeding failed:', error)
-  } finally {
-    process.exit(0)
+    await databaseService.categories.deleteMany({})
+  } catch {
+    // Categories collection might not exist, skipping delete
   }
+
+  try {
+    await databaseService.brands.deleteMany({})
+  } catch {
+    // Brands collection might not exist, skipping delete
+  }
+
+  try {
+    await databaseService.products.deleteMany({})
+  } catch {
+    // Products collection might not exist, skipping delete
+  }
+
+  try {
+    await databaseService.productMedia.deleteMany({})
+  } catch {
+    // Product media collection might not exist, skipping delete
+  }
+
+  // Insert categories with proper hierarchy
+  const insertedCategories = []
+
+  // First, insert level 1 categories
+  const level1Categories = categoriesData.filter((cat) => cat.level === 1)
+  for (const cat of level1Categories) {
+    const category = new Category({
+      name: cat.name,
+      slug: cat.slug,
+      description: cat.description,
+      isActive: cat.isActive,
+      level: cat.level,
+      path: cat.path,
+      productCount: 0,
+      sortOrder: cat.sortOrder
+    })
+    const result = await databaseService.categories.insertOne(category)
+    insertedCategories.push({ ...category, _id: result.insertedId })
+  }
+
+  // Then, insert level 2 categories with parentId
+  const level2Categories = categoriesData.filter((cat) => cat.level === 2)
+  for (const cat of level2Categories) {
+    // Find parent category based on path prefix
+    const parentPath = cat.path.split('/').slice(0, -1).join('/')
+    const parent: Category | undefined = insertedCategories.find((c) => c.path === parentPath)
+
+    if (!parent) {
+      continue
+    }
+
+    const category: Category = new Category({
+      name: cat.name,
+      slug: cat.slug,
+      description: cat.description,
+      parentId: parent._id,
+      isActive: cat.isActive,
+      level: cat.level,
+      path: cat.path,
+      productCount: 0,
+      sortOrder: cat.sortOrder
+    })
+    const result = await databaseService.categories.insertOne(category)
+    insertedCategories.push({ ...category, _id: result.insertedId })
+  }
+
+  // Insert brands
+  const insertedBrands = []
+  for (const br of brandsData) {
+    const brand = new Brand({
+      name: br.name,
+      slug: br.slug,
+      description: br.description,
+      logo: br.logo,
+      country: br.country,
+      isActive: br.isActive,
+      productCount: 0
+    })
+    const result = await databaseService.brands.insertOne(brand)
+    insertedBrands.push({ ...brand, _id: result.insertedId })
+  }
+
+  // Insert products
+  const insertedProducts = []
+  for (const prod of productsData) {
+    const category = insertedCategories.find((c) => c.slug === prod.categorySlug)
+    const brand = insertedBrands.find((b) => b.slug === prod.brandSlug)
+
+    if (!category || !brand) {
+      continue
+    }
+
+    const product = new Product({
+      name: prod.name,
+      slug: prod.slug,
+      sku: prod.sku,
+      shortDescription: prod.shortDescription,
+      categoryId: category._id,
+      brandId: brand._id,
+      price: prod.price,
+      stockQuantity: prod.stockQuantity,
+      maxOrderQuantity: prod.maxOrderQuantity,
+      status: prod.status,
+      isActive: prod.isActive,
+      requiresPrescription: prod.requiresPrescription,
+      featuredImage: prod.featuredImage,
+      createdBy: new ObjectId() // Placeholder
+    })
+
+    const result = await databaseService.products.insertOne(product)
+    insertedProducts.push({ ...product, _id: result.insertedId })
+  }
+
+  // Update productCount for categories
+  for (const category of insertedCategories) {
+    const productCount = insertedProducts.filter((p) => p.categoryId.toString() === category._id.toString()).length
+    await databaseService.categories.updateOne({ _id: category._id }, { $set: { productCount } })
+  }
+
+  // Update insertedCategories with the new productCount
+  for (const category of insertedCategories) {
+    const dbCategory = await databaseService.categories.findOne({ _id: category._id })
+    category.productCount = dbCategory?.productCount || 0
+  }
+
+  // Aggregate productCount for parent categories
+  const categoriesMap = new Map(insertedCategories.map((c) => [c._id.toString(), c]))
+
+  // Sort by level descending to update parents after children
+  const sortedCategories = insertedCategories.sort((a, b) => b.level - a.level)
+
+  for (const category of sortedCategories) {
+    if (category.parentId) {
+      const parent = categoriesMap.get(category.parentId.toString())
+      if (parent) {
+        const currentCount = parent.productCount || 0
+        const childCount = category.productCount || 0
+        await databaseService.categories.updateOne(
+          { _id: parent._id },
+          { $set: { productCount: currentCount + childCount } }
+        )
+        // Update the map
+        parent.productCount = currentCount + childCount
+      }
+    }
+  }
+
+  // Insert product media
+  for (const product of insertedProducts) {
+    // Generate realistic image URLs based on product type
+    const images = []
+    // Main product image
+    images.push({
+      url: `https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=400&fit=crop&crop=center&q=80`,
+      alt: `${product.name} - Hình ảnh chính`,
+      type: 'main' as const,
+      sortOrder: 1
+    })
+
+    // Gallery images (2-3 additional images)
+    const galleryUrls = [
+      `https://images.unsplash.com/photo-1559757148-5c350d0d3c56?w=400&h=400&fit=crop&crop=center&q=80`,
+      `https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&h=400&fit=crop&crop=center&q=80`,
+      `https://images.unsplash.com/photo-1550572017-edd951aa8ca9?w=400&h=400&fit=crop&crop=center&q=80`
+    ]
+
+    galleryUrls.slice(0, Math.floor(Math.random() * 3) + 1).forEach((url, index) => {
+      images.push({
+        url,
+        alt: `${product.name} - Hình ảnh ${index + 2}`,
+        type: 'gallery' as const,
+        sortOrder: index + 2
+      })
+    })
+
+    // Packaging image
+    if (Math.random() > 0.5) {
+      images.push({
+        url: `https://images.unsplash.com/photo-1594736797933-d0401ba2fe65?w=400&h=400&fit=crop&crop=center&q=80`,
+        alt: `${product.name} - Hình ảnh bao bì`,
+        type: 'packaging' as const,
+        sortOrder: images.length + 1
+      })
+    }
+
+    const productMedia = new ProductMedia({
+      productId: product._id,
+      images,
+      videos: [],
+      documents: []
+    })
+
+    await databaseService.productMedia.insertOne(productMedia)
+  }
+
+  process.exit(0)
 }
 
 seedDatabase()
