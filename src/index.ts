@@ -28,7 +28,7 @@ app.use(
   cors({
     origin: process.env.FRONTEND_URLS, // Frontend URL from env
     credentials: true, // Allow cookies/auth headers
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
   })
 )

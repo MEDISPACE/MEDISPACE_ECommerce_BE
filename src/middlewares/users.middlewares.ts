@@ -423,9 +423,21 @@ export const updateMeValidator = validate(
       },
       gender: {
         optional: true,
-        isIn: {
-          options: [[0, 1]],
-          errorMessage: USERS_MESSAGES.GENDER_INVALID
+        custom: {
+          options: (value) => {
+            if (value === undefined || value === null) return true
+            const numValue = typeof value === 'string' ? parseInt(value) : value
+            if (isNaN(numValue) || ![0, 1].includes(numValue)) {
+              throw new Error(USERS_MESSAGES.GENDER_INVALID)
+            }
+            return true
+          }
+        },
+        customSanitizer: {
+          options: (value) => {
+            if (value === undefined || value === null) return value
+            return typeof value === 'string' ? parseInt(value) : value
+          }
         }
       },
       avatar: imageUrlSchema,
