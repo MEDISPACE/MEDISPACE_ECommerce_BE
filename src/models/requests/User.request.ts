@@ -1,12 +1,15 @@
 import { JwtPayload } from 'jsonwebtoken'
 import { TokenType, UserStatus } from '~/constants/enum'
-import { ParamsDictionary } from 'express-serve-static-core'
-import User from '../schemas/User.schema'
 
 export interface Address {
-  address: string
+  id?: string
+  name: string
+  phone: string
+  province: string
+  district: string
   ward: string
-  city: string
+  address: string
+  type: 'home' | 'office' | 'other'
   isDefault: boolean
 }
 
@@ -21,6 +24,7 @@ export interface MedicalProfile {
 export interface LoginReqBody {
   email: string
   password: string
+  rememberMe?: boolean
 }
 export interface RegisterReqBody {
   firstName: string
@@ -63,7 +67,7 @@ export interface UpdateMeReqBody {
   dateOfBirth?: string
   gender?: number
   avatar?: string
-  address?: Address
+  addresses?: Address[]
   lisenseNumber?: string
 }
 export interface ChangePasswordReqBody {

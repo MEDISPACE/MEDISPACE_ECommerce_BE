@@ -11,13 +11,12 @@ export const signToken = ({
 }: {
   payload: string | Buffer | object
   privateKey: string
-  options?: SignOptions
+  options?: SignOptions & { expiresIn?: string | number }
 }) => {
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<string>((resolve) => {
     jwt.sign(payload, privateKey, options, (error, token) => {
       if (error) {
-        console.error('Error signing token:', error)
-        return reject(new Error('Token signing failed'))
+        throw new Error('Token signing failed')
       }
       resolve(token as string)
     })
