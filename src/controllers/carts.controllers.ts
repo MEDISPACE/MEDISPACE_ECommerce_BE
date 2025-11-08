@@ -13,9 +13,8 @@ const getUserAndSession = (req: Request) => {
   if (req.decoded_authorization?.userId) {
     try {
       userId = new ObjectId(req.decoded_authorization.userId)
-    } catch (error) {
-      console.error('❌ Invalid userId in token:', req.decoded_authorization.userId, error)
-      userId = undefined
+    } catch {
+      throw new Error('Invalid userId in token')
     }
   }
 
@@ -25,9 +24,7 @@ const getUserAndSession = (req: Request) => {
 
 // Get user's cart
 export const getCartController = async (req: Request, res: Response) => {
-  console.log('🔍 getCartController - decoded_authorization:', req.decoded_authorization)
   const { userId, sessionId } = getUserAndSession(req)
-  console.log('🔍 getCartController - userId:', userId?.toString(), 'sessionId:', sessionId)
   const result = await cartService.getCart(userId, sessionId)
 
   // Set session cookie for guest users
