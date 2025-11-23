@@ -348,3 +348,69 @@ export const ORDERS_MESSAGES = {
   UPDATE_ORDER_FAILED: 'Failed to update order',
   CANCEL_ORDER_FAILED: 'Failed to cancel order'
 } as const
+
+export const PRESCRIPTIONS_MESSAGES = {
+  // Success Messages
+  UPLOAD_PRESCRIPTION_SUCCESS: 'Upload prescription successfully',
+  GET_PRESCRIPTIONS_SUCCESS: 'Get prescriptions successfully',
+  GET_PRESCRIPTION_SUCCESS: 'Get prescription successfully',
+  VERIFY_PRESCRIPTION_SUCCESS: 'Verify prescription successfully',
+  GET_PENDING_PRESCRIPTIONS_SUCCESS: 'Get pending prescriptions successfully',
+
+  // Error Messages
+  UPLOAD_PRESCRIPTION_FAILED: 'Failed to upload prescription',
+  PRESCRIPTION_NOT_FOUND: 'Prescription not found',
+  INVALID_PRESCRIPTION_STATUS: 'Invalid prescription status',
+  PRESCRIPTION_ALREADY_VERIFIED: 'Prescription already verified',
+  UNAUTHORIZED_TO_VERIFY: 'Unauthorized to verify prescription',
+  INVALID_MEDICATION_DATA: 'Invalid medication data',
+  MISSING_DOCTOR_INFO: 'Missing doctor information',
+  INVALID_PRESCRIPTION_DATE: 'Invalid prescription date'
+} as const
+
+export const PHARMACIST_MESSAGES = {
+  // Dashboard
+  GET_DASHBOARD_STATS_SUCCESS: 'Get dashboard stats successfully',
+  GET_RECENT_ACTIVITIES_SUCCESS: 'Get recent activities successfully',
+
+  // Profile
+  GET_PROFILE_SUCCESS: 'Get pharmacist profile successfully',
+  UPDATE_PROFILE_SUCCESS: 'Update pharmacist profile successfully',
+  UPDATE_SETTINGS_SUCCESS: 'Update pharmacist settings successfully',
+
+  // Patient
+  GET_PATIENT_INFO_SUCCESS: 'Get patient information successfully',
+  GET_PATIENT_HISTORY_SUCCESS: 'Get patient history successfully',
+  PATIENT_NOT_FOUND: 'Patient not found',
+
+  // Medical Info
+  GET_MEDICAL_INFO_SUCCESS: 'Get patient medical information successfully',
+  UPDATE_MEDICAL_INFO_SUCCESS: 'Update patient medical information successfully',
+  ADD_ALLERGY_SUCCESS: 'Add allergy to patient successfully',
+
+  // Patient Notes
+  CREATE_NOTE_SUCCESS: 'Create patient note successfully',
+  GET_NOTES_SUCCESS: 'Get patient notes successfully',
+  UPDATE_NOTE_SUCCESS: 'Update patient note successfully',
+
+  // Medications
+  GET_MEDICATIONS_SUCCESS: 'Get patient medications successfully',
+  CHECK_INTERACTIONS_SUCCESS: 'Check drug interactions successfully',
+
+  // Order Management
+  GET_ORDERS_SUCCESS: 'Get orders successfully',
+  GET_ORDER_DETAILS_SUCCESS: 'Get order details successfully',
+  UPDATE_ORDER_STATUS_SUCCESS: 'Update order status successfully',
+  ORDER_NOT_FOUND: 'Order not found',
+  GET_ORDER_STATS_SUCCESS: 'Get order statistics successfully',
+
+  // Settings & Profile
+  UPDATE_PASSWORD_SUCCESS: 'Update password successfully',
+  GET_WORKING_STATS_SUCCESS: 'Get working statistics successfully',
+  UPDATE_ONLINE_STATUS_SUCCESS: 'Update online status successfully',
+
+  // Error Messages
+  UNAUTHORIZED_ACCESS: 'Unauthorized access',
+  INVALID_PHARMACIST_ID: 'Invalid pharmacist ID',
+  PHARMACIST_NOT_FOUND: 'Pharmacist not found'
+} as const

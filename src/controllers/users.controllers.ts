@@ -40,7 +40,12 @@ export const loginController = async (req: Request<ParamsDictionary, unknown, Lo
   const user = req.user as User
   const userId = user._id as ObjectId
   const { rememberMe = false } = req.body
-  const result = await usersService.login({ userId: userId.toString(), userVerify: user.status, rememberMe })
+  const result = await usersService.login({
+    userId: userId.toString(),
+    userVerify: user.status,
+    userRole: user.role,
+    rememberMe
+  })
 
   // Set refresh token as httpOnly cookie
   const refreshTokenExpiresIn = rememberMe ? 90 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000 // milliseconds
@@ -137,8 +142,8 @@ export const refreshTokenController = async (
   res: Response
 ) => {
   // Refresh token is now obtained from cookie in middleware, not from body
-  const { userId, verify } = req.decodedRefreshToken as TokenPayload
-  const result = await usersService.refreshToken({ userId, verify, refreshToken: req.cookies?.refreshToken })
+  const { userId, verify, role } = req.decodedRefreshToken as TokenPayload
+  const result = await usersService.refreshToken({ userId, verify, role, refreshToken: req.cookies?.refreshToken })
 
   // Set new refresh token as httpOnly cookie
   res.cookie('refreshToken', result.refreshToken, {
