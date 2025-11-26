@@ -167,6 +167,7 @@ export const forgotPasswordController = async (
 ) => {
   const { _id, status } = req.user as User
   const result = await usersService.forgotPassword({ userId: (_id as ObjectId).toString(), status })
+  console.log(result)
   return res.json(result)
 }
 export const verifyForgotPasswordTokenController = async (
@@ -220,4 +221,27 @@ export const updateMeController = async (req: Request<ParamsDictionary, unknown,
     message: USERS_MESSAGES.UPDATE_PROFILE_SUCCESS,
     user
   })
+}
+
+export const getWishlistController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const result = await usersService.getWishlist(userId)
+  return res.json({
+    message: 'Get wishlist successfully',
+    result
+  })
+}
+
+export const addToWishlistController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { productId } = req.body
+  const result = await usersService.addToWishlist(userId, productId)
+  return res.json(result)
+}
+
+export const removeFromWishlistController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { productId } = req.params
+  const result = await usersService.removeFromWishlist(userId, productId)
+  return res.json(result)
 }
