@@ -3,32 +3,11 @@ import databaseService from './database.services'
 import {
   UploadPrescriptionReqBody,
   VerifyPrescriptionReqBody,
-  PrescriptionQuery,
-  Medication
+  PrescriptionQuery
 } from '~/models/requests/Prescription.request'
 import { PRESCRIPTIONS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
-
-// Type for database document (without methods)
-type PrescriptionDocument = {
-  _id: ObjectId
-  prescriptionNumber: string
-  customerId: ObjectId
-  doctorName: string
-  hospitalName: string
-  prescriptionDate: Date
-  images: string[]
-  medications: any[]
-  status: string
-  verifiedBy: ObjectId | null
-  verifiedAt: Date | null
-  rejectionReason: string | null
-  notes: string | null
-  validUntil: Date
-  createdAt: Date
-  updatedAt: Date
-}
 
 class PrescriptionsService {
   // Generate unique prescription number
@@ -53,16 +32,19 @@ class PrescriptionsService {
       prescriptionDate: new Date(body.prescriptionDate),
       images: body.images || [],
       medications: body.medications,
-      status: 'Pending',
-      verifiedBy: null,
-      verifiedAt: null,
-      rejectionReason: null,
-      notes: null,
+      status: 'pending', // lowercase for consistency
+      verifiedBy: undefined,
+      verifiedAt: undefined,
+      rejectionReason: undefined,
+      notes: undefined,
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      updateVerification: undefined, // Required by schema
+      pharmacistNotes: undefined // Field for pharmacist notes
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await databaseService.prescriptions.insertOne(prescriptionData as any)
     return {
       _id: result.insertedId,
@@ -80,7 +62,7 @@ class PrescriptionsService {
 
       console.log('getPrescriptions called with:', { page, limit, status, sort, customerId })
 
-      const filter: Record<string, any> = {}
+      const filter: Record<string, string | ObjectId> = {}
       if (status) filter.status = status
       if (customerId) {
         // Validate ObjectId
@@ -146,7 +128,7 @@ class PrescriptionsService {
       console.log('getPendingPrescriptions called with:', { page, limit, status, sort })
 
       // If status is provided, filter by it; otherwise show all prescriptions
-      const filter: Record<string, any> = {}
+      const filter: Record<string, string> = {}
       if (status) {
         filter.status = status
       }
@@ -186,32 +168,79 @@ class PrescriptionsService {
     // Check if prescription exists
     const prescription = await this.getPrescriptionById(prescriptionId)
 
-    // Check if already verified
-    if (prescription.status !== 'Pending') {
+    // Check if already verified (case-insensitive check for backward compatibility)
+    const currentStatus = prescription.status.toLowerCase()
+    if (currentStatus !== 'pending') {
       throw new ErrorWithStatus({
         message: PRESCRIPTIONS_MESSAGES.PRESCRIPTION_ALREADY_VERIFIED,
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
 
-    const updateData: Record<string, any> = {
-      status: status === 'verified' ? 'Verified' : 'Rejected',
+    const updateData: Record<string, unknown> = {
+      status: status === 'verified' ? 'verified' : 'rejected',
       verifiedBy: pharmacistId,
       verifiedAt: new Date(),
       updatedAt: new Date()
     }
 
     if (notes) {
-      updateData.notes = notes
+      updateData.pharmacistNotes = notes // Save notes to pharmacistNotes field
     }
 
     await databaseService.prescriptions.updateOne({ _id: new ObjectId(prescriptionId) }, { $set: updateData })
 
-    return {
-      prescriptionId,
-      status: updateData.status,
-      verifiedBy: pharmacistId,
-      verifiedAt: updateData.verifiedAt
+    // Return the updated prescription with all fields including pharmacistNotes
+    const updatedPrescription = await this.getPrescriptionById(prescriptionId)
+    return updatedPrescription
+  }
+
+  // Get prescription statistics
+  async getPrescriptionStats() {
+    try {
+      console.log('🔵 Getting prescription statistics...')
+
+      // Use aggregation for efficient counting
+      const stats = await databaseService.prescriptions
+        .aggregate([
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 }
+            }
+          }
+        ])
+        .toArray()
+
+      console.log('Raw stats from DB:', stats)
+
+      // Initialize counters
+      const result = {
+        pending: 0,
+        verified: 0,
+        rejected: 0,
+        expired: 0,
+        total: 0
+      }
+
+      // Map aggregation results to result object
+      stats.forEach((stat) => {
+        const status = stat._id.toLowerCase()
+        const count = stat.count
+
+        if (status === 'pending') result.pending = count
+        else if (status === 'verified') result.verified = count
+        else if (status === 'rejected') result.rejected = count
+        else if (status === 'expired') result.expired = count
+
+        result.total += count
+      })
+
+      console.log('✅ Prescription stats:', result)
+      return result
+    } catch (error) {
+      console.error('❌ getPrescriptionStats error:', error)
+      throw error
     }
   }
 }

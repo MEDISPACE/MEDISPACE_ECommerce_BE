@@ -35,6 +35,9 @@ export interface PrescriptionType {
   // Timestamps
   createdAt?: Date
   updatedAt?: Date
+
+  // Notes added by the pharmacist
+  pharmacistNotes?: string // Notes added by the pharmacist
 }
 
 export default class Prescription {
@@ -66,6 +69,9 @@ export default class Prescription {
   createdAt?: Date
   updatedAt?: Date
 
+  // Notes added by the pharmacist
+  pharmacistNotes?: string
+
   constructor(prescription: PrescriptionType) {
     const date = new Date()
 
@@ -85,6 +91,7 @@ export default class Prescription {
     this.verifiedBy = prescription.verifiedBy
     this.verifiedAt = prescription.verifiedAt
     this.notes = prescription.notes
+    this.pharmacistNotes = prescription.pharmacistNotes
 
     this.validUntil = prescription.validUntil
 

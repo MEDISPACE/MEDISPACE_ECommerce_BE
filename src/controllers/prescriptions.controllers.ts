@@ -92,10 +92,38 @@ export const verifyPrescriptionController = async (
   req: Request<{ prescriptionId: string }, unknown, VerifyPrescriptionReqBody>,
   res: Response
 ) => {
-  const pharmacist = req.pharmacist as { _id: ObjectId; firstName: string; lastName: string }
-  const result = await prescriptionsService.verifyPrescription(req.params.prescriptionId, pharmacist._id, req.body)
-  return res.status(HTTP_STATUS.OK).json({
-    message: PRESCRIPTIONS_MESSAGES.VERIFY_PRESCRIPTION_SUCCESS,
-    result
-  })
+  try {
+    console.log('🔵 verifyPrescriptionController called')
+    console.log('Prescription ID:', req.params.prescriptionId)
+    console.log('Request body:', req.body)
+    console.log('Pharmacist:', req.pharmacist)
+
+    const pharmacist = req.pharmacist as { _id: ObjectId; firstName: string; lastName: string }
+    const result = await prescriptionsService.verifyPrescription(req.params.prescriptionId, pharmacist._id, req.body)
+
+    console.log('✅ Verification successful:', result)
+    return res.status(HTTP_STATUS.OK).json({
+      message: PRESCRIPTIONS_MESSAGES.VERIFY_PRESCRIPTION_SUCCESS,
+      result
+    })
+  } catch (error) {
+    console.error('❌ verifyPrescriptionController error:', error)
+    throw error
+  }
+}
+
+// Get prescription statistics - Pharmacist
+export const getPrescriptionStatsController = async (req: Request, res: Response) => {
+  try {
+    console.log('🔵 getPrescriptionStatsController called')
+    const result = await prescriptionsService.getPrescriptionStats()
+
+    return res.status(HTTP_STATUS.OK).json({
+      message: 'Get prescription statistics successfully',
+      result
+    })
+  } catch (error) {
+    console.error('❌ getPrescriptionStatsController error:', error)
+    throw error
+  }
 }

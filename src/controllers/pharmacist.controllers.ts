@@ -108,6 +108,14 @@ export const createPatientNoteController = async (req: Request<{ customerId: str
   const { userId } = req.decoded_authorization as TokenPayload
   const { note_type, content, related_prescription_id } = req.body
 
+  // Check prescription status
+  const prescription = await pharmacistService.getPrescriptionById(related_prescription_id)
+  if (!prescription || prescription.status !== 'pending') {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({
+      message: 'Chỉ đơn thuốc ở trạng thái chờ xử lý mới có thể ghi chú.'
+    })
+  }
+
   const result = await pharmacistService.createPatientNote(customerId, new ObjectId(userId), {
     note_type,
     content,
@@ -155,6 +163,19 @@ export const checkDrugInteractionsController = async (req: Request<{ customerId:
 }
 
 // ========== ORDER MANAGEMENT CONTROLLERS ==========
+
+// Create order (for pharmacist)
+export const createPharmacistOrderController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const pharmacistId = new ObjectId(userId)
+
+  const result = await pharmacistService.createPharmacistOrder(pharmacistId, req.body)
+
+  return res.status(HTTP_STATUS.CREATED).json({
+    message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
+    result
+  })
+}
 
 // Get orders with filters
 export const getOrdersController = async (req: Request, res: Response) => {

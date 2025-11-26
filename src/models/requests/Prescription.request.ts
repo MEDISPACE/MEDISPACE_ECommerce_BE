@@ -14,7 +14,7 @@ export interface UploadPrescriptionReqBody {
 }
 
 export interface VerifyPrescriptionReqBody {
-  status: 'verified' | 'rejected'
+  status: 'verified' | 'rejected' // lowercase for consistency
   notes?: string
 }
 
