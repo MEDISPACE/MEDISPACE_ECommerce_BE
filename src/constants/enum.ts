@@ -26,3 +26,10 @@ export enum UserGender {
   Male,
   Female
 }
+
+export enum PrescriptionStatus {
+  Pending = 'pending',
+  Verified = 'verified',
+  Rejected = 'rejected',
+  Expired = 'expired'
+}
