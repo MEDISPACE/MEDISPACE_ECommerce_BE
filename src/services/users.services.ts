@@ -10,6 +10,7 @@ import { USERS_MESSAGES } from '~/constants/message'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import axios from 'axios'
+import emailService from './email.services'
 
 class UsersService {
   private signAccessToken({ userId, verify, role }: { userId: string; verify: UserStatus; role: UserRole }) {
@@ -102,6 +103,10 @@ class UsersService {
         token: refreshToken
       })
     )
+
+    // Send verify email
+    await emailService.sendVerifyRegisterEmail(payload.email, emailVerifyToken)
+
     return { accessToken, refreshToken }
   }
   async refreshToken({
@@ -275,21 +280,45 @@ class UsersService {
     }
   }
   async resendVerifyEmail(userId: string) {
+    const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
+    if (!user) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.USER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
     const emailVerifyToken = await this.signEmailVerifyToken({ userId, verify: UserStatus.Unverified })
     await databaseService.users.updateOne(
       { _id: new ObjectId(userId) },
       { $set: { emailVerifyToken }, $currentDate: { updated_at: true } }
     )
+
+    // Send verify email
+    await emailService.sendVerifyRegisterEmail(user.email, emailVerifyToken)
+
     return {
       message: USERS_MESSAGES.RESEND_EMAIL_VERIFY_SUCCESS
     }
   }
   async forgotPassword({ userId, status }: { userId: string; status: UserStatus }) {
+    const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
+    if (!user) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.USER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
     const forgotPasswordToken = await this.signForgotPasswordToken({ userId, status })
     await databaseService.users.updateOne(
       { _id: new ObjectId(userId) },
       { $set: { forgotPasswordToken }, $currentDate: { updated_at: true } }
     )
+
+    // Send forgot password email
+    await emailService.sendForgotPasswordEmail(user.email, forgotPasswordToken)
+
     return {
       message: USERS_MESSAGES.FORGOT_PASSWORD_EMAIL_SENT
     }
@@ -355,6 +384,63 @@ class UsersService {
     return {
       message: USERS_MESSAGES.RESET_PASSWORD_SUCCESS
     }
+  }
+
+  async getWishlist(userId: string) {
+    const user = await databaseService.users
+      .aggregate([
+        { $match: { _id: new ObjectId(userId) } },
+        {
+          $lookup: {
+            from: process.env.DB_PRODUCTS_COLLECTION || 'products',
+            localField: 'wishlist',
+            foreignField: '_id',
+            as: 'wishlistProducts'
+          }
+        },
+        {
+          $project: {
+            wishlistProducts: 1
+          }
+        }
+      ])
+      .toArray()
+
+    if (!user.length) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.USER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    return user[0].wishlistProducts || []
+  }
+
+  async addToWishlist(userId: string, productId: string) {
+    // Check if product exists first
+    const product = await databaseService.products.findOne({ _id: new ObjectId(productId) })
+    if (!product) {
+      throw new ErrorWithStatus({
+        message: 'Product not found',
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    await databaseService.users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $addToSet: { wishlist: new ObjectId(productId) } }
+    )
+
+    return { message: 'Added to wishlist successfully' }
+  }
+
+  async removeFromWishlist(userId: string, productId: string) {
+    await databaseService.users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $pull: { wishlist: new ObjectId(productId) } }
+    )
+
+    return { message: 'Removed from wishlist successfully' }
   }
 }
 const usersService = new UsersService()
