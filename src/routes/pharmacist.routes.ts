@@ -12,6 +12,7 @@ import {
   getPatientNotesController,
   getRecentMedicationsController,
   checkDrugInteractionsController,
+  createPharmacistOrderController,
   getOrdersController,
   getOrderDetailsController,
   updateOrderStatusController,
@@ -148,6 +149,15 @@ pharmacistRouter.get('/patients/:customerId/medications', wrapRequestHandler(get
 pharmacistRouter.post('/patients/:customerId/check-interactions', wrapRequestHandler(checkDrugInteractionsController))
 
 // ========== ORDER MANAGEMENT ROUTES ==========
+
+/**
+ * Description: Create order (for pharmacist)
+ * Path: /pharmacist/orders
+ * Method: POST
+ * Body: { customerId, prescriptionId?, items[], shippingAddress, deliveryMethod, paymentMethod, orderNotes?, pharmacistNotes? }
+ * Headers: { Authorization: Bearer <access_token> }
+ */
+pharmacistRouter.post('/orders', wrapRequestHandler(createPharmacistOrderController))
 
 /**
  * Description: Get orders list with filters

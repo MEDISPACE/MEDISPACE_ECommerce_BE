@@ -6,6 +6,7 @@ import { ErrorWithStatus } from '~/models/Error'
 import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
 import PatientNote from '~/models/schemas/PatientNote.schema'
 import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
+import prescriptionsService from './prescriptions.services'
 
 class PharmacistService {
   // Get dashboard statistics
@@ -13,64 +14,52 @@ class PharmacistService {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
-    const [
-      pendingPrescriptions,
-      totalPrescriptionsToday,
-      verifiedPrescriptionsToday,
-      rejectedPrescriptionsToday,
-      ordersToday,
-      totalRevenue
-    ] = await Promise.all([
-      // Count pending prescriptions
-      databaseService.prescriptions.countDocuments({ status: 'Pending' }),
+    const [prescriptionStats, totalPrescriptionsToday, verifiedPrescriptionsToday, ordersToday, totalRevenue] =
+      await Promise.all([
+        // Get prescription stats from prescriptions service (using lowercase status)
+        prescriptionsService.getPrescriptionStats(),
 
-      // Count total prescriptions today
-      databaseService.prescriptions.countDocuments({
-        createdAt: { $gte: today }
-      }),
+        // Count total prescriptions today
+        databaseService.prescriptions.countDocuments({
+          createdAt: { $gte: today }
+        }),
 
-      // Count verified prescriptions today
-      databaseService.prescriptions.countDocuments({
-        status: 'Verified',
-        verifiedAt: { $gte: today }
-      }),
+        // Count verified prescriptions today
+        databaseService.prescriptions.countDocuments({
+          status: 'verified',
+          verifiedAt: { $gte: today }
+        }),
 
-      // Count rejected prescriptions today
-      databaseService.prescriptions.countDocuments({
-        status: 'Rejected',
-        verifiedAt: { $gte: today }
-      }),
+        // Count orders today
+        databaseService.orders.countDocuments({
+          createdAt: { $gte: today }
+        }),
 
-      // Count orders today
-      databaseService.orders.countDocuments({
-        createdAt: { $gte: today }
-      }),
-
-      // Calculate total revenue today
-      databaseService.orders
-        .aggregate([
-          {
-            $match: {
-              createdAt: { $gte: today },
-              status: { $in: ['confirmed', 'shipping', 'delivered'] }
+        // Calculate total revenue today
+        databaseService.orders
+          .aggregate([
+            {
+              $match: {
+                createdAt: { $gte: today },
+                status: { $in: ['confirmed', 'shipping', 'delivered'] }
+              }
+            },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: '$totalAmount' }
+              }
             }
-          },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: '$totalAmount' }
-            }
-          }
-        ])
-        .toArray()
-    ])
+          ])
+          .toArray()
+      ])
 
     return {
-      pendingPrescriptions,
+      pendingPrescriptions: prescriptionStats.pending,
       prescriptionsToday: {
         total: totalPrescriptionsToday,
         verified: verifiedPrescriptionsToday,
-        rejected: rejectedPrescriptionsToday
+        rejected: prescriptionStats.rejected // Using stats from prescriptions service
       },
       ordersToday,
       totalRevenue: totalRevenue[0]?.total || 0,
@@ -98,7 +87,7 @@ class PharmacistService {
 
   // Get patient by phone
   async getPatientByPhone(phone: string) {
-    const user = await databaseService.users.findOne({ phone })
+    const user = await databaseService.users.findOne({ phoneNumber: phone })
 
     if (!user) {
       throw new ErrorWithStatus({
@@ -127,7 +116,7 @@ class PharmacistService {
     }
   }
 
-  // Get pharmacist profile (placeholder for future implementation)
+  // Get pharmacist profile
   async getPharmacistProfile(pharmacistId: ObjectId) {
     const pharmacist = await databaseService.users.findOne({
       _id: pharmacistId
@@ -145,9 +134,16 @@ class PharmacistService {
       email: pharmacist.email,
       firstName: pharmacist.firstName,
       lastName: pharmacist.lastName,
+      phoneNumber: pharmacist.phoneNumber,
+      dateOfBirth: pharmacist.dateOfBirth,
+      gender: pharmacist.gender,
+      avatar: pharmacist.avatar,
+      lisenseNumber: pharmacist.lisenseNumber,
       role: pharmacist.role,
       status: pharmacist.status,
-      createdAt: pharmacist.createdAt
+      isOnline: pharmacist.isOnline,
+      createdAt: pharmacist.createdAt,
+      updatedAt: pharmacist.updatedAt
     }
   }
 
@@ -315,6 +311,140 @@ class PharmacistService {
   }
 
   // ========== ORDER MANAGEMENT METHODS ==========
+
+  // Create order for pharmacist (direct order creation without cart)
+  async createPharmacistOrder(
+    pharmacistId: ObjectId,
+    orderData: {
+      customerId: string
+      prescriptionId?: string
+      items: Array<{
+        productId: string
+        quantity: number
+        notes?: string
+      }>
+      shippingAddress: {
+        firstName: string
+        lastName: string
+        phone: string
+        email: string
+        address: string
+        ward: string
+        district: string
+        province: string
+      }
+      deliveryMethod: string
+      paymentMethod: string
+      orderNotes?: string
+      pharmacistNotes?: string
+    }
+  ) {
+    // Validate items
+    if (!orderData.items || orderData.items.length === 0) {
+      throw new ErrorWithStatus({
+        message: 'Order must have at least one item',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    // Fetch product details and calculate prices
+    const orderItems = []
+    let subtotal = 0
+
+    for (const item of orderData.items) {
+      const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+
+      if (!product) {
+        throw new ErrorWithStatus({
+          message: `Product not found: ${item.productId}`,
+          status: HTTP_STATUS.NOT_FOUND
+        })
+      }
+
+      // Check stock
+      if (product.stock < item.quantity) {
+        throw new ErrorWithStatus({
+          message: `Insufficient stock for product: ${product.name}`,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
+      const totalPrice = product.price * item.quantity
+      subtotal += totalPrice
+
+      orderItems.push({
+        productId: new ObjectId(item.productId),
+        name: product.name,
+        sku: product.sku || '',
+        quantity: item.quantity,
+        unitPrice: product.price,
+        totalPrice,
+        prescriptionRequired: product.prescriptionRequired || false,
+        image: product.images?.[0] || ''
+      })
+    }
+
+    // Calculate delivery fee based on method
+    const deliveryFees: Record<string, number> = {
+      standard: 0,
+      fast: 15000,
+      express: 25000
+    }
+    const shippingFee = deliveryFees[orderData.deliveryMethod] || 0
+
+    // Calculate tax and total
+    const taxAmount = Math.round(subtotal * 0.1) // 10% VAT
+    const discountAmount = 0 // No discount for now
+    const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
+
+    // Generate order number
+    const orderNumber = `DH${Date.now()}${Math.floor(Math.random() * 1000)}`
+
+    // Find customer
+    const customer = await databaseService.users.findOne({ phoneNumber: orderData.customerId })
+    const userId = customer ? customer._id : new ObjectId() // If customer not found, create temp ID
+
+    // Create order document
+    const order = {
+      _id: new ObjectId(),
+      userId,
+      orderNumber,
+      items: orderItems,
+      itemCount: orderItems.length,
+      shippingAddress: orderData.shippingAddress,
+      paymentMethod: orderData.paymentMethod,
+      paymentStatus: 'pending',
+      orderStatus: 'pending',
+      subtotal,
+      taxAmount,
+      shippingFee,
+      discountAmount,
+      totalAmount,
+      notes: orderData.orderNotes || '',
+      pharmacistNotes: orderData.pharmacistNotes || '',
+      prescriptionId: orderData.prescriptionId ? new ObjectId(orderData.prescriptionId) : undefined,
+      createdBy: pharmacistId, // Track who created this order
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+
+    // Insert order
+    const result = await databaseService.orders.insertOne(order)
+
+    // Update product stock
+    for (const item of orderData.items) {
+      await databaseService.products.updateOne(
+        { _id: new ObjectId(item.productId) },
+        { $inc: { stock: -item.quantity } }
+      )
+    }
+
+    return {
+      order: { ...order, _id: result.insertedId },
+      orderId: result.insertedId.toString(),
+      orderNumber
+    }
+  }
 
   // Get orders list for pharmacist with filters
   async getOrders(filters: {
@@ -645,6 +775,22 @@ class PharmacistService {
       isOnline: result.isOnline,
       updatedAt: result.updatedAt
     }
+  }
+
+  // Get prescription by ID
+  async getPrescriptionById(prescriptionId: string) {
+    const prescription = await databaseService.prescriptions.findOne({
+      _id: new ObjectId(prescriptionId)
+    })
+
+    if (!prescription) {
+      throw new ErrorWithStatus({
+        message: 'Không tìm thấy đơn thuốc',
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    return prescription
   }
 }
 

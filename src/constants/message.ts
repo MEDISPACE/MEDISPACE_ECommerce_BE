@@ -398,6 +398,7 @@ export const PHARMACIST_MESSAGES = {
   CHECK_INTERACTIONS_SUCCESS: 'Check drug interactions successfully',
 
   // Order Management
+  CREATE_ORDER_SUCCESS: 'Create order successfully',
   GET_ORDERS_SUCCESS: 'Get orders successfully',
   GET_ORDER_DETAILS_SUCCESS: 'Get order details successfully',
   UPDATE_ORDER_STATUS_SUCCESS: 'Update order status successfully',

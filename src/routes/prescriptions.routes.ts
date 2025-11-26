@@ -4,11 +4,12 @@ import {
   getPrescriptionsController,
   getPrescriptionByIdController,
   getPendingPrescriptionsController,
-  verifyPrescriptionController
+  verifyPrescriptionController,
+  getPrescriptionStatsController
 } from '~/controllers/prescriptions.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
-import { authenticatePharmacist } from '~/middlewares/pharmacists.middlewares'
+import { authenticatePharmacist, checkLicense } from '~/middlewares/pharmacists.middlewares'
 
 const prescriptionsRouter = Router()
 
@@ -31,13 +32,18 @@ prescriptionsRouter.post('/', accessTokenValidator, wrapRequestHandler(uploadPre
 prescriptionsRouter.get('/', accessTokenValidator, wrapRequestHandler(getPrescriptionsController))
 
 /**
- * Description: Get prescription by ID
- * Path: /prescriptions/:prescriptionId
+ * Description: Get prescription statistics
+ * Path: /prescriptions/stats
  * Method: GET
- * Params: { prescriptionId: string }
- * Headers: { Authorization: Bearer <access_token> } (Customer)
+ * Headers: { Authorization: Bearer <access_token> } (Pharmacist)
+ * IMPORTANT: This route MUST be before /:prescriptionId to avoid matching "stats" as an ID
  */
-prescriptionsRouter.get('/:prescriptionId', accessTokenValidator, wrapRequestHandler(getPrescriptionByIdController))
+prescriptionsRouter.get(
+  '/stats',
+  accessTokenValidator,
+  authenticatePharmacist,
+  wrapRequestHandler(getPrescriptionStatsController)
+)
 
 /**
  * Description: Get pending prescriptions for verification
@@ -45,6 +51,7 @@ prescriptionsRouter.get('/:prescriptionId', accessTokenValidator, wrapRequestHan
  * Method: GET
  * Query: { page?, limit?, sort? }
  * Headers: { Authorization: Bearer <access_token> } (Pharmacist)
+ * IMPORTANT: This route MUST be before /:prescriptionId to avoid matching "pending" as an ID
  */
 prescriptionsRouter.get(
   '/pending',
@@ -52,6 +59,15 @@ prescriptionsRouter.get(
   authenticatePharmacist,
   wrapRequestHandler(getPendingPrescriptionsController)
 )
+
+/**
+ * Description: Get prescription by ID
+ * Path: /prescriptions/:prescriptionId
+ * Method: GET
+ * Params: { prescriptionId: string }
+ * Headers: { Authorization: Bearer <access_token> } (Customer)
+ */
+prescriptionsRouter.get('/:prescriptionId', accessTokenValidator, wrapRequestHandler(getPrescriptionByIdController))
 
 /**
  * Description: Verify prescription (approve/reject)
@@ -65,6 +81,7 @@ prescriptionsRouter.put(
   '/:prescriptionId/verify',
   accessTokenValidator,
   authenticatePharmacist,
+  checkLicense,
   wrapRequestHandler(verifyPrescriptionController)
 )
 
