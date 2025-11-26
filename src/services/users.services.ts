@@ -12,12 +12,13 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import axios from 'axios'
 
 class UsersService {
-  private signAccessToken({ userId, verify }: { userId: string; verify: UserStatus }) {
+  private signAccessToken({ userId, verify, role }: { userId: string; verify: UserStatus; role: UserRole }) {
     return signToken({
       payload: {
         userId,
         tokenType: TokenType.AccessToken,
-        verify
+        verify,
+        role
       },
       privateKey: process.env.JWT_SECRET_ACCESS_TOKEN as string,
       options: { expiresIn: '15m' }
@@ -26,24 +27,30 @@ class UsersService {
   private signRefreshToken({
     userId,
     verify,
+    role,
     expiresIn = '30d'
   }: {
     userId: string
     verify: UserStatus
-    expiresIn?: string | number
+    role: UserRole
+    expiresIn?: string
   }) {
     return signToken({
       payload: {
         userId,
         tokenType: TokenType.RefreshToken,
-        verify
+        verify,
+        role
       },
       privateKey: process.env.JWT_SECRET_REFRESH_TOKEN as string,
       options: { expiresIn: expiresIn as '30d' | '90d' }
     })
   }
-  private signAccessAndRefreshToken({ userId, verify }: { userId: string; verify: UserStatus }) {
-    return Promise.all([this.signAccessToken({ userId, verify }), this.signRefreshToken({ userId, verify })])
+  private signAccessAndRefreshToken({ userId, verify, role }: { userId: string; verify: UserStatus; role: UserRole }) {
+    return Promise.all([
+      this.signAccessToken({ userId, verify, role }),
+      this.signRefreshToken({ userId, verify, role })
+    ])
   }
   private signEmailVerifyToken({ userId, verify }: { userId: string; verify: UserStatus }) {
     return signToken({
@@ -86,7 +93,8 @@ class UsersService {
     )
     const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
       userId: userId.toString(),
-      verify: UserStatus.Unverified
+      verify: UserStatus.Unverified,
+      role: UserRole.Customer
     })
     await databaseService.refreshTokens.insertOne(
       new RefreshToken({
@@ -96,10 +104,20 @@ class UsersService {
     )
     return { accessToken, refreshToken }
   }
-  async refreshToken({ userId, verify, refreshToken }: { userId: string; verify: UserStatus; refreshToken: string }) {
+  async refreshToken({
+    userId,
+    verify,
+    role,
+    refreshToken
+  }: {
+    userId: string
+    verify: UserStatus
+    role: UserRole
+    refreshToken: string
+  }) {
     const [newAccessToken, newRefreshToken] = await Promise.all([
-      this.signAccessToken({ userId, verify }),
-      this.signRefreshToken({ userId, verify })
+      this.signAccessToken({ userId, verify, role }),
+      this.signRefreshToken({ userId, verify, role })
     ])
     await databaseService.refreshTokens.deleteOne({ token: refreshToken })
     await databaseService.refreshTokens.insertOne(
@@ -155,16 +173,18 @@ class UsersService {
   async login({
     userId,
     userVerify,
+    userRole,
     rememberMe = false
   }: {
     userId: string
     userVerify: UserStatus
+    userRole: UserRole
     rememberMe?: boolean
   }) {
     const refreshTokenExpiresIn = rememberMe ? '90d' : '30d'
     const [accessToken, refreshToken] = await Promise.all([
-      this.signAccessToken({ userId, verify: userVerify }),
-      this.signRefreshToken({ userId, verify: userVerify, expiresIn: refreshTokenExpiresIn })
+      this.signAccessToken({ userId, verify: userVerify, role: userRole }),
+      this.signRefreshToken({ userId, verify: userVerify, role: userRole, expiresIn: refreshTokenExpiresIn })
     ])
     await databaseService.refreshTokens.insertOne(
       new RefreshToken({
@@ -192,7 +212,8 @@ class UsersService {
     if (user) {
       const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
         userId: user._id.toString(),
-        verify: user.status
+        verify: user.status,
+        role: user.role
       })
       await databaseService.refreshTokens.insertOne(
         new RefreshToken({
@@ -231,8 +252,12 @@ class UsersService {
     }
   }
   async verifyEmail(userId: string) {
+    // Fetch user to get role
+    const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
+    if (!user) throw new ErrorWithStatus({ message: 'User not found', status: HTTP_STATUS.NOT_FOUND })
+
     const [token] = await Promise.all([
-      this.signAccessAndRefreshToken({ userId, verify: UserStatus.Verified }),
+      this.signAccessAndRefreshToken({ userId, verify: UserStatus.Verified, role: user.role }),
       databaseService.users.updateOne(
         { _id: new ObjectId(userId) },
         {

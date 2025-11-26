@@ -8,8 +8,11 @@ import Product from '~/models/schemas/Product.schema'
 import ProductMedia from '~/models/schemas/ProductMedia.schema'
 import Cart from '~/models/schemas/Cart.schema'
 import Order from '~/models/schemas/Order.schema'
+import Prescription from '~/models/schemas/Prescription.schema'
+import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
+import PatientNote from '~/models/schemas/PatientNote.schema'
 
-const result = config()
+config()
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
 
@@ -53,6 +56,15 @@ class DatabaseService {
   }
   get orders(): Collection<Order> {
     return this.db.collection(process.env.DB_ORDERS_COLLECTION as string)
+  }
+  get prescriptions(): Collection<Prescription> {
+    return this.db.collection(process.env.DB_PRESCRIPTIONS_COLLECTION as string)
+  }
+  get patientMedicalInfos(): Collection<PatientMedicalInfo> {
+    return this.db.collection(process.env.DB_PATIENT_MEDICAL_INFOS_COLLECTION as string)
+  }
+  get patientNotes(): Collection<PatientNote> {
+    return this.db.collection(process.env.DB_PATIENT_NOTES_COLLECTION as string)
   }
 }
 
