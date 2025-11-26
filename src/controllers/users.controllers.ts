@@ -191,8 +191,8 @@ export const changePasswordController = async (
   res: Response
 ) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const { password } = req.body
-  const result = await usersService.changePassword(userId, password)
+  const { currentPassword, password } = req.body
+  const result = await usersService.changePassword(userId, currentPassword, password)
   return res.json(result)
 }
 export const getMeController = async (req: Request, res: Response) => {

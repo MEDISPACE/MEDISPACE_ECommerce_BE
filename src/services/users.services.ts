@@ -271,7 +271,7 @@ class UsersService {
       accessToken,
       refreshToken,
       newUser: 1,
-      status: UserStatus.Unverified
+      status: UserStatus.Verified
     }
   }
   async resendVerifyEmail(userId: string) {
@@ -347,13 +347,33 @@ class UsersService {
     }
     return user
   }
-  async changePassword(userId: string, newPassword: string) {
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    // Get user and verify current password
+    const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
+
+    if (!user) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.USER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    // Verify current password
+    const hashedCurrentPassword = hashPassword(currentPassword)
+    if (user.password !== hashedCurrentPassword) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.OLD_PASSWORD_NOT_MATCH,
+        status: HTTP_STATUS.UNAUTHORIZED
+      })
+    }
+
+    // Update to new password
     await databaseService.users.updateOne(
       { _id: new ObjectId(userId) },
       { $set: { password: hashPassword(newPassword) }, $currentDate: { updated_at: true } }
     )
     return {
-      message: USERS_MESSAGES.RESET_PASSWORD_SUCCESS
+      message: USERS_MESSAGES.CHANGE_PASSWORD_SUCCESS
     }
   }
 }
