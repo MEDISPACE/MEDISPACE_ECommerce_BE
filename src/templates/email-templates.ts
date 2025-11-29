@@ -61,3 +61,115 @@ export const getForgotPasswordContent = (resetUrl: string) => `
   <p><a href="${resetUrl}" style="color: #007bff; word-break: break-all;">${resetUrl}</a></p>
   <p>Link này sẽ hết hạn sau <strong>15 phút</strong>.</p>
 `
+
+export const getOrderConfirmationContent = (order: any) => {
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount)
+  }
+
+  const itemsHtml = order.items
+    .map(
+      (item: any) => `
+    <tr>
+      <td style="padding: 10px; border-bottom: 1px solid #eee;">
+        <div style="font-weight: bold;">${item.name}</div>
+        <div style="font-size: 12px; color: #666;">SKU: ${item.sku}</div>
+      </td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.unitPrice)}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${formatCurrency(item.totalPrice)}</td>
+    </tr>
+  `
+    )
+    .join('')
+
+  return `
+    <h2>Xác nhận đơn hàng #${order.orderNumber}</h2>
+    <p>Xin chào <strong>${order.shippingAddress.lastName} ${order.shippingAddress.firstName}</strong>,</p>
+    <p>Cảm ơn bạn đã đặt hàng tại <strong>MediSpace</strong>. Đơn hàng của bạn đã được tiếp nhận và đang được xử lý.</p>
+    
+    <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+      <h3 style="margin-top: 0; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Thông tin đơn hàng</h3>
+      <table style="width: 100%; font-size: 14px;">
+        <tr>
+          <td style="padding: 5px 0;"><strong>Mã đơn hàng:</strong></td>
+          <td style="text-align: right;">${order.orderNumber}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0;"><strong>Ngày đặt:</strong></td>
+          <td style="text-align: right;">${new Date(order.createdAt).toLocaleDateString('vi-VN')}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0;"><strong>Trạng thái thanh toán:</strong></td>
+          <td style="text-align: right;">${order.paymentStatus === 'paid'
+      ? '<span style="color: green;">Đã thanh toán</span>'
+      : '<span style="color: orange;">Chưa thanh toán</span>'
+    }</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0;"><strong>Phương thức thanh toán:</strong></td>
+          <td style="text-align: right;">${order.paymentMethod === 'cod'
+      ? 'Thanh toán khi nhận hàng (COD)'
+      : order.paymentMethod === 'bank_transfer'
+        ? 'Chuyển khoản ngân hàng'
+        : order.paymentMethod
+    }</td>
+        </tr>
+      </table>
+    </div>
+
+    <h3 style="border-bottom: 1px solid #ddd; padding-bottom: 10px;">Chi tiết sản phẩm</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      <thead>
+        <tr style="background-color: #f9f9f9;">
+          <th style="padding: 10px; text-align: left;">Sản phẩm</th>
+          <th style="padding: 10px; text-align: center;">SL</th>
+          <th style="padding: 10px; text-align: right;">Đơn giá</th>
+          <th style="padding: 10px; text-align: right;">Thành tiền</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsHtml}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3" style="padding: 10px; text-align: right; border-top: 2px solid #eee;"><strong>Tạm tính:</strong></td>
+          <td style="padding: 10px; text-align: right; border-top: 2px solid #eee;">${formatCurrency(order.subtotal)}</td>
+        </tr>
+        <tr>
+          <td colspan="3" style="padding: 5px 10px; text-align: right;">Phí vận chuyển:</td>
+          <td style="padding: 5px 10px; text-align: right;">${formatCurrency(order.shippingFee)}</td>
+        </tr>
+        ${order.discountAmount > 0
+      ? `
+        <tr>
+          <td colspan="3" style="padding: 5px 10px; text-align: right; color: green;">Giảm giá:</td>
+          <td style="padding: 5px 10px; text-align: right; color: green;">-${formatCurrency(order.discountAmount)}</td>
+        </tr>
+        `
+      : ''
+    }
+        <tr>
+          <td colspan="3" style="padding: 10px; text-align: right; font-size: 16px; border-top: 1px solid #ddd;"><strong>Tổng cộng:</strong></td>
+          <td style="padding: 10px; text-align: right; font-size: 16px; font-weight: bold; color: #007bff; border-top: 1px solid #ddd;">${formatCurrency(
+      order.totalAmount
+    )}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div style="margin-top: 30px;">
+      <h3 style="border-bottom: 1px solid #ddd; padding-bottom: 10px;">Địa chỉ giao hàng</h3>
+      <p>
+        <strong>${order.shippingAddress.lastName} ${order.shippingAddress.firstName}</strong><br>
+        ${order.shippingAddress.phone}<br>
+        ${order.shippingAddress.address}<br>
+        ${order.shippingAddress.ward}, ${order.shippingAddress.district}, ${order.shippingAddress.province}
+      </p>
+    </div>
+
+    <div style="text-align: center; margin-top: 30px;">
+      <a href="${CLIENT_URL}/account/orders/${order._id}" class="button">Xem chi tiết đơn hàng</a>
+    </div>
+  `
+}
