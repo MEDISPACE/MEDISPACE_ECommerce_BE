@@ -14,6 +14,7 @@ import addressesRouter from './routes/addresses.routes'
 import notificationsRouter from './routes/notifications.routes'
 import prescriptionsRouter from './routes/prescriptions.routes'
 import pharmacistRouter from './routes/pharmacist.routes'
+import paymentRouter from './routes/payment.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 config()
@@ -46,6 +47,7 @@ app.use('/addresses', addressesRouter)
 app.use('/notifications', notificationsRouter)
 app.use('/prescriptions', prescriptionsRouter)
 app.use('/pharmacist', pharmacistRouter)
+app.use('/payment', paymentRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
