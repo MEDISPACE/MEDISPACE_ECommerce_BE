@@ -1,4 +1,4 @@
-import databaseService from './database.services'
+﻿import databaseService from './database.services'
 import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
 import { hashPassword } from '~/utils/crypto'
@@ -417,6 +417,33 @@ class AdminService {
     }
 
     /**
+     * Get pharmacist statistics
+     */
+    async getPharmacistStats() {
+        const [total, active, verified] = await Promise.all([
+            databaseService.users.countDocuments({ role: UserRole.Pharmacist }),
+            databaseService.users.countDocuments({ role: UserRole.Pharmacist, status: UserStatus.Verified }),
+            databaseService.users.countDocuments({ role: UserRole.Pharmacist, status: UserStatus.Verified })
+        ])
+
+        // Get total prescriptions handled by pharmacists
+        // This is a rough estimate or placeholder if we don't have a direct link yet
+        const totalPrescriptions = await databaseService.prescriptions.countDocuments({
+            verifiedBy: { $exists: true }
+        })
+
+        return {
+            total,
+            active,
+            verified,
+            onLeave: 0, // Placeholder
+            totalPrescriptions,
+            totalConsultations: 0, // Placeholder
+            avgRating: 4.8 // Placeholder
+        }
+    }
+
+    /**
      * Create new user (Admin only)
      */
     async createUser(userData: {
@@ -539,6 +566,390 @@ class AdminService {
         }
 
         return { message: 'User email verified successfully' }
+    }
+
+
+    // ==================== ORDER MANAGEMENT ====================
+
+    async getAllOrders(params: {
+        page?: number
+        limit?: number
+        status?: string
+        paymentStatus?: string
+        search?: string
+        dateFrom?: string
+        dateTo?: string
+    }) {
+        const page = params.page || 1
+        const limit = params.limit || 10
+        const skip = (page - 1) * limit
+
+        // Build match conditions
+        const matchConditions: any = {}
+
+        if (params.status && params.status !== 'all') {
+            matchConditions.orderStatus = params.status
+        }
+
+        if (params.paymentStatus && params.paymentStatus !== 'all') {
+            matchConditions.paymentStatus = params.paymentStatus
+        }
+
+        if (params.search) {
+            matchConditions.$or = [
+                { orderNumber: { $regex: params.search, $options: 'i' } },
+                { 'shippingAddress.firstName': { $regex: params.search, $options: 'i' } },
+                { 'shippingAddress.lastName': { $regex: params.search, $options: 'i' } },
+                { 'shippingAddress.phone': { $regex: params.search, $options: 'i' } }
+            ]
+        }
+
+        if (params.dateFrom || params.dateTo) {
+            matchConditions.createdAt = {}
+            if (params.dateFrom) {
+                matchConditions.createdAt.$gte = new Date(params.dateFrom)
+            }
+            if (params.dateTo) {
+                const dateTo = new Date(params.dateTo)
+                dateTo.setHours(23, 59, 59, 999)
+                matchConditions.createdAt.$lte = dateTo
+            }
+        }
+
+        // Get orders with customer info
+        const orders = await databaseService.orders
+            .aggregate([
+                { $match: matchConditions },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'userId',
+                        foreignField: '_id',
+                        as: 'customer'
+                    }
+                },
+                { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+                { $sort: { createdAt: -1 } },
+                { $skip: skip },
+                { $limit: limit },
+                {
+                    $project: {
+                        _id: 1,
+                        orderNumber: 1,
+                        userId: 1,
+                        items: 1,
+                        shippingAddress: 1,
+                        paymentMethod: 1,
+                        paymentStatus: 1,
+                        orderStatus: 1,
+                        totalAmount: 1,
+                        shippingFee: 1,
+                        createdAt: 1,
+                        updatedAt: 1,
+                        'customer.name': 1,
+                        'customer.email': 1,
+                        'customer.phone_number': 1
+                    }
+                }
+            ])
+            .toArray()
+
+        // Get total count
+        const total = await databaseService.orders.countDocuments(matchConditions)
+
+        return {
+            orders,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        }
+    }
+
+    async getOrderStats() {
+        const orders = await databaseService.orders.find({}).toArray()
+
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+
+        const stats = {
+            total: orders.length,
+            pending: orders.filter(o => o.orderStatus === 'pending').length,
+            processing: orders.filter(o => o.orderStatus === 'processing').length,
+            shipped: orders.filter(o => o.orderStatus === 'shipped').length,
+            delivered: orders.filter(o => o.orderStatus === 'delivered').length,
+            cancelled: orders.filter(o => o.orderStatus === 'cancelled').length,
+            revenue: orders
+                .filter(o => o.orderStatus !== 'cancelled' && o.paymentStatus === 'paid')
+                .reduce((acc, curr) => acc + (curr.totalAmount || 0), 0),
+            todayOrders: orders.filter(o => {
+                const orderDate = new Date(o.createdAt || new Date())
+                orderDate.setHours(0, 0, 0, 0)
+                return orderDate.getTime() === today.getTime()
+            }).length
+        }
+
+        return stats
+    }
+
+    async getOrderDetails(orderId: string) {
+        const order = await databaseService.orders
+            .aggregate([
+                { $match: { _id: new ObjectId(orderId) } },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'userId',
+                        foreignField: '_id',
+                        as: 'customer'
+                    }
+                },
+                { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: 'products',
+                        localField: 'items.productId',
+                        foreignField: '_id',
+                        as: 'products'
+                    }
+                }
+            ])
+            .next()
+
+        if (!order) {
+            throw new Error('Order not found')
+        }
+
+        return order
+    }
+
+    async updateOrderStatus(orderId: string, data: {
+        status: string
+        notes?: string
+        trackingNumber?: string
+    }) {
+        const updateData: any = {
+            orderStatus: data.status,
+            updatedAt: new Date()
+        }
+
+        if (data.notes) {
+            updateData.notes = data.notes
+        }
+
+        if (data.trackingNumber) {
+            updateData.trackingNumber = data.trackingNumber
+        }
+
+        if (data.status === 'delivered') {
+            updateData.paymentStatus = 'paid'
+            updateData.deliveredAt = new Date()
+        }
+
+        const result = await databaseService.orders.findOneAndUpdate(
+            { _id: new ObjectId(orderId) },
+            { $set: updateData },
+            { returnDocument: 'after' }
+        )
+
+        if (!result) {
+            throw new Error('Order not found')
+        }
+
+        return result
+    }
+
+    // ==================== PRESCRIPTION MANAGEMENT ====================
+
+    async getAllPrescriptions(params: {
+        page?: number
+        limit?: number
+        status?: string
+        search?: string
+    }) {
+        const page = params.page || 1
+        const limit = params.limit || 10
+        const skip = (page - 1) * limit
+
+        // 1. Initial Match (Status)
+        const initialMatch: any = {}
+        if (params.status && params.status !== 'all') {
+            initialMatch.status = params.status
+        }
+
+        // 2. Search Match (After Lookup)
+        const searchMatch: any = {}
+        if (params.search) {
+            const searchRegex = { $regex: params.search, $options: 'i' }
+            searchMatch.$or = [
+                { prescriptionNumber: searchRegex },
+                { doctorName: searchRegex },
+                { hospitalName: searchRegex },
+                { 'customer.firstName': searchRegex },
+                { 'customer.lastName': searchRegex },
+                { 'customer.email': searchRegex },
+                { 'pharmacist.firstName': searchRegex },
+                { 'pharmacist.lastName': searchRegex }
+            ]
+        }
+
+        const [result] = await databaseService.prescriptions
+            .aggregate([
+                { $match: initialMatch },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'customerId',
+                        foreignField: '_id',
+                        as: 'customer'
+                    }
+                },
+                { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'verifiedBy',
+                        foreignField: '_id',
+                        as: 'pharmacist'
+                    }
+                },
+                { $unwind: { path: '$pharmacist', preserveNullAndEmptyArrays: true } },
+                { $match: searchMatch },
+                {
+                    $facet: {
+                        data: [
+                            { $sort: { createdAt: -1 } },
+                            { $skip: skip },
+                            { $limit: limit },
+                            {
+                                $project: {
+                                    _id: 1,
+                                    prescriptionNumber: 1,
+                                    customerId: 1,
+                                    doctorName: 1,
+                                    hospitalName: 1,
+                                    prescriptionDate: 1,
+                                    images: 1,
+                                    medications: 1,
+                                    status: 1,
+                                    verifiedBy: 1,
+                                    verifiedAt: 1,
+                                    notes: 1,
+                                    validUntil: 1,
+                                    createdAt: 1,
+                                    updatedAt: 1,
+                                    customerName: {
+                                        $cond: {
+                                            if: { $ne: ['$customer', null] },
+                                            then: { $concat: ['$customer.firstName', ' ', '$customer.lastName'] },
+                                            else: 'Unknown Customer'
+                                        }
+                                    },
+                                    customerEmail: { $ifNull: ['$customer.email', ''] },
+                                    customerPhone: { $ifNull: ['$customer.phoneNumber', ''] },
+                                    pharmacistId: '$verifiedBy',
+                                    pharmacistName: {
+                                        $cond: {
+                                            if: { $ne: ['$pharmacist', null] },
+                                            then: { $concat: ['$pharmacist.firstName', ' ', '$pharmacist.lastName'] },
+                                            else: 'Chưa phân công'
+                                        }
+                                    },
+                                    pharmacistEmail: { $ifNull: ['$pharmacist.email', ''] },
+                                    pharmacistPhone: { $ifNull: ['$pharmacist.phoneNumber', ''] }
+                                }
+                            }
+                        ],
+                        total: [{ $count: 'count' }]
+                    }
+                }
+            ])
+            .toArray()
+
+        const prescriptions = result.data
+        const total = result.total[0]?.count || 0
+
+        return {
+            prescriptions,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        }
+    }
+
+    async getPrescriptionStats() {
+        const prescriptions = await databaseService.prescriptions.find({}).toArray()
+
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+
+        const stats = {
+            total: prescriptions.length,
+            pending: prescriptions.filter(p => p.status === 'pending').length,
+            verified: prescriptions.filter(p => p.status === 'verified').length,
+            rejected: prescriptions.filter(p => p.status === 'rejected').length,
+            verifiedToday: prescriptions.filter(p => {
+                if (!p.verifiedAt) return false
+                const verifiedDate = new Date(p.verifiedAt)
+                verifiedDate.setHours(0, 0, 0, 0)
+                return verifiedDate.getTime() === today.getTime()
+            }).length
+        }
+
+        return stats
+    }
+
+    async updatePrescriptionStatus(prescriptionId: string, data: {
+        status: string
+        notes?: string
+    }) {
+        const updateData: any = {
+            status: data.status,
+            updatedAt: new Date()
+        }
+
+        if (data.notes) {
+            updateData.notes = data.notes
+        }
+
+        if (data.status === 'verified') {
+            updateData.verifiedAt = new Date()
+        }
+
+        const result = await databaseService.prescriptions.findOneAndUpdate(
+            { _id: new ObjectId(prescriptionId) },
+            { $set: updateData },
+            { returnDocument: 'after' }
+        )
+
+        if (!result) {
+            throw new Error('Prescription not found')
+        }
+
+        return result
+    }
+
+    async bulkUpdatePrescriptions(prescriptionIds: string[], status: string) {
+        const objectIds = prescriptionIds.map(id => new ObjectId(id))
+
+        const updateData: any = {
+            status,
+            updatedAt: new Date()
+        }
+
+        if (status === 'verified') {
+            updateData.verifiedAt = new Date()
+        }
+
+        const result = await databaseService.prescriptions.updateMany(
+            { _id: { $in: objectIds } },
+            { $set: updateData }
+        )
+
+        return {
+            modifiedCount: result.modifiedCount
+        }
     }
 }
 
