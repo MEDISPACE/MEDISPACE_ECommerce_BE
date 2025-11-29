@@ -1,6 +1,6 @@
-import nodemailer from 'nodemailer'
+import * as nodemailer from 'nodemailer'
 import { config } from 'dotenv'
-import { getEmailTemplate, getForgotPasswordContent, getVerifyEmailContent } from '~/templates/email-templates'
+import { getEmailTemplate, getForgotPasswordContent, getVerifyEmailContent, getOrderConfirmationContent } from '~/templates/email-templates'
 
 config()
 
@@ -39,9 +39,14 @@ class EmailService {
 
     async sendVerifyRegisterEmail(to: string, emailVerifyToken: string) {
         const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
-        const verifyUrl = `${clientUrl}/verify-email?token=${emailVerifyToken}`
+        const verifyUrl = `${clientUrl}/verify-email/${emailVerifyToken}`
         const content = getVerifyEmailContent(verifyUrl)
         return this.sendEmail(to, 'Xác thực tài khoản MediSpace', content)
+    }
+
+    async sendOrderConfirmationEmail(to: string, order: any) {
+        const content = getOrderConfirmationContent(order)
+        return this.sendEmail(to, `Xác nhận đơn hàng #${order.orderNumber}`, content)
     }
 
     async sendForgotPasswordEmail(to: string, forgotPasswordToken: string) {
