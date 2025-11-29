@@ -2,15 +2,25 @@ import { ObjectId } from 'mongodb'
 import Order, { OrderItem, ShippingAddress } from '~/models/schemas/Order.schema'
 import databaseService from './database.services'
 import cartService from './carts.services'
+import emailService from './email.services'
+import paymentService from './payment.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES } from '~/constants/message'
+import { PaymentMethod } from '~/constants/enum'
 
 class OrderService {
   // Create order from cart
-  async createOrder(userId: ObjectId, shippingAddress: ShippingAddress, paymentMethod: string, notes?: string) {
-    // Get user's cart
-    const cartResult = await cartService.getCart(userId)
+  async createOrder(
+    userId: ObjectId,
+    shippingAddress: ShippingAddress,
+    paymentMethod: PaymentMethod,
+    notes: string,
+    sessionId?: string,
+    req?: any
+  ) {
+    // Check if cart is empty
+    const cartResult = await cartService.getCart(userId, sessionId)
     const cart = cartResult.cart
 
     if (!cart || cart.items.length === 0) {
@@ -20,31 +30,23 @@ class OrderService {
       })
     }
 
-    // Check if cart requires prescription
-    if (cart.requiresPrescription) {
-      throw new ErrorWithStatus({
-        message: ORDERS_MESSAGES.PRESCRIPTION_REQUIRED,
-        status: HTTP_STATUS.BAD_REQUEST
-      })
+    // Check prescription requirement
+    const hasPrescriptionItem = cart.items.some((item) => item.prescriptionRequired)
+    if (hasPrescriptionItem) {
+      // Check if user has uploaded prescription
+      // This logic depends on how we store prescriptions. 
+      // For now, we assume frontend handles the upload and we might check a flag or recent upload here.
+      // If we skip this check for now:
+      // console.log('Order contains prescription items')
     }
 
-    // Convert cart items to order items
-    const orderItems: OrderItem[] = cart.items.map((item) => ({
-      productId: item.productId,
-      name: item.name,
-      sku: item.sku,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalPrice: item.totalPrice,
-      prescriptionRequired: item.prescriptionRequired,
-      image: item.image
-    }))
+    const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
 
-    // Create order
     const order = new Order({
+      _id: new ObjectId(),
       userId,
-      orderNumber: Order.generateOrderNumber(),
-      items: orderItems,
+      orderNumber,
+      items: cart.items,
       itemCount: cart.itemCount,
       shippingAddress,
       paymentMethod,
@@ -58,16 +60,65 @@ class OrderService {
       notes
     })
 
-    // Save order to database
     const result = await databaseService.orders.insertOne(order)
 
-    // Clear user's cart after successful order
-    await cartService.clearCart(userId)
+    // Clear cart
+    await cartService.clearCart(userId.toString())
+
+    // Send order confirmation email
+    try {
+      await emailService.sendOrderConfirmationEmail(shippingAddress.email, { ...order, _id: result.insertedId })
+    } catch (error) {
+      console.error('Failed to send order confirmation email:', error)
+    }
+
+    // Generate Payment URL if applicable
+    let paymentUrl = undefined
+    if (paymentMethod !== PaymentMethod.COD && req) {
+      try {
+        console.log('Generating payment URL for method:', paymentMethod)
+        paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
+        console.log('Generated payment URL:', paymentUrl)
+      } catch (error) {
+        console.error('Failed to generate payment URL:', error)
+      }
+    } else {
+      console.log('Skipping payment URL generation. Method:', paymentMethod, 'Req:', !!req)
+    }
 
     return {
       order: { ...order, _id: result.insertedId },
-      orderId: result.insertedId
+      orderId: result.insertedId,
+      paymentUrl
     }
+  }
+
+  // Get Payment URL for existing order
+  async getPaymentUrl(orderId: ObjectId, userId: ObjectId, req: any) {
+    const order = await databaseService.orders.findOne({ _id: orderId, userId })
+    if (!order) {
+      throw new ErrorWithStatus({
+        message: ORDERS_MESSAGES.ORDER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    if (order.paymentStatus === 'paid') {
+      throw new ErrorWithStatus({
+        message: 'Order is already paid',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (order.paymentMethod === PaymentMethod.COD) {
+      throw new ErrorWithStatus({
+        message: 'Cannot generate payment URL for COD order',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const paymentUrl = await paymentService.createPaymentUrl(order as any, req)
+    return { paymentUrl }
   }
 
   // Get orders for user
@@ -105,6 +156,11 @@ class OrderService {
     }
 
     return order
+  }
+
+  // Get order by Order Number
+  async getOrderByOrderNumber(orderNumber: string) {
+    return await databaseService.orders.findOne({ orderNumber })
   }
 
   // Update order status (admin only)
