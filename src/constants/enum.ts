@@ -26,3 +26,18 @@ export enum UserGender {
   Male,
   Female
 }
+
+export enum PrescriptionStatus {
+  Pending = 'pending',
+  Verified = 'verified',
+  Rejected = 'rejected',
+  Expired = 'expired'
+}
+
+export enum PaymentMethod {
+  COD = 'cod',
+  BankTransfer = 'bank_transfer',
+  VNPay = 'vnpay',
+  Momo = 'momo',
+  PayOS = 'payos'
+}

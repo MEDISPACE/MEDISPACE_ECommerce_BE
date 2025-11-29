@@ -20,11 +20,44 @@ class CartService {
 
   // Get cart for user or guest
   async getCart(userId?: ObjectId, sessionId?: string) {
-    const query = this.buildCartQuery(userId, sessionId)
     let cart = null
 
-    if (query) {
-      cart = await databaseService.carts.findOne(query)
+    // 1. Try to find cart by userId first
+    if (userId) {
+      const userCart = await databaseService.carts.findOne({ userId })
+
+      // If user cart exists and has items, return it
+      if (userCart && userCart.items.length > 0) {
+        return { cart: userCart, sessionId: userCart.sessionId }
+      }
+
+      // If user cart is empty or doesn't exist, check for session cart to merge
+      if (sessionId) {
+        const sessionCart = await databaseService.carts.findOne({ sessionId })
+
+        // If session cart exists and has items
+        if (sessionCart && sessionCart.items.length > 0) {
+          // If userCart existed (but was empty), delete it to avoid duplicates
+          if (userCart) {
+            await databaseService.carts.deleteOne({ _id: userCart._id })
+          }
+
+          // Assign session cart to user
+          await databaseService.carts.updateOne({ _id: sessionCart._id }, { $set: { userId, updatedAt: new Date() } })
+
+          return { cart: { ...sessionCart, userId }, sessionId: sessionCart.sessionId }
+        }
+      }
+
+      // If we found a user cart (even if empty) and no better session cart, use it
+      if (userCart) {
+        cart = userCart
+      }
+    }
+
+    // 2. If no cart found yet, try by sessionId
+    if (!cart && sessionId) {
+      cart = await databaseService.carts.findOne({ sessionId })
     }
 
     if (!cart) {
@@ -278,12 +311,12 @@ class CartService {
           ...item,
           product: product
             ? {
-                _id: product._id,
-                name: product.name,
-                sku: product.sku,
-                featuredImage: product.featuredImage,
-                requiresPrescription: product.requiresPrescription
-              }
+              _id: product._id,
+              name: product.name,
+              sku: product.sku,
+              featuredImage: product.featuredImage,
+              requiresPrescription: product.requiresPrescription
+            }
             : null
         }
       })

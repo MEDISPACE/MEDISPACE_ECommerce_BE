@@ -29,6 +29,7 @@ interface UserType {
 
   createdAt?: Date
   updatedAt?: Date
+  wishlist?: ObjectId[]
 }
 export default class User {
   _id?: ObjectId
@@ -57,6 +58,7 @@ export default class User {
 
   createdAt?: Date
   updatedAt?: Date
+  wishlist: ObjectId[]
 
   constructor(user: UserType) {
     const date = new Date()
@@ -83,5 +85,6 @@ export default class User {
 
     this.createdAt = user.createdAt || date
     this.updatedAt = user.updatedAt || date
+    this.wishlist = user.wishlist || []
   }
 }

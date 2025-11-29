@@ -6,7 +6,8 @@ import {
   updateOrderStatusController,
   updatePaymentStatusController,
   getAllOrdersController,
-  getOrderStatsController
+  getOrderStatsController,
+  getPaymentUrlController
 } from '~/controllers/orders.controllers'
 import {
   createOrderValidator,
@@ -49,6 +50,13 @@ ordersRouter.put(
   orderIdValidator,
   updatePaymentStatusValidator,
   wrapRequestHandler(updatePaymentStatusController)
+)
+ordersRouter.post(
+  '/:orderId/payment-url',
+  accessTokenValidator,
+  verifiedUserValidator,
+  orderIdValidator,
+  wrapRequestHandler(getPaymentUrlController)
 )
 ordersRouter.get('/admin/all', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(getAllOrdersController))
 ordersRouter.get(

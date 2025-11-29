@@ -12,6 +12,9 @@ import cartsRouter from './routes/carts.routes'
 import ordersRouter from './routes/orders.routes'
 import addressesRouter from './routes/addresses.routes'
 import notificationsRouter from './routes/notifications.routes'
+import prescriptionsRouter from './routes/prescriptions.routes'
+import pharmacistRouter from './routes/pharmacist.routes'
+import paymentRouter from './routes/payment.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 config()
@@ -42,10 +45,14 @@ app.use('/cart', cartsRouter)
 app.use('/orders', ordersRouter)
 app.use('/addresses', addressesRouter)
 app.use('/notifications', notificationsRouter)
+app.use('/prescriptions', prescriptionsRouter)
+app.use('/pharmacist', pharmacistRouter)
+app.use('/payment', paymentRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
 
-app.listen(process.env.PORT, () => {
-  console.log(`Server is running on port ${process.env.PORT}`)
+const port = Number(process.env.PORT) || 8000
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`)
 })
