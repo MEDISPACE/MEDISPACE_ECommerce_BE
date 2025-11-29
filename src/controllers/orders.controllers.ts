@@ -10,6 +10,7 @@ import {
 } from '~/models/requests/Order.request'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES } from '~/constants/message'
+import { PaymentMethod } from '~/constants/enum'
 
 // Create order from cart
 export const createOrderController = async (
@@ -17,11 +18,16 @@ export const createOrderController = async (
   res: Response
 ) => {
   const userId = new ObjectId(req.decoded_authorization?.userId)
+  const sessionId = req.cookies?.sessionId
+
+  console.log('createOrderController - userId:', userId)
+
+  console.log('createOrderController body:', req.body)
+  console.log('createOrderController user_id:', userId)
   const { shippingAddress, paymentMethod, notes } = req.body
+  const result = await orderService.createOrder(userId, shippingAddress, paymentMethod as PaymentMethod, notes, sessionId, req)
 
-  const result = await orderService.createOrder(userId, shippingAddress, paymentMethod, notes)
-
-  return res.status(HTTP_STATUS.CREATED).json({
+  return res.json({
     message: ORDERS_MESSAGES.CREATE_ORDER_SUCCESS,
     result
   })
@@ -106,6 +112,19 @@ export const getOrderStatsController = async (req: Request, res: Response) => {
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Get order statistics successfully',
+    result
+  })
+}
+
+// Get payment URL for order
+export const getPaymentUrlController = async (req: Request, res: Response) => {
+  const userId = new ObjectId(req.decoded_authorization?.userId)
+  const orderId = new ObjectId(req.params.orderId)
+
+  const result = await orderService.getPaymentUrl(orderId, userId, req)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get payment URL successfully',
     result
   })
 }
