@@ -4,6 +4,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 import { validate } from '~/utils/validation'
 import { ORDERS_MESSAGES } from '~/constants/message'
+import { PaymentMethod } from '~/constants/enum'
 
 // Order ID validation
 const orderIdSchema = {
@@ -57,9 +58,10 @@ const shippingAddressSchema = {
 }
 
 // Payment method validation
+// Payment method validation
 const paymentMethodSchema = {
   isIn: {
-    options: [['cod', 'bank_transfer', 'credit_card', 'e_wallet']],
+    options: [[...Object.values(PaymentMethod)]],
     errorMessage: ORDERS_MESSAGES.PAYMENT_METHOD_INVALID
   }
 }

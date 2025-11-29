@@ -33,3 +33,11 @@ export enum PrescriptionStatus {
   Rejected = 'rejected',
   Expired = 'expired'
 }
+
+export enum PaymentMethod {
+  COD = 'cod',
+  BankTransfer = 'bank_transfer',
+  VNPay = 'vnpay',
+  Momo = 'momo',
+  PayOS = 'payos'
+}
