@@ -24,7 +24,7 @@ import {
 } from '~/controllers/pharmacist.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
-import { authenticatePharmacist } from '~/middlewares/pharmacists.middlewares'
+import { authenticatePharmacist, updatePasswordValidator } from '~/middlewares/pharmacists.middlewares'
 
 const pharmacistRouter = Router()
 
@@ -214,7 +214,13 @@ pharmacistRouter.patch('/profile', wrapRequestHandler(updateProfileController))
  * Body: { oldPassword: string, newPassword: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.patch('/password', wrapRequestHandler(updatePasswordController))
+pharmacistRouter.patch(
+  '/password',
+  accessTokenValidator,
+  authenticatePharmacist,
+  updatePasswordValidator,
+  wrapRequestHandler(updatePasswordController)
+)
 
 /**
  * Description: Get pharmacist working statistics

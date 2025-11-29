@@ -6,6 +6,10 @@ import { UserRole } from '~/constants/enum'
 import { TokenPayload } from '~/models/requests/User.request'
 import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
+import { checkSchema, ParamSchema } from 'express-validator'
+import { validate } from '~/utils/validation'
+import { USERS_MESSAGES } from '~/constants/message'
+import { hashPassword } from '~/utils/crypto'
 
 // Extend Request interface để thêm pharmacist property
 declare global {
@@ -43,6 +47,60 @@ export const authenticatePharmacist = (req: Request, res: Response, next: NextFu
   // console.log('✅ Pharmacist authenticated successfully')
   next()
 }
+
+// Password schema for pharmacist
+const passwordSchema: ParamSchema = {
+  in: ['body'],
+  isString: {
+    errorMessage: USERS_MESSAGES.PASSWORD_MUST_BE_STRING
+  },
+  isLength: {
+    options: { min: 6, max: 50 },
+    errorMessage: USERS_MESSAGES.PASSWORD_LENGTH_MUST_BE_FROM_6_TO_50
+  },
+  notEmpty: {
+    errorMessage: USERS_MESSAGES.PASSWORD_IS_REQUIRED
+  },
+  isStrongPassword: {
+    errorMessage: USERS_MESSAGES.PASSWORD_TOO_WEAK,
+    options: {
+      minLength: 6,
+      minUppercase: 1,
+      minLowercase: 1,
+      minNumbers: 1,
+      minSymbols: 1
+    }
+  }
+}
+
+/**
+ * Middleware validate update password cho Pharmacist
+ */
+export const updatePasswordValidator = validate(
+  checkSchema(
+    {
+      oldPassword: {
+        ...passwordSchema,
+        custom: {
+          options: async (value: string, { req }) => {
+            const { userId } = req.decoded_authorization as TokenPayload
+            const pharmacist = await databaseService.users.findOne({
+              _id: new ObjectId(userId),
+              role: UserRole.Pharmacist,
+              password: hashPassword(value)
+            })
+            if (!pharmacist) {
+              throw new Error('Mật khẩu hiện tại không đúng')
+            }
+            return true
+          }
+        }
+      },
+      newPassword: passwordSchema
+    },
+    ['body']
+  )
+)
 
 /**
  * Middleware kiểm tra giấy phép hành nghề của Pharmacist

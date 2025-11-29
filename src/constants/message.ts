@@ -78,6 +78,7 @@ export const USERS_MESSAGES = {
     'Username must be 4-15 characters long and can only contain letters, numbers, and underscores',
   USERNAME_ALREADY_EXISTS: 'Username already exists',
   CURRENT_PASSWORD_IS_INCORRECT: 'Current password is incorrect',
+  OLD_PASSWORD_NOT_MATCH: 'Old password is incorrect',
   CHANGE_PASSWORD_SUCCESS: 'Change password successful',
   CONFIRM_PASSWORD_DO_NOT_MATCH: 'Confirm password do not match',
   GMAIL_NOT_VERIFIED: 'Gmail account is not verified',
@@ -413,5 +414,9 @@ export const PHARMACIST_MESSAGES = {
   // Error Messages
   UNAUTHORIZED_ACCESS: 'Unauthorized access',
   INVALID_PHARMACIST_ID: 'Invalid pharmacist ID',
-  PHARMACIST_NOT_FOUND: 'Pharmacist not found'
+  PHARMACIST_NOT_FOUND: 'Pharmacist not found',
+  OLD_PASSWORD_INCORRECT: 'Old password is incorrect',
+  OLD_PASSWORD_IS_REQUIRED: 'Old password is required',
+  NEW_PASSWORD_IS_REQUIRED: 'New password is required',
+  PASSWORD_MUST_BE_STRONG: 'Password must be at least 6 characters long'
 } as const
