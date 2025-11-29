@@ -7,6 +7,7 @@ import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
 import PatientNote from '~/models/schemas/PatientNote.schema'
 import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
 import prescriptionsService from './prescriptions.services'
+import { hashPassword } from '~/utils/crypto'
 
 class PharmacistService {
   // Get dashboard statistics
@@ -694,13 +695,22 @@ class PharmacistService {
       })
     }
 
-    // TODO: Implement password verification with hashing
-    // For now, just update the password
+    // Verify old password
+    const hashedOldPassword = hashPassword(oldPassword)
+    if (pharmacist.password !== hashedOldPassword) {
+      throw new ErrorWithStatus({
+        message: PHARMACIST_MESSAGES.OLD_PASSWORD_INCORRECT,
+        status: HTTP_STATUS.UNAUTHORIZED
+      })
+    }
+
+    // Hash and update new password
+    const hashedNewPassword = hashPassword(newPassword)
     await databaseService.users.findOneAndUpdate(
       { _id: pharmacistId },
       {
         $set: {
-          password: newPassword,
+          password: hashedNewPassword,
           updatedAt: new Date()
         }
       },
