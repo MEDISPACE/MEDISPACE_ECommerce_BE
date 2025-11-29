@@ -363,7 +363,7 @@ class PharmacistService {
       }
 
       // Check stock
-      if (product.stock < item.quantity) {
+      if (product.stockQuantity < item.quantity) {
         throw new ErrorWithStatus({
           message: `Insufficient stock for product: ${product.name}`,
           status: HTTP_STATUS.BAD_REQUEST
@@ -380,8 +380,8 @@ class PharmacistService {
         quantity: item.quantity,
         unitPrice: product.price,
         totalPrice,
-        prescriptionRequired: product.prescriptionRequired || false,
-        image: product.images?.[0] || ''
+        prescriptionRequired: product.requiresPrescription || false,
+        image: product.featuredImage || ''
       })
     }
 
@@ -430,13 +430,13 @@ class PharmacistService {
     }
 
     // Insert order
-    const result = await databaseService.orders.insertOne(order)
+    const result = await databaseService.orders.insertOne(order as any)
 
     // Update product stock
     for (const item of orderData.items) {
       await databaseService.products.updateOne(
         { _id: new ObjectId(item.productId) },
-        { $inc: { stock: -item.quantity } }
+        { $inc: { stockQuantity: -item.quantity } }
       )
     }
 
@@ -517,11 +517,11 @@ class PharmacistService {
       ...order,
       customer: customer
         ? {
-            _id: customer._id,
-            email: customer.email,
-            firstName: customer.firstName,
-            lastName: customer.lastName
-          }
+          _id: customer._id,
+          email: customer.email,
+          firstName: customer.firstName,
+          lastName: customer.lastName
+        }
         : null
     }
   }

@@ -52,6 +52,7 @@ app.use('/payment', paymentRouter)
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
 
-app.listen(process.env.PORT, () => {
-  console.log(`Server is running on port ${process.env.PORT}`)
+const port = Number(process.env.PORT) || 8000
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`)
 })
