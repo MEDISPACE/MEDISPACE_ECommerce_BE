@@ -229,6 +229,14 @@ const stockFilterSchema = {
   }
 }
 
+const priceSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: 'Giá sản phẩm phải lớn hơn hoặc bằng 0'
+  }
+}
+
 // Validators
 export const createProductValidator = validate(
   checkSchema(
@@ -240,6 +248,7 @@ export const createProductValidator = validate(
       shortDescription: shortDescriptionSchema,
       categoryId: categoryIdSchema,
       brandId: brandIdSchema,
+      price: priceSchema,
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
@@ -273,6 +282,7 @@ export const updateProductValidator = validate(
         notEmpty: undefined
       },
       brandId: brandIdSchema,
+      price: priceSchema,
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,

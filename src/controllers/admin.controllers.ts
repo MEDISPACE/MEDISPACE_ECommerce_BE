@@ -362,3 +362,85 @@ export const bulkUpdatePrescriptionsController = async (req: Request, res: Respo
         next(error)
     }
 }
+
+// ==================== REPORTS & ANALYTICS ====================
+
+/**
+ * Get comprehensive reports analytics
+ * Path: /admin/reports/analytics
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const getReportsAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { timeRange = 'month' } = req.query
+        const result = await adminService.getReportsAnalytics(timeRange as string)
+        return res.json({
+            message: 'Get reports analytics successfully',
+            result
+        })
+    } catch (error) {
+        next(error)
+    }
+}
+
+/**
+ * Get revenue analytics
+ * Path: /admin/reports/revenue
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const getRevenueAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { timeRange = 'month' } = req.query
+        const result = await adminService.getRevenueAnalytics(timeRange as string)
+        return res.json({
+            message: 'Get revenue analytics successfully',
+            result
+        })
+    } catch (error) {
+        next(error)
+    }
+}
+
+/**
+ * Get product analytics
+ * Path: /admin/reports/products
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const getProductAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { timeRange = 'month' } = req.query
+        const result = await adminService.getProductAnalytics(timeRange as string)
+        return res.json({
+            message: 'Get product analytics successfully',
+            result
+        })
+    } catch (error) {
+        next(error)
+    }
+}
+
+/**
+ * Get customer analytics
+ * Path: /admin/reports/customers
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const getCustomerAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { timeRange = 'month' } = req.query
+        const result = await adminService.getCustomerAnalytics(timeRange as string)
+        return res.json({
+            message: 'Get customer analytics successfully',
+            result
+        })
+    } catch (error) {
+        next(error)
+    }
+}
