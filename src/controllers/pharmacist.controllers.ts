@@ -229,9 +229,9 @@ export const getOrderStatisticsController = async (req: Request, res: Response) 
   const dateRange =
     startDate && endDate
       ? {
-          startDate: new Date(startDate),
-          endDate: new Date(endDate)
-        }
+        startDate: new Date(startDate),
+        endDate: new Date(endDate)
+      }
       : undefined
 
   const result = await pharmacistService.getOrderStatistics(dateRange)
@@ -286,9 +286,9 @@ export const getWorkingStatsController = async (req: Request, res: Response) => 
   const dateRange =
     startDate && endDate
       ? {
-          startDate: new Date(startDate),
-          endDate: new Date(endDate)
-        }
+        startDate: new Date(startDate),
+        endDate: new Date(endDate)
+      }
       : undefined
 
   const result = await pharmacistService.getWorkingStats(new ObjectId(userId), dateRange)
@@ -308,6 +308,73 @@ export const updateOnlineStatusController = async (req: Request, res: Response) 
 
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.UPDATE_ONLINE_STATUS_SUCCESS,
+    result
+  })
+}
+
+// ==================== REPORTS & ANALYTICS ====================
+
+// Get comprehensive reports analytics
+export const getReportsAnalyticsController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { timeRange = 'week' } = req.query as { timeRange?: string }
+
+  const result = await pharmacistService.getReportsAnalytics(new ObjectId(userId), timeRange)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get reports analytics successfully',
+    result
+  })
+}
+
+// Get prescription analytics
+export const getPrescriptionAnalyticsController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { timeRange = 'week' } = req.query as { timeRange?: string }
+
+  const result = await pharmacistService.getPrescriptionAnalytics(new ObjectId(userId), timeRange)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get prescription analytics successfully',
+    result
+  })
+}
+
+// Get consultation statistics
+export const getConsultationStatsController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { timeRange = 'week' } = req.query as { timeRange?: string }
+
+  const result = await pharmacistService.getConsultationStats(new ObjectId(userId), timeRange)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get consultation stats successfully',
+    result
+  })
+}
+
+// Get category analytics
+export const getCategoryAnalyticsController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { timeRange = 'week' } = req.query as { timeRange?: string }
+
+  const result = await pharmacistService.getCategoryAnalytics(new ObjectId(userId), timeRange)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get category analytics successfully',
+    result
+  })
+}
+
+// Get performance metrics
+export const getPerformanceMetricsController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { timeRange = 'week' } = req.query as { timeRange?: string }
+
+  const result = await pharmacistService.getPerformanceMetrics(new ObjectId(userId), timeRange)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get performance metrics successfully',
     result
   })
 }
