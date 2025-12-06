@@ -14,12 +14,6 @@ export class PayOSProvider implements PaymentProvider {
             process.env.PAYOS_API_KEY || '',
             process.env.PAYOS_CHECKSUM_KEY || ''
         )
-        console.log('PayOS instance keys:', Object.keys(this.payOS))
-        console.log('PayOS instance prototype keys:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.payOS)))
-        if (this.payOS.paymentRequests) {
-            console.log('PayOS paymentRequests keys:', Object.keys(this.payOS.paymentRequests))
-            console.log('PayOS paymentRequests prototype keys:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.payOS.paymentRequests)))
-        }
     }
 
     async createPaymentUrl(order: Order, req?: any): Promise<string> {
