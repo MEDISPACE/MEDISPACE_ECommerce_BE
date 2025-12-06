@@ -16,13 +16,16 @@ import prescriptionsRouter from './routes/prescriptions.routes'
 import pharmacistRouter from './routes/pharmacist.routes'
 import paymentRouter from './routes/payment.routes'
 import adminRouter from './routes/admin.routes'
+import mediasRouter from './routes/medias.route'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
+import { initFolder } from './utils/file'
 
 config()
 
 const app = express()
 databaseService.connect()
 cleanupService.startCartCleanup()
+initFolder() // Tạo thư mục temp cho upload
 
 // Parse cookies
 app.use(cookieParser())
@@ -50,6 +53,7 @@ app.use('/prescriptions', prescriptionsRouter)
 app.use('/pharmacist', pharmacistRouter)
 app.use('/payment', paymentRouter)
 app.use('/admin', adminRouter)
+app.use('/medias', mediasRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
