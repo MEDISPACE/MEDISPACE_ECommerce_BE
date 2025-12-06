@@ -18,7 +18,11 @@ import {
     getPrescriptionStatsController,
     updatePrescriptionStatusController,
     bulkUpdatePrescriptionsController,
-    getPharmacistStatsController
+    getPharmacistStatsController,
+    getReportsAnalyticsController,
+    getRevenueAnalyticsController,
+    getProductAnalyticsController,
+    getCustomerAnalyticsController
 } from '~/controllers/admin.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -291,4 +295,66 @@ adminRouter.patch(
     verifiedUserValidator,
     adminRequired,
     wrapRequestHandler(bulkUpdatePrescriptionsController)
+)
+
+// ==================== REPORTS & ANALYTICS ====================
+
+/**
+ * Description: Get comprehensive reports analytics
+ * Path: /admin/reports/analytics
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+    '/reports/analytics',
+    accessTokenValidator,
+    verifiedUserValidator,
+    adminRequired,
+    wrapRequestHandler(getReportsAnalyticsController)
+)
+
+/**
+ * Description: Get revenue analytics
+ * Path: /admin/reports/revenue
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+    '/reports/revenue',
+    accessTokenValidator,
+    verifiedUserValidator,
+    adminRequired,
+    wrapRequestHandler(getRevenueAnalyticsController)
+)
+
+/**
+ * Description: Get product analytics
+ * Path: /admin/reports/products
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+    '/reports/products',
+    accessTokenValidator,
+    verifiedUserValidator,
+    adminRequired,
+    wrapRequestHandler(getProductAnalyticsController)
+)
+
+/**
+ * Description: Get customer analytics
+ * Path: /admin/reports/customers
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+    '/reports/customers',
+    accessTokenValidator,
+    verifiedUserValidator,
+    adminRequired,
+    wrapRequestHandler(getCustomerAnalyticsController)
 )
