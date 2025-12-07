@@ -12,7 +12,10 @@ import {
   updateMeController,
   changePasswordController,
   oauthController,
-  refreshTokenController
+  refreshTokenController,
+  getWishlistController,
+  addToWishlistController,
+  removeFromWishlistController
 } from '~/controllers/users.controllers'
 import {
   accessTokenValidator,
@@ -145,5 +148,30 @@ usersRouter.patch(
   updateMeValidator,
   wrapRequestHandler(updateMeController)
 )
+
+/**
+ * Get wishlist
+ * Path: /wishlist
+ * Method: GET
+ * Header: { Authorization: Bearer <access_token> }
+ */
+usersRouter.get('/wishlist', accessTokenValidator, wrapRequestHandler(getWishlistController))
+
+/**
+ * Add to wishlist
+ * Path: /wishlist
+ * Method: POST
+ * Header: { Authorization: Bearer <access_token> }
+ * Body: { productId: string }
+ */
+usersRouter.post('/wishlist', accessTokenValidator, wrapRequestHandler(addToWishlistController))
+
+/**
+ * Remove from wishlist
+ * Path: /wishlist/:productId
+ * Method: DELETE
+ * Header: { Authorization: Bearer <access_token> }
+ */
+usersRouter.delete('/wishlist/:productId', accessTokenValidator, wrapRequestHandler(removeFromWishlistController))
 
 export default usersRouter

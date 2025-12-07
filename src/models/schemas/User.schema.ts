@@ -17,7 +17,7 @@ interface UserType {
   gender?: UserGender
   avatar?: string
 
-  address?: Address
+  addresses?: Address[]
 
   medicalProfile?: MedicalProfile
 
@@ -29,6 +29,7 @@ interface UserType {
 
   createdAt?: Date
   updatedAt?: Date
+  wishlist?: ObjectId[]
 }
 export default class User {
   _id?: ObjectId
@@ -45,7 +46,7 @@ export default class User {
   gender?: UserGender
   avatar?: string
 
-  address?: Address
+  addresses?: Address[]
 
   medicalProfile?: MedicalProfile
 
@@ -57,6 +58,7 @@ export default class User {
 
   createdAt?: Date
   updatedAt?: Date
+  wishlist: ObjectId[]
 
   constructor(user: UserType) {
     const date = new Date()
@@ -73,7 +75,7 @@ export default class User {
     this.dateOfBirth = user.dateOfBirth || new Date()
     this.gender = user.gender || 1
     this.avatar = user.avatar || ''
-    this.address = user.address || { address: '', ward: '', city: '', isDefault: true }
+    this.addresses = user.addresses || []
     this.medicalProfile = user.medicalProfile || {}
     this.lisenseNumber = user.lisenseNumber || ''
     this.isOnline = user.isOnline || false
@@ -83,5 +85,6 @@ export default class User {
 
     this.createdAt = user.createdAt || date
     this.updatedAt = user.updatedAt || date
+    this.wishlist = user.wishlist || []
   }
 }

@@ -82,9 +82,6 @@ const forgotPasswordTokenSchema: ParamSchema = {
           })
         }
         if (user.forgotPasswordToken !== value) {
-          console.log('User forgot password token in DB:', user.forgotPasswordToken)
-          console.log('Provided forgot password token:', value)
-          console.log('Forgot password token is invalid')
           throw new ErrorWithStatus({
             message: USERS_MESSAGES.INVALID_FORGOT_PASSWORD_TOKEN,
             status: HTTP_STATUS.UNAUTHORIZED
@@ -221,7 +218,7 @@ export const accessTokenValidator = validate(
                 token: access_token,
                 secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
               })
-              ;(req as Request).decoded_authorization = decoded_authorization
+                ; (req as Request).decoded_authorization = decoded_authorization
             } catch {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_ACCESS_TOKEN,
@@ -263,7 +260,7 @@ export const refreshTokenValidator = validate(
                   status: HTTP_STATUS.UNAUTHORIZED
                 })
               }
-              ;(req as Request).decodedRefreshToken = decodedRefreshToken
+              ; (req as Request).decodedRefreshToken = decodedRefreshToken
             } catch (error) {
               if (error instanceof JsonWebTokenError) {
                 throw new ErrorWithStatus({
@@ -299,7 +296,21 @@ export const emailVerifyTokenValidator = validate(
                 token: value,
                 secretOrPublicKey: process.env.JWT_SECRET_EMAIL_VERIFY_TOKEN as string
               })
-              ;(req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
+              const { userId } = decodedEmailVerifyToken
+              const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
+              if (!user) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.USER_NOT_FOUND,
+                  status: HTTP_STATUS.NOT_FOUND
+                })
+              }
+              if (user.emailVerifyToken !== value) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,
+                  status: HTTP_STATUS.UNAUTHORIZED
+                })
+              }
+              ; (req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
             } catch {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,
@@ -426,9 +437,21 @@ export const updateMeValidator = validate(
       },
       gender: {
         optional: true,
-        isIn: {
-          options: [[0, 1]],
-          errorMessage: USERS_MESSAGES.GENDER_INVALID
+        custom: {
+          options: (value) => {
+            if (value === undefined || value === null) return true
+            const numValue = typeof value === 'string' ? parseInt(value) : value
+            if (isNaN(numValue) || ![0, 1].includes(numValue)) {
+              throw new Error(USERS_MESSAGES.GENDER_INVALID)
+            }
+            return true
+          }
+        },
+        customSanitizer: {
+          options: (value) => {
+            if (value === undefined || value === null) return value
+            return typeof value === 'string' ? parseInt(value) : value
+          }
         }
       },
       avatar: imageUrlSchema,

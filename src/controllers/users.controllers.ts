@@ -40,7 +40,12 @@ export const loginController = async (req: Request<ParamsDictionary, unknown, Lo
   const user = req.user as User
   const userId = user._id as ObjectId
   const { rememberMe = false } = req.body
-  const result = await usersService.login({ userId: userId.toString(), userVerify: user.status, rememberMe })
+  const result = await usersService.login({
+    userId: userId.toString(),
+    userVerify: user.status,
+    userRole: user.role,
+    rememberMe
+  })
 
   // Set refresh token as httpOnly cookie
   const refreshTokenExpiresIn = rememberMe ? 90 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000 // milliseconds
@@ -137,8 +142,8 @@ export const refreshTokenController = async (
   res: Response
 ) => {
   // Refresh token is now obtained from cookie in middleware, not from body
-  const { userId, verify } = req.decodedRefreshToken as TokenPayload
-  const result = await usersService.refreshToken({ userId, verify, refreshToken: req.cookies?.refreshToken })
+  const { userId, verify, role } = req.decodedRefreshToken as TokenPayload
+  const result = await usersService.refreshToken({ userId, verify, role, refreshToken: req.cookies?.refreshToken })
 
   // Set new refresh token as httpOnly cookie
   res.cookie('refreshToken', result.refreshToken, {
@@ -162,6 +167,7 @@ export const forgotPasswordController = async (
 ) => {
   const { _id, status } = req.user as User
   const result = await usersService.forgotPassword({ userId: (_id as ObjectId).toString(), status })
+  console.log(result)
   return res.json(result)
 }
 export const verifyForgotPasswordTokenController = async (
@@ -186,8 +192,8 @@ export const changePasswordController = async (
   res: Response
 ) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const { password } = req.body
-  const result = await usersService.changePassword(userId, password)
+  const { currentPassword, password } = req.body
+  const result = await usersService.changePassword(userId, currentPassword, password)
   return res.json(result)
 }
 export const getMeController = async (req: Request, res: Response) => {
@@ -215,4 +221,27 @@ export const updateMeController = async (req: Request<ParamsDictionary, unknown,
     message: USERS_MESSAGES.UPDATE_PROFILE_SUCCESS,
     user
   })
+}
+
+export const getWishlistController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const result = await usersService.getWishlist(userId)
+  return res.json({
+    message: 'Get wishlist successfully',
+    result
+  })
+}
+
+export const addToWishlistController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { productId } = req.body
+  const result = await usersService.addToWishlist(userId, productId)
+  return res.json(result)
+}
+
+export const removeFromWishlistController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { productId } = req.params
+  const result = await usersService.removeFromWishlist(userId, productId)
+  return res.json(result)
 }

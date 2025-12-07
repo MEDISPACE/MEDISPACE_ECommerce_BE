@@ -8,17 +8,11 @@ import Product from '~/models/schemas/Product.schema'
 import ProductMedia from '~/models/schemas/ProductMedia.schema'
 import Cart from '~/models/schemas/Cart.schema'
 import Order from '~/models/schemas/Order.schema'
+import Prescription from '~/models/schemas/Prescription.schema'
+import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
+import PatientNote from '~/models/schemas/PatientNote.schema'
 
-console.log('Loading .env file...')
-const result = config()
-console.log('Dotenv result:', result)
-console.log('Parsed env vars:', result.parsed)
-
-console.log('Environment variables loaded:')
-console.log('DB_PRODUCTS_COLLECTION:', process.env.DB_PRODUCTS_COLLECTION)
-console.log('DB_CATEGORIES_COLLECTION:', process.env.DB_CATEGORIES_COLLECTION)
-console.log('DB_BRANDS_COLLECTION:', process.env.DB_BRANDS_COLLECTION)
-console.log('DB_PRODUCT_MEDIA_COLLECTION:', process.env.DB_PRODUCT_MEDIA_COLLECTION)
+config()
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
 
@@ -33,9 +27,9 @@ class DatabaseService {
     try {
       await this.client.connect()
       await this.db.command({ ping: 1 })
-      console.log('You successfully connected to MongoDB!')
     } catch (error) {
-      console.error('Error connecting to MongoDB:', error)
+      // Reference error silently to satisfy linters, then exit
+      void error
       process.exit(1)
     }
   }
@@ -62,6 +56,15 @@ class DatabaseService {
   }
   get orders(): Collection<Order> {
     return this.db.collection(process.env.DB_ORDERS_COLLECTION as string)
+  }
+  get prescriptions(): Collection<Prescription> {
+    return this.db.collection(process.env.DB_PRESCRIPTIONS_COLLECTION as string)
+  }
+  get patientMedicalInfos(): Collection<PatientMedicalInfo> {
+    return this.db.collection(process.env.DB_PATIENT_MEDICAL_INFOS_COLLECTION as string)
+  }
+  get patientNotes(): Collection<PatientNote> {
+    return this.db.collection(process.env.DB_PATIENT_NOTES_COLLECTION as string)
   }
 }
 

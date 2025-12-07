@@ -3,15 +3,8 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 import { omit } from 'lodash'
 
-export const defaultErrorHandler = (err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('❌ ============ ERROR ============')
-  console.error('❌ Error Message:', err.message)
-  console.error('❌ Error Stack:', err.stack)
-  console.error('❌ Full Error Object:', err)
-  console.error('❌ Request URL:', req.url)
-  console.error('❌ Request Method:', req.method)
-  console.error('❌ ==============================')
-
+export const defaultErrorHandler = (err: Error, req: Request, res: Response, _next: NextFunction) => {
+  console.error('ERROR HANDLER:', JSON.stringify(err, null, 2))
   // Kiểm tra nếu là ErrorWithStatus (cả class và object thường)
   if (err instanceof ErrorWithStatus) {
     return res.status(err.status).json(omit(err, ['status']))

@@ -20,58 +20,83 @@ class CartService {
 
   // Get cart for user or guest
   async getCart(userId?: ObjectId, sessionId?: string) {
-    try {
-      console.log('🔍 getCart called with:', { userId: userId?.toString(), sessionId })
-      const query = this.buildCartQuery(userId, sessionId)
-      console.log('🔍 Cart query:', query)
-      let cart = null
+    let cart = null
 
-      if (query) {
-        cart = await databaseService.carts.findOne(query)
+    // 1. Try to find cart by userId first
+    if (userId) {
+      const userCart = await databaseService.carts.findOne({ userId })
+
+      // If user cart exists and has items, return it
+      if (userCart && userCart.items.length > 0) {
+        return { cart: userCart, sessionId: userCart.sessionId }
       }
 
-      if (!cart) {
-        // Create new cart
-        const newCart = new Cart({
-          ...(userId && { userId }),
-          ...(sessionId && { sessionId }),
-          items: [],
-          itemCount: 0,
-          uniqueProductCount: 0,
-          subtotal: 0,
-          discountAmount: 0,
-          taxAmount: 0,
-          shippingFee: 0,
-          loyaltyDiscount: 0,
-          totalAmount: 0,
-          requiresPrescription: false,
-          status: 'active'
-        })
+      // If user cart is empty or doesn't exist, check for session cart to merge
+      if (sessionId) {
+        const sessionCart = await databaseService.carts.findOne({ sessionId })
 
-        if (!userId && !sessionId) {
-          // Generate sessionId for new guest user
-          newCart.sessionId = generateSessionId()
-        }
-
-        // Convert to plain object and explicitly remove undefined/null fields
-        const cartToInsert: any = {}
-        Object.keys(newCart).forEach((key) => {
-          const value = (newCart as any)[key]
-          if (value !== undefined && value !== null) {
-            cartToInsert[key] = value
+        // If session cart exists and has items
+        if (sessionCart && sessionCart.items.length > 0) {
+          // If userCart existed (but was empty), delete it to avoid duplicates
+          if (userCart) {
+            await databaseService.carts.deleteOne({ _id: userCart._id })
           }
-        })
 
-        console.log('🔍 Cart to insert:', cartToInsert)
-        await databaseService.carts.insertOne(cartToInsert)
-        return { cart: newCart, sessionId: newCart.sessionId }
+          // Assign session cart to user
+          await databaseService.carts.updateOne({ _id: sessionCart._id }, { $set: { userId, updatedAt: new Date() } })
+
+          return { cart: { ...sessionCart, userId }, sessionId: sessionCart.sessionId }
+        }
       }
 
-      return { cart, sessionId: cart.sessionId }
-    } catch (error) {
-      console.error('❌ Error in getCart:', error)
-      throw error
+      // If we found a user cart (even if empty) and no better session cart, use it
+      if (userCart) {
+        cart = userCart
+      }
     }
+
+    // 2. If no cart found yet, try by sessionId
+    if (!cart && sessionId) {
+      cart = await databaseService.carts.findOne({ sessionId })
+    }
+
+    if (!cart) {
+      // Create new cart
+      const newCart = new Cart({
+        ...(userId && { userId }),
+        ...(sessionId && { sessionId }),
+        items: [],
+        itemCount: 0,
+        uniqueProductCount: 0,
+        subtotal: 0,
+        discountAmount: 0,
+        taxAmount: 0,
+        shippingFee: 0,
+        loyaltyDiscount: 0,
+        totalAmount: 0,
+        requiresPrescription: false,
+        status: 'active'
+      })
+
+      if (!userId && !sessionId) {
+        // Generate sessionId for new guest user
+        newCart.sessionId = generateSessionId()
+      }
+
+      // Convert to plain object and explicitly remove undefined/null fields
+      const cartToInsert: any = {}
+      Object.keys(newCart).forEach((key) => {
+        const value = (newCart as any)[key]
+        if (value !== undefined && value !== null) {
+          cartToInsert[key] = value
+        }
+      })
+
+      await databaseService.carts.insertOne(cartToInsert)
+      return { cart: newCart, sessionId: newCart.sessionId }
+    }
+
+    return { cart, sessionId: cart.sessionId }
   }
 
   // Legacy method for backward compatibility
@@ -286,12 +311,12 @@ class CartService {
           ...item,
           product: product
             ? {
-                _id: product._id,
-                name: product.name,
-                sku: product.sku,
-                featuredImage: product.featuredImage,
-                requiresPrescription: product.requiresPrescription
-              }
+              _id: product._id,
+              name: product.name,
+              sku: product.sku,
+              featuredImage: product.featuredImage,
+              requiresPrescription: product.requiresPrescription
+            }
             : null
         }
       })
