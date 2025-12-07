@@ -32,7 +32,16 @@ export const getCategoriesController = async (
 
 // Get category tree (hierarchical)
 export const getCategoryTreeController = async (req: Request, res: Response) => {
-  const result = await categoriesService.getCategoryTree()
+  const result = await categoriesService.getCategoryTree({ includeInactive: false })
+  return res.status(HTTP_STATUS.OK).json({
+    message: CATEGORIES_MESSAGES.GET_CATEGORY_TREE_SUCCESS,
+    result
+  })
+}
+
+// Get admin category tree (hierarchical - includes inactive)
+export const getAdminCategoryTreeController = async (req: Request, res: Response) => {
+  const result = await categoriesService.getCategoryTree({ includeInactive: true })
   return res.status(HTTP_STATUS.OK).json({
     message: CATEGORIES_MESSAGES.GET_CATEGORY_TREE_SUCCESS,
     result

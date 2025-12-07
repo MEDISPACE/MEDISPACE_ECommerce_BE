@@ -167,9 +167,14 @@ class CategoriesService {
   }
 
   // Lấy category tree (hierarchical)
-  async getCategoryTree() {
+  async getCategoryTree({ includeInactive = false }: { includeInactive?: boolean } = {}) {
+    const filter: Record<string, any> = {}
+    if (!includeInactive) {
+      filter.isActive = true
+    }
+
     const categories = await databaseService.categories
-      .find({ isActive: true })
+      .find(filter)
       .sort({ level: 1, sortOrder: 1, name: 1 })
       .toArray()
 

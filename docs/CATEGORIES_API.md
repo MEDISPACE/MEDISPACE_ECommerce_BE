@@ -7,6 +7,7 @@ Categories API quản lý hệ thống phân loại sản phẩm dược phẩm 
 ## Cấu trúc Database
 
 ### Category Schema
+
 ```typescript
 {
   _id: ObjectId,
@@ -29,12 +30,14 @@ Categories API quản lý hệ thống phân loại sản phẩm dược phẩm 
 ## API Endpoints
 
 ### 1. Tạo Category Mới
+
 ```
 POST /categories
 Authorization: Bearer <access_token> (Admin only)
 ```
 
 **Request Body:**
+
 ```json
 {
   "name": "Thuốc tim mạch",
@@ -49,6 +52,7 @@ Authorization: Bearer <access_token> (Admin only)
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Category created successfully",
@@ -72,11 +76,13 @@ Authorization: Bearer <access_token> (Admin only)
 ```
 
 ### 2. Lấy Danh Sách Categories
+
 ```
 GET /categories
 ```
 
 **Query Parameters:**
+
 - `page`: Số trang (default: 1)
 - `limit`: Số lượng per page (default: 20, max: 100)
 - `parentId`: ID danh mục cha (hoặc "null" để lấy root categories)
@@ -85,6 +91,7 @@ GET /categories
 - `search`: Tìm kiếm theo tên hoặc mô tả
 
 **Response:**
+
 ```json
 {
   "message": "Get categories successfully",
@@ -101,11 +108,13 @@ GET /categories
 ```
 
 ### 3. Lấy Category Tree (Cấu trúc phân cấp)
+
 ```
 GET /categories/tree
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Get category tree successfully",
@@ -130,28 +139,32 @@ GET /categories/tree
 ```
 
 ### 4. Lấy Category theo ID
+
 ```
 GET /categories/:categoryId
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Get category successfully",
   "result": {
     "_id": "64a7b2c1d4e5f6789abcdef1",
-    "name": "Thuốc tim mạch",
+    "name": "Thuốc tim mạch"
     // ... full category info
   }
 }
 ```
 
 ### 5. Lấy Breadcrumb
+
 ```
 GET /categories/:categoryId/breadcrumb
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Get category breadcrumb successfully",
@@ -171,11 +184,13 @@ GET /categories/:categoryId/breadcrumb
 ```
 
 ### 6. Lấy Categories Con
+
 ```
 GET /categories/:categoryId/children
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Get category children successfully",
@@ -191,12 +206,14 @@ GET /categories/:categoryId/children
 ```
 
 ### 7. Cập Nhật Category
+
 ```
 PATCH /categories/:categoryId
 Authorization: Bearer <access_token> (Admin only)
 ```
 
 **Request Body:** (Tương tự POST, tất cả fields đều optional)
+
 ```json
 {
   "name": "Thuốc tim mạch cập nhật",
@@ -205,12 +222,14 @@ Authorization: Bearer <access_token> (Admin only)
 ```
 
 ### 8. Toggle Trạng Thái Category
+
 ```
 PATCH /categories/:categoryId/toggle-status
 Authorization: Bearer <access_token> (Pharmacist/Admin)
 ```
 
 **Request Body:**
+
 ```json
 {
   "isActive": false
@@ -218,29 +237,34 @@ Authorization: Bearer <access_token> (Pharmacist/Admin)
 ```
 
 ### 9. Xóa Category
+
 ```
 DELETE /categories/:categoryId
 Authorization: Bearer <access_token> (Admin only)
 ```
 
 **Điều kiện xóa:**
+
 - Không có categories con
 - Không có sản phẩm (productCount = 0)
 
 ## Quy tắc Business
 
 ### 1. Hierarchy Rules
+
 - Tối đa 3 cấp độ (level 0, 1, 2, 3)
 - Root categories có level = 0, path = "/"
 - Child categories có path = parent_path + "/" + parent_slug
 
 ### 2. Slug Generation
+
 - Auto generate từ name nếu không cung cấp
 - Loại bỏ dấu tiếng Việt, chuyển thành lowercase
 - Thay spaces bằng hyphens
 - Unique trong toàn bộ hệ thống
 
 ### 3. Validation Rules
+
 - name: required, 1-100 chars
 - slug: optional, 1-100 chars, format: [a-z0-9-]+
 - description: optional, max 500 chars
@@ -249,6 +273,7 @@ Authorization: Bearer <access_token> (Admin only)
 - icon, thumbnailImage: must be valid URLs
 
 ### 4. Permission Rules
+
 - GET endpoints: Public access
 - POST, PATCH (update), DELETE: Admin only
 - PATCH (toggle-status): Pharmacist hoặc Admin
@@ -256,24 +281,29 @@ Authorization: Bearer <access_token> (Admin only)
 ## Error Codes
 
 ### 400 Bad Request
+
 - Validation errors
 - Circular reference khi set parent
 - Max level exceeded
 - Invalid parent category
 
 ### 404 Not Found
+
 - Category not found
 - Parent category not found
 
 ### 409 Conflict
+
 - Category name/slug already exists
 
 ### 403 Forbidden
+
 - Insufficient permissions
 
 ## Examples Usage
 
 ### Tạo Root Category
+
 ```bash
 curl -X POST http://localhost:3000/categories \
   -H "Content-Type: application/json" \
@@ -286,6 +316,7 @@ curl -X POST http://localhost:3000/categories \
 ```
 
 ### Tạo Subcategory
+
 ```bash
 curl -X POST http://localhost:3000/categories \
   -H "Content-Type: application/json" \
@@ -298,11 +329,13 @@ curl -X POST http://localhost:3000/categories \
 ```
 
 ### Lấy Tree Structure
+
 ```bash
 curl http://localhost:3000/categories/tree
 ```
 
 ### Search Categories
+
 ```bash
 curl "http://localhost:3000/categories?search=tim%20mạch&isActive=true&limit=10"
 ```
@@ -317,6 +350,7 @@ curl "http://localhost:3000/categories?search=tim%20mạch&isActive=true&limit=1
 ## Migration & Seeding
 
 Tạo script seed data với categories phổ biến trong ngành dược:
+
 - Thuốc kê đơn / Thuốc không kê đơn
 - Theo nhóm chức năng (tim mạch, tiêu hóa, etc.)
 - Theo dạng bào chế (viên nén, siro, etc.)
@@ -324,6 +358,7 @@ Tạo script seed data với categories phổ biến trong ngành dược:
 ## Database Collections
 
 MediSpace sử dụng các MongoDB collections sau:
+
 - `users`: Thông tin người dùng
 - `refreshTokens`: JWT refresh tokens (thống nhất chỉ dùng collection này)
 - `categories`: Danh mục sản phẩm
@@ -331,15 +366,18 @@ MediSpace sử dụng các MongoDB collections sau:
 ## Testing với Postman
 
 ### Bước 1: Setup Environment
+
 1. Tạo Environment mới trong Postman với tên `MediSpace Local`
 2. Thêm variables:
    - `base_url`: `http://localhost:3000`
    - `admin_token`: `Bearer <access_token>` (sẽ có sau khi implement authentication)
 
 ### Bước 2: Import Collection
+
 Tạo Collection mới với tên `Categories API` và thêm các request sau:
 
 #### 1. Tạo Root Category
+
 ```
 Method: POST
 URL: {{base_url}}/categories
@@ -357,6 +395,7 @@ Body (JSON):
 ```
 
 #### 2. Tạo Subcategory
+
 ```
 Method: POST
 URL: {{base_url}}/categories
@@ -377,6 +416,7 @@ Body (JSON):
 ```
 
 #### 3. Lấy Danh Sách Categories
+
 ```
 Method: GET
 URL: {{base_url}}/categories
@@ -387,12 +427,14 @@ Query Params:
 ```
 
 #### 4. Lấy Category Tree
+
 ```
 Method: GET
 URL: {{base_url}}/categories/tree
 ```
 
 #### 5. Tìm Kiếm Categories
+
 ```
 Method: GET
 URL: {{base_url}}/categories
@@ -403,24 +445,28 @@ Query Params:
 ```
 
 #### 6. Lấy Category by ID
+
 ```
 Method: GET
 URL: {{base_url}}/categories/{{category_id}}
 ```
 
 #### 7. Lấy Breadcrumb
+
 ```
 Method: GET
 URL: {{base_url}}/categories/{{category_id}}/breadcrumb
 ```
 
 #### 8. Lấy Children Categories
+
 ```
 Method: GET
 URL: {{base_url}}/categories/{{parent_category_id}}/children
 ```
 
 #### 9. Cập Nhật Category
+
 ```
 Method: PATCH
 URL: {{base_url}}/categories/{{category_id}}
@@ -437,6 +483,7 @@ Body (JSON):
 ```
 
 #### 10. Toggle Category Status
+
 ```
 Method: PATCH
 URL: {{base_url}}/categories/{{category_id}}/toggle-status
@@ -451,6 +498,7 @@ Body (JSON):
 ```
 
 #### 11. Xóa Category
+
 ```
 Method: DELETE
 URL: {{base_url}}/categories/{{category_id}}
@@ -461,6 +509,7 @@ Headers:
 ### Bước 3: Test Scenarios
 
 #### Scenario 1: Tạo Hierarchy 3 Cấp
+
 1. Tạo Root Category: "Thuốc đặc trị"
 2. Tạo Level 1: "Thuốc tim mạch" (parent: Root)
 3. Tạo Level 2: "Thuốc huyết áp" (parent: Level 1)
@@ -468,19 +517,21 @@ Headers:
 5. Thử tạo Level 4 → Should fail với error "Maximum category level exceeded"
 
 #### Scenario 2: Test Validation
+
 1. **Tên trống**: Gửi POST với `name: ""`
    - Expected: 400 Bad Request
 2. **Slug invalid**: Gửi POST với `slug: "Thuốc Cảm"`
    - Expected: 400 Bad Request
 3. **Parent ID invalid**: Gửi POST với `parentId: "invalid_id"`
    - Expected: 400 Bad Request
-4. **Circular reference**: 
+4. **Circular reference**:
    - Tạo Category A
    - Tạo Category B với parent = A
    - Update Category A với parent = B
    - Expected: 400 Bad Request
 
 #### Scenario 3: Test Hierarchy Operations
+
 1. Tạo cấu trúc: Root → Level1 → Level2
 2. Test breadcrumb cho Level2
 3. Test children cho Root
@@ -488,6 +539,7 @@ Headers:
 5. Thử xóa Level1 khi có Level2 → Should fail
 
 #### Scenario 4: Test Search & Filter
+
 1. Tạo nhiều categories với tên khác nhau
 2. Test search theo keyword
 3. Test filter theo level
@@ -500,57 +552,57 @@ Thêm test script vào từng request để auto-validate response:
 
 ```javascript
 // Test cho Create Category
-pm.test("Status code is 201", function () {
-    pm.response.to.have.status(201);
-});
+pm.test('Status code is 201', function () {
+  pm.response.to.have.status(201)
+})
 
-pm.test("Response has required fields", function () {
-    var jsonData = pm.response.json();
-    pm.expect(jsonData).to.have.property('message');
-    pm.expect(jsonData).to.have.property('result');
-    pm.expect(jsonData.result).to.have.property('_id');
-    pm.expect(jsonData.result).to.have.property('name');
-    pm.expect(jsonData.result).to.have.property('slug');
-});
+pm.test('Response has required fields', function () {
+  var jsonData = pm.response.json()
+  pm.expect(jsonData).to.have.property('message')
+  pm.expect(jsonData).to.have.property('result')
+  pm.expect(jsonData.result).to.have.property('_id')
+  pm.expect(jsonData.result).to.have.property('name')
+  pm.expect(jsonData.result).to.have.property('slug')
+})
 
-pm.test("Category name matches request", function () {
-    var jsonData = pm.response.json();
-    var requestData = JSON.parse(pm.request.body.raw);
-    pm.expect(jsonData.result.name).to.eql(requestData.name);
-});
+pm.test('Category name matches request', function () {
+  var jsonData = pm.response.json()
+  var requestData = JSON.parse(pm.request.body.raw)
+  pm.expect(jsonData.result.name).to.eql(requestData.name)
+})
 
 // Lưu category ID cho request tiếp theo
 if (pm.response.code === 201) {
-    var jsonData = pm.response.json();
-    pm.environment.set("category_id", jsonData.result._id);
-    if (jsonData.result.level === 0) {
-        pm.environment.set("root_category_id", jsonData.result._id);
-    }
+  var jsonData = pm.response.json()
+  pm.environment.set('category_id', jsonData.result._id)
+  if (jsonData.result.level === 0) {
+    pm.environment.set('root_category_id', jsonData.result._id)
+  }
 }
 ```
 
 ```javascript
 // Test cho Get Categories
-pm.test("Status code is 200", function () {
-    pm.response.to.have.status(200);
-});
+pm.test('Status code is 200', function () {
+  pm.response.to.have.status(200)
+})
 
-pm.test("Response has pagination", function () {
-    var jsonData = pm.response.json();
-    pm.expect(jsonData.result).to.have.property('categories');
-    pm.expect(jsonData.result).to.have.property('pagination');
-    pm.expect(jsonData.result.pagination).to.have.property('page');
-    pm.expect(jsonData.result.pagination).to.have.property('totalPages');
-});
+pm.test('Response has pagination', function () {
+  var jsonData = pm.response.json()
+  pm.expect(jsonData.result).to.have.property('categories')
+  pm.expect(jsonData.result).to.have.property('pagination')
+  pm.expect(jsonData.result.pagination).to.have.property('page')
+  pm.expect(jsonData.result.pagination).to.have.property('totalPages')
+})
 
-pm.test("Categories array is valid", function () {
-    var jsonData = pm.response.json();
-    pm.expect(jsonData.result.categories).to.be.an('array');
-    if (jsonData.result.categories.length > 0) {
-        pm.expect(jsonData.result.categories[0]).to.have.property('_id');
-        pm.expect(jsonData.result.categories[0]).to.have.property('name');
-    }
-});
+pm.test('Categories array is valid', function () {
+  var jsonData = pm.response.json()
+  pm.expect(jsonData.result.categories).to.be.an('array')
+  if (jsonData.result.categories.length > 0) {
+    pm.expect(jsonData.result.categories[0]).to.have.property('_id')
+    pm.expect(jsonData.result.categories[0]).to.have.property('name')
+  }
+})
 ```
 
 ### Bước 5: Automated Testing
@@ -560,7 +612,7 @@ Tạo Collection Runner để chạy tự động:
 1. **Setup Data**: Tạo root categories
 2. **Create Hierarchy**: Tạo subcategories
 3. **Read Operations**: Test GET endpoints
-4. **Update Operations**: Test PATCH endpoints  
+4. **Update Operations**: Test PATCH endpoints
 5. **Validation Tests**: Test error cases
 6. **Cleanup**: Xóa test data
 
@@ -581,10 +633,12 @@ Sử dụng các biến sau để test linh hoạt:
 ### Expected Responses
 
 #### Success Responses
+
 - **201 Created**: Tạo category thành công
 - **200 OK**: Get, Update, Toggle status thành công
 
 #### Error Responses
+
 - **400 Bad Request**: Validation error, Business rule violation
 - **404 Not Found**: Category không tồn tại
 - **409 Conflict**: Tên/slug đã tồn tại
@@ -593,6 +647,7 @@ Sử dụng các biến sau để test linh hoạt:
 ### Performance Testing
 
 Dùng Postman để test performance:
+
 1. **Load Test**: Tạo 100 categories cùng lúc
 2. **Hierarchy Depth**: Test với cấu trúc 3 cấp sâu
 3. **Search Performance**: Test search với nhiều keyword
