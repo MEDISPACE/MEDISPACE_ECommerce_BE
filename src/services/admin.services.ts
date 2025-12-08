@@ -728,6 +728,13 @@ class AdminService {
         notes?: string
         trackingNumber?: string
     }) {
+        // Get current order to check payment method
+        const order = await databaseService.orders.findOne({ _id: new ObjectId(orderId) })
+
+        if (!order) {
+            throw new Error('Order not found')
+        }
+
         const updateData: any = {
             orderStatus: data.status,
             updatedAt: new Date()
@@ -742,8 +749,13 @@ class AdminService {
         }
 
         if (data.status === 'delivered') {
-            updateData.paymentStatus = 'paid'
             updateData.deliveredAt = new Date()
+
+            // Auto-update payment status for COD orders only
+            if (order.paymentMethod === 'cod' && order.paymentStatus === 'pending') {
+                updateData.paymentStatus = 'paid'
+                updateData.paidAt = new Date()
+            }
         }
 
         const result = await databaseService.orders.findOneAndUpdate(
