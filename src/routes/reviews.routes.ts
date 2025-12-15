@@ -17,7 +17,10 @@ import {
   updateReviewController,
   deleteReviewController,
   markReviewHelpfulController,
-  moderateReviewController
+  moderateReviewController,
+  getAdminReviewsController,
+  getAdminReviewStatsController,
+  bulkModerateController
 } from '~/controllers/reviews.controllers'
 
 const reviewsRouter = Router()
@@ -68,6 +71,28 @@ reviewsRouter.patch(
   isAdminOrPharmacist,
   moderateReviewValidator,
   wrapRequestHandler(moderateReviewController)
+)
+
+// Admin-only routes - Review management
+reviewsRouter.get(
+  '/admin',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  wrapRequestHandler(getAdminReviewsController)
+)
+
+reviewsRouter.get(
+  '/admin/stats',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  wrapRequestHandler(getAdminReviewStatsController)
+)
+
+reviewsRouter.post(
+  '/admin/bulk-moderate',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  wrapRequestHandler(bulkModerateController)
 )
 
 export default reviewsRouter

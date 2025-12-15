@@ -17,6 +17,115 @@ import { ReviewStatus } from '~/constants/enum'
 
 class ReviewService {
     /**
+     * Hybrid Moderation: Determine if review should be auto-approved
+     * 
+     * Auto-approve criteria:
+     * 1. Verified purchase (delivered order)
+     * 2. User has good review history (3+ approved, 0 rejected)
+     * 3. No spam patterns detected
+     * 4. No sensitive keywords (medical safety)
+     * 5. Reasonable content length
+     * 6. Not extreme rating with short comment
+     */
+    private async shouldAutoApprove(
+        userId: ObjectId,
+        reviewData: {
+            comment: string
+            title?: string
+            rating: number
+            images?: string[]
+        },
+        isVerifiedPurchase: boolean
+    ): Promise<boolean> {
+        // Rule 1: Verified Purchase (HIGHEST PRIORITY)
+        // If user has verified purchase, proceed to other checks
+        if (!isVerifiedPurchase) {
+            console.log('⏳ Pending: Not a verified purchase')
+            return false
+        }
+
+        // Rule 2: User Trust Score
+        const userReviews = await databaseService.reviews.find({ userId }).toArray()
+        const approvedCount = userReviews.filter(r => r.status === ReviewStatus.Approved).length
+        const rejectedCount = userReviews.filter(r => r.status === ReviewStatus.Rejected).length
+
+        if (approvedCount >= 3 && rejectedCount === 0) {
+            console.log('✅ Auto-approve: Trusted user (3+ approved, 0 rejected)')
+            return true
+        }
+
+        // Rule 3: Spam Detection
+        const spamPatterns = [
+            /https?:\/\//i,           // URLs
+            /www\./i,                 // www links
+            /\.(com|net|org|vn)/i,    // domains
+            /mua.*tại/i,              // "mua tại..."
+            /liên hệ/i,               // contact info
+            /\d{10,}/,                // phone numbers (10+ digits)
+            /zalo|telegram|facebook/i, // social media
+        ]
+
+        const textToCheck = `${reviewData.comment} ${reviewData.title || ''}`
+        const hasSpam = spamPatterns.some(pattern => pattern.test(textToCheck))
+
+        if (hasSpam) {
+            console.log('⏳ Pending: Spam pattern detected')
+            return false
+        }
+
+        // Rule 4: Sensitive Keywords (Medical Safety)
+        const sensitiveKeywords = [
+            'tác dụng phụ',
+            'nguy hiểm',
+            'chết',
+            'tử vong',
+            'bệnh nặng',
+            'dị ứng',
+            'phản ứng',
+            'độc hại',
+            'cấm',
+            'không nên dùng',
+            'ngộ độc',
+            'biến chứng',
+        ]
+
+        const lowerText = textToCheck.toLowerCase()
+        const hasSensitive = sensitiveKeywords.some(keyword => lowerText.includes(keyword))
+
+        if (hasSensitive) {
+            console.log('⏳ Pending: Sensitive medical content detected')
+            return false
+        }
+
+        // Rule 5: Content Length Check
+        if (reviewData.comment.length < 10) {
+            console.log('⏳ Pending: Comment too short (<10 chars)')
+            return false
+        }
+
+        if (reviewData.comment.length > 2000) {
+            console.log('⏳ Pending: Comment too long (>2000 chars)')
+            return false
+        }
+
+        // Rule 6: Extreme Ratings with Short Comments (potential fake)
+        if ((reviewData.rating === 1 || reviewData.rating === 5) && reviewData.comment.length < 50) {
+            console.log('⏳ Pending: Extreme rating with short comment')
+            return false
+        }
+
+        // Rule 7: Too Many Images (potential spam)
+        if (reviewData.images && reviewData.images.length > 3) {
+            console.log('⏳ Pending: Too many images (>3)')
+            return false
+        }
+
+        // Default: Auto-approve if passed all checks
+        console.log('✅ Auto-approve: Passed all safety checks')
+        return true
+    }
+
+    /**
      * Create a new review
      *
      * @param userId - ID of the user creating the review
@@ -80,7 +189,19 @@ class ReviewService {
             })
         }
 
-        // 5. Create review instance
+        // 5. Hybrid Moderation: Check if should auto-approve
+        const shouldApprove = await this.shouldAutoApprove(
+            userId,
+            {
+                comment: data.comment,
+                title: data.title,
+                rating: data.rating,
+                images: data.images
+            },
+            true // isVerifiedPurchase = true (we verified the order above)
+        )
+
+        // 6. Create review instance with appropriate status
         const review = new Review({
             _id: new ObjectId(),
             productId,
@@ -93,10 +214,11 @@ class ReviewService {
             isVerifiedPurchase: true, // Always true since we verified the order
             helpfulCount: 0,
             helpfulVotes: [],
-            status: ReviewStatus.Pending // Requires moderation for medical products
+            autoApproved: shouldApprove, // Track if auto-approved
+            status: shouldApprove ? ReviewStatus.Approved : ReviewStatus.Pending
         })
 
-        // 6. Validate review data
+        // 7. Validate review data
         const validationError = review.validate()
         if (validationError) {
             throw new ErrorWithStatus({
@@ -105,11 +227,13 @@ class ReviewService {
             })
         }
 
-        // 7. Insert review into database
+        // 8. Insert review into database
         const result = await databaseService.reviews.insertOne(review)
 
-        // 8. Update product rating statistics (even for pending reviews for internal tracking)
-        await this.updateProductRating(productId)
+        // 9. Update product rating statistics (only for approved reviews)
+        if (shouldApprove) {
+            await this.updateProductRating(productId)
+        }
 
         return { ...review, _id: result.insertedId }
     }
@@ -342,13 +466,9 @@ class ReviewService {
             updateData.images = data.images
         }
 
-        // 4. Reset moderation status if content changed (requires re-approval)
-        if (data.rating !== undefined || data.comment !== undefined) {
-            updateData.status = ReviewStatus.Pending
-            updateData.moderatedBy = undefined
-            updateData.moderatedAt = undefined
-            updateData.moderationNotes = undefined
-        }
+        // Note: We preserve the review's current status (approved/pending/rejected)
+        // This implements "Skip Re-moderation" for better UX
+        // Admin can still use post-moderation to unpublish if needed
 
         // 5. Update review
         const result = await databaseService.reviews.findOneAndUpdate(
@@ -565,6 +685,186 @@ class ReviewService {
             averageRating: Math.round(averageRating * 10) / 10,
             distribution,
             percentages
+        }
+    }
+
+    /**
+     * Get all reviews for admin dashboard (with filtering)
+     * 
+     * @param filters - Filter criteria
+     * @returns Paginated reviews with filters
+     */
+    async getAdminReviews(filters: {
+        status?: ReviewStatus
+        page?: number
+        limit?: number
+        sortBy?: string
+        dateFrom?: string
+        dateTo?: string
+    }) {
+        const query: any = {}
+
+        // Filter by status if provided
+        if (filters.status) {
+            query.status = filters.status
+        }
+
+        // Filter by date range
+        if (filters.dateFrom || filters.dateTo) {
+            query.createdAt = {}
+            if (filters.dateFrom) {
+                query.createdAt.$gte = new Date(filters.dateFrom)
+            }
+            if (filters.dateTo) {
+                // Add 1 day to include the entire end date
+                const endDate = new Date(filters.dateTo)
+                endDate.setDate(endDate.getDate() + 1)
+                query.createdAt.$lt = endDate
+            }
+        }
+
+        const page = filters.page || 1
+        const limit = filters.limit || 20
+        const skip = (page - 1) * limit
+
+        // Sort options
+        let sort: any = { createdAt: -1 } // Default: newest first
+        if (filters.sortBy === 'oldest') sort = { createdAt: 1 }
+        if (filters.sortBy === 'rating-high') sort = { rating: -1 }
+        if (filters.sortBy === 'rating-low') sort = { rating: 1 }
+
+        // Get reviews with populated product and user info using aggregation
+        const [reviewsResult, total] = await Promise.all([
+            databaseService.reviews.aggregate([
+                { $match: query },
+                { $sort: sort },
+                { $skip: skip },
+                { $limit: limit },
+                // Lookup product info
+                {
+                    $lookup: {
+                        from: 'products',
+                        localField: 'productId',
+                        foreignField: '_id',
+                        as: 'productInfo'
+                    }
+                },
+                // Lookup user info
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'userId',
+                        foreignField: '_id',
+                        as: 'userInfo'
+                    }
+                },
+                // Add computed fields
+                {
+                    $addFields: {
+                        productName: { $arrayElemAt: ['$productInfo.name', 0] },
+                        userName: {
+                            $concat: [
+                                { $arrayElemAt: ['$userInfo.firstName', 0] },
+                                ' ',
+                                { $arrayElemAt: ['$userInfo.lastName', 0] }
+                            ]
+                        }
+                    }
+                },
+                // Remove lookup arrays to keep response clean
+                {
+                    $project: {
+                        productInfo: 0,
+                        userInfo: 0
+                    }
+                }
+            ]).toArray(),
+            databaseService.reviews.countDocuments(query)
+        ])
+
+        return {
+            reviews: reviewsResult,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit)
+            }
+        }
+    }
+
+    /**
+     * Get admin dashboard statistics
+     * 
+     * @returns Review statistics for admin dashboard
+     */
+    async getAdminReviewStats() {
+        // Count reviews by status
+        const [total, pending, approved, rejected, autoApproved] = await Promise.all([
+            databaseService.reviews.countDocuments(),
+            databaseService.reviews.countDocuments({ status: ReviewStatus.Pending }),
+            databaseService.reviews.countDocuments({ status: ReviewStatus.Approved }),
+            databaseService.reviews.countDocuments({ status: ReviewStatus.Rejected }),
+            databaseService.reviews.countDocuments({ autoApproved: true })
+        ])
+
+        // Calculate average rating (approved reviews only)
+        const avgRatingResult = await databaseService.reviews.aggregate([
+            { $match: { status: ReviewStatus.Approved } },
+            { $group: { _id: null, avgRating: { $avg: '$rating' } } }
+        ]).toArray()
+
+        const averageRating = avgRatingResult[0]?.avgRating || 0
+
+        return {
+            total,
+            pending,
+            approved,
+            rejected,
+            autoApproved,
+            autoApprovedPercentage: total > 0 ? Math.round((autoApproved / total) * 100) : 0,
+            averageRating: Math.round(averageRating * 10) / 10
+        }
+    }
+
+    /**
+     * Bulk moderate reviews (approve or reject multiple reviews)
+     * 
+     * @param reviewIds - Array of review IDs
+     * @param action - 'approve' or 'reject'
+     * @param moderatorId - ID of the moderator
+     * @returns Result of bulk operation
+     */
+    async bulkModerate(reviewIds: ObjectId[], action: 'approve' | 'reject', moderatorId: ObjectId) {
+        const updateData: any = {
+            moderatedBy: moderatorId,
+            moderatedAt: new Date()
+        }
+
+        if (action === 'approve') {
+            updateData.status = ReviewStatus.Approved
+        } else {
+            updateData.status = ReviewStatus.Rejected
+            updateData.moderationNotes = 'Bulk rejected by admin'
+        }
+
+        // Update all reviews
+        const result = await databaseService.reviews.updateMany(
+            { _id: { $in: reviewIds } },
+            { $set: updateData }
+        )
+
+        // Update product ratings for affected products
+        const reviews = await databaseService.reviews
+            .find({ _id: { $in: reviewIds } })
+            .toArray()
+
+        const productIds = [...new Set(reviews.map(r => r.productId))]
+        await Promise.all(productIds.map(id => this.updateProductRating(id)))
+
+        return {
+            modifiedCount: result.modifiedCount,
+            action
         }
     }
 }

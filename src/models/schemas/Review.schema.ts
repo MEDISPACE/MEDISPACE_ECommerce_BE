@@ -30,6 +30,15 @@ export interface ReviewType {
     helpfulCount: number // Number of users who found this helpful
     helpfulVotes?: ObjectId[] // Users who voted helpful (prevent duplicate votes)
 
+    // Hybrid Moderation - Auto-approval tracking
+    autoApproved?: boolean // True if auto-approved by system
+
+    // Flagging system for post-moderation
+    flagged?: boolean // True if flagged for review
+    flagReason?: 'spam' | 'inappropriate' | 'fake' | 'sensitive' | 'other'
+    flaggedBy?: ObjectId // User who flagged
+    flaggedAt?: Date
+
     // Moderation (important for medical products)
     status: ReviewStatus
     moderatedBy?: ObjectId // Admin/Pharmacist who moderated
@@ -56,6 +65,13 @@ export default class Review {
 
     helpfulCount: number
     helpfulVotes?: ObjectId[]
+
+    // Hybrid moderation
+    autoApproved?: boolean
+    flagged?: boolean
+    flagReason?: 'spam' | 'inappropriate' | 'fake' | 'sensitive' | 'other'
+    flaggedBy?: ObjectId
+    flaggedAt?: Date
 
     status: ReviewStatus
     moderatedBy?: ObjectId
@@ -85,6 +101,13 @@ export default class Review {
         // Engagement
         this.helpfulCount = review.helpfulCount || 0
         this.helpfulVotes = review.helpfulVotes || []
+
+        // Hybrid moderation
+        this.autoApproved = review.autoApproved || false
+        this.flagged = review.flagged || false
+        this.flagReason = review.flagReason
+        this.flaggedBy = review.flaggedBy
+        this.flaggedAt = review.flaggedAt
 
         // Moderation - default to pending for safety (medical products)
         this.status = review.status || ReviewStatus.Pending
