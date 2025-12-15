@@ -183,3 +183,68 @@ export const moderateReviewController = async (req: Request, res: Response, next
         next(error)
     }
 }
+
+/**
+ * Get all reviews for admin (with filtering)
+ * GET /reviews/admin
+ */
+export const getAdminReviewsController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { status, page, limit, sortBy } = req.query
+
+        const result = await reviewService.getAdminReviews({
+            status: status as any,
+            page: page ? Number(page) : undefined,
+            limit: limit ? Number(limit) : undefined,
+            sortBy: sortBy as string
+        })
+
+        return res.status(200).json({
+            message: 'Get admin reviews successfully',
+            data: result
+        })
+    } catch (error) {
+        next(error)
+    }
+}
+
+/**
+ * Get admin dashboard statistics
+ * GET /reviews/admin/stats
+ */
+export const getAdminReviewStatsController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const stats = await reviewService.getAdminReviewStats()
+
+        return res.status(200).json({
+            message: 'Get admin review stats successfully',
+            data: stats
+        })
+    } catch (error) {
+        next(error)
+    }
+}
+
+/**
+ * Bulk moderate reviews (Admin only)
+ * POST /reviews/admin/bulk-moderate
+ */
+export const bulkModerateController = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { userId } = req.decoded_authorization as TokenPayload
+        const { reviewIds, action } = req.body
+
+        const result = await reviewService.bulkModerate(
+            reviewIds.map((id: string) => new ObjectId(id)),
+            action,
+            new ObjectId(userId)
+        )
+
+        return res.status(200).json({
+            message: `Bulk ${action} completed successfully`,
+            data: result
+        })
+    } catch (error) {
+        next(error)
+    }
+}

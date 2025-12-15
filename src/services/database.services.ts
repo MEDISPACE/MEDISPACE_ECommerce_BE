@@ -12,6 +12,7 @@ import Prescription from '~/models/schemas/Prescription.schema'
 import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
 import PatientNote from '~/models/schemas/PatientNote.schema'
 import Review from '~/models/schemas/Review.schema'
+import ProductDetail from '~/models/schemas/ProductDetail.schema'
 
 config()
 
@@ -69,6 +70,9 @@ class DatabaseService {
   }
   get reviews(): Collection<Review> {
     return this.db.collection(process.env.DB_REVIEWS_COLLECTION as string)
+  }
+  get productDetails(): Collection<ProductDetail> {
+    return this.db.collection(process.env.DB_PRODUCT_DETAILS_COLLECTION as string)
   }
 }
 
