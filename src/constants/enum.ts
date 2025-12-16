@@ -41,3 +41,9 @@ export enum PaymentMethod {
   Momo = 'momo',
   PayOS = 'payos'
 }
+
+export enum ReviewStatus {
+  Pending = 'pending',
+  Approved = 'approved',
+  Rejected = 'rejected'
+}

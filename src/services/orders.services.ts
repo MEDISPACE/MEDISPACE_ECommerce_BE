@@ -63,7 +63,7 @@ class OrderService {
     const result = await databaseService.orders.insertOne(order)
 
     // Clear cart
-    await cartService.clearCart(userId.toString())
+    await cartService.clearCart(userId)
 
     // Send order confirmation email
     try {
@@ -187,6 +187,12 @@ class OrderService {
 
     if (newStatus === 'delivered') {
       updateData.deliveredAt = new Date()
+
+      // Auto-update payment status for COD orders
+      if (order.paymentMethod === PaymentMethod.COD && order.paymentStatus === 'pending') {
+        updateData.paymentStatus = 'paid'
+        updateData.paidAt = new Date()
+      }
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
