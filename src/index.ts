@@ -1,4 +1,5 @@
 import express from 'express'
+
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import databaseService from './services/database.services'
@@ -18,12 +19,15 @@ import paymentRouter from './routes/payment.routes'
 import adminRouter from './routes/admin.routes'
 import mediasRouter from './routes/medias.route'
 import reviewsRouter from './routes/reviews.routes'
+import chatsRouter from './routes/chats.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
+
 import { initFolder } from './utils/file'
 
 config()
 
 const app = express()
+
 databaseService.connect()
 cleanupService.startCartCleanup()
 initFolder() // Tạo thư mục temp cho upload
@@ -56,11 +60,24 @@ app.use('/payment', paymentRouter)
 app.use('/admin', adminRouter)
 app.use('/medias', mediasRouter)
 app.use('/reviews', reviewsRouter)
+app.use('/chats', chatsRouter)
+
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
 
+// Create HTTP server for Socket.IO
+import { createServer } from 'http'
+import { initChatSocket } from './sockets/chat.socket'
+
+const httpServer = createServer(app)
+
+// Initialize Socket.IO for chat
+initChatSocket(httpServer)
+
 const port = Number(process.env.PORT) || 8000
-app.listen(port, '0.0.0.0', () => {
+httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server is running on port ${port}`)
+  console.log(`Socket.IO is ready for chat connections`)
 })
+
