@@ -9,7 +9,7 @@ import { mediasService } from '~/services/medias.services'
 export const uploadImageController = async (req: Request, res: Response, next: NextFunction) => {
     const url = await mediasService.uploadImage(req)
     return res.json({
-        url,
+        result: url,
         message: USERS_MESSAGES.UPLOAD_IMAGE_SUCCESS
     })
 }

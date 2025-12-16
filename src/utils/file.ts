@@ -35,7 +35,7 @@ export const handleUploadImage = async (req: Request) => {
     return new Promise<File[]>((resolve, reject) => {
         form.parse(req, (err: any, fields: any, files: any) => {
             if (err) {
-                reject(err)
+                return reject(err)
             }
             if (Boolean(files.image) === false) {
                 return reject(new Error(USERS_MESSAGES.FILE_IS_EMPTY))

@@ -1,4 +1,5 @@
 import express from 'express'
+
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import databaseService from './services/database.services'
@@ -18,11 +19,13 @@ import paymentRouter from './routes/payment.routes'
 import adminRouter from './routes/admin.routes'
 import mediasRouter from './routes/medias.route'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
+
 import { initFolder } from './utils/file'
 
 config()
 
 const app = express()
+
 databaseService.connect()
 cleanupService.startCartCleanup()
 initFolder() // Tạo thư mục temp cho upload
@@ -55,6 +58,7 @@ app.use('/payment', paymentRouter)
 app.use('/admin', adminRouter)
 app.use('/medias', mediasRouter)
 
+
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
 
@@ -62,3 +66,4 @@ const port = Number(process.env.PORT) || 8000
 app.listen(port, '0.0.0.0', () => {
   console.log(`Server is running on port ${port}`)
 })
+
