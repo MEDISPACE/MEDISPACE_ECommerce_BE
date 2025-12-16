@@ -553,6 +553,12 @@ class PharmacistService {
     // Add delivery timestamp if delivered
     if (newStatus === 'delivered') {
       updateData.deliveredAt = new Date()
+
+      // Auto-update payment status for COD orders
+      if (order.paymentMethod === 'cod' && order.paymentStatus === 'pending') {
+        updateData.paymentStatus = 'paid'
+        updateData.paidAt = new Date()
+      }
     }
 
     // Add notes if provided
