@@ -71,10 +71,6 @@ export const getPendingPrescriptionsController = async (
   req: Request<ParamsDictionary, unknown, unknown, PrescriptionQuery>,
   res: Response
 ) => {
-  console.log('🔵 getPendingPrescriptionsController called')
-  console.log('Query params:', req.query)
-  console.log('User role:', req.decoded_authorization?.role)
-
   try {
     const result = await prescriptionsService.getPendingPrescriptions(req.query)
     return res.status(HTTP_STATUS.OK).json({
@@ -82,7 +78,6 @@ export const getPendingPrescriptionsController = async (
       result
     })
   } catch (error) {
-    console.error('❌ getPendingPrescriptionsController error:', error)
     throw error
   }
 }
