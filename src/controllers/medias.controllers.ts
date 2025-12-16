@@ -7,11 +7,11 @@ import { mediasService } from '~/services/medias.services'
  * POST /medias/upload-image
  */
 export const uploadImageController = async (req: Request, res: Response, next: NextFunction) => {
-    const url = await mediasService.uploadImage(req)
-    return res.json({
-        result: url,
-        message: USERS_MESSAGES.UPLOAD_IMAGE_SUCCESS
-    })
+  const url = await mediasService.uploadImage(req)
+  return res.json({
+    result: url,
+    message: USERS_MESSAGES.UPLOAD_IMAGE_SUCCESS
+  })
 }
 
 // TODO: Uncomment khi cần upload video
@@ -26,4 +26,3 @@ export const uploadImageController = async (req: Request, res: Response, next: N
 //         message: USERS_MESSAGES.UPLOAD_VIDEO_SUCCESS
 //     })
 // }
-
