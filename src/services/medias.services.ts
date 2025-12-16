@@ -18,9 +18,12 @@ class MediasService {
      * - Xóa file tạm
      */
     async uploadImage(req: Request) {
+        console.log('Starting image upload...')
         const files = await handleUploadImage(req)
+        console.log('Files received:', files.length)
         const result: Media[] = await Promise.all(
             files.map(async (file) => {
+                console.log('Processing file:', file.filepath)
                 // Tạo file tạm để xử lý với Sharp
                 const tempProcessedPath = `${file.filepath}-processed.jpeg`
 

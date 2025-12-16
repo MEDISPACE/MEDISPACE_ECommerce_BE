@@ -12,6 +12,7 @@ import Prescription from '~/models/schemas/Prescription.schema'
 import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
 import PatientNote from '~/models/schemas/PatientNote.schema'
 
+
 config()
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
@@ -66,6 +67,8 @@ class DatabaseService {
   get patientNotes(): Collection<PatientNote> {
     return this.db.collection(process.env.DB_PATIENT_NOTES_COLLECTION as string)
   }
+
+
 }
 
 //Tao Object tu Class DatabaseService
