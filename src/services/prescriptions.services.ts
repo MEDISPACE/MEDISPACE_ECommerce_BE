@@ -125,15 +125,11 @@ class PrescriptionsService {
       const limit = Number(query.limit) || 10
       const { status, sort = 'newest' } = query
 
-      console.log('getPendingPrescriptions called with:', { page, limit, status, sort })
-
       // If status is provided, filter by it; otherwise show all prescriptions
       const filter: Record<string, string> = {}
       if (status) {
         filter.status = status
       }
-
-      console.log('getPendingPrescriptions filter:', filter)
 
       const sortOption: Record<string, 1 | -1> = sort === 'newest' ? { createdAt: -1 } : { createdAt: 1 }
 
@@ -143,8 +139,6 @@ class PrescriptionsService {
         databaseService.prescriptions.find(filter).sort(sortOption).skip(skip).limit(limit).toArray(),
         databaseService.prescriptions.countDocuments(filter)
       ])
-
-      console.log('getPendingPrescriptions result:', { total, count: prescriptions.length })
 
       return {
         prescriptions,
@@ -156,7 +150,6 @@ class PrescriptionsService {
         }
       }
     } catch (error) {
-      console.error('❌ getPendingPrescriptions error:', error)
       throw error
     }
   }
@@ -198,8 +191,6 @@ class PrescriptionsService {
   // Get prescription statistics
   async getPrescriptionStats() {
     try {
-      console.log('🔵 Getting prescription statistics...')
-
       // Use aggregation for efficient counting
       const stats = await databaseService.prescriptions
         .aggregate([
@@ -211,8 +202,6 @@ class PrescriptionsService {
           }
         ])
         .toArray()
-
-      console.log('Raw stats from DB:', stats)
 
       // Initialize counters
       const result = {
@@ -236,10 +225,8 @@ class PrescriptionsService {
         result.total += count
       })
 
-      console.log('✅ Prescription stats:', result)
       return result
     } catch (error) {
-      console.error('❌ getPrescriptionStats error:', error)
       throw error
     }
   }
