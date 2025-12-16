@@ -27,6 +27,17 @@ interface ProductType {
   // Featured Media
   featuredImage?: string
 
+  // Review & Rating (cached from reviews collection)
+  rating?: number
+  reviewCount?: number
+  ratingDistribution?: {
+    1: number
+    2: number
+    3: number
+    4: number
+    5: number
+  }
+
   // Audit Information
   createdAt?: Date
   updatedAt?: Date
@@ -61,6 +72,17 @@ export default class Product {
   // Featured Media
   featuredImage?: string
 
+  // Review & Rating
+  rating?: number
+  reviewCount?: number
+  ratingDistribution?: {
+    1: number
+    2: number
+    3: number
+    4: number
+    5: number
+  }
+
   // Audit Information
   createdAt?: Date
   updatedAt?: Date
@@ -89,6 +111,17 @@ export default class Product {
     this.requiresPrescription = product.requiresPrescription || false
 
     this.featuredImage = product.featuredImage
+
+    // Initialize rating fields
+    this.rating = product.rating || 0
+    this.reviewCount = product.reviewCount || 0
+    this.ratingDistribution = product.ratingDistribution || {
+      1: 0,
+      2: 0,
+      3: 0,
+      4: 0,
+      5: 0
+    }
 
     this.createdAt = product.createdAt || date
     this.updatedAt = product.updatedAt || date
