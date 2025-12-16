@@ -13,7 +13,8 @@ import PatientMedicalInfo from '~/models/schemas/PatientMedicalInfo.schema'
 import PatientNote from '~/models/schemas/PatientNote.schema'
 import Review from '~/models/schemas/Review.schema'
 import ProductDetail from '~/models/schemas/ProductDetail.schema'
-
+import Conversation from '~/models/schemas/Conversation.schema'
+import Message from '~/models/schemas/Message.schema'
 
 config()
 
@@ -74,6 +75,12 @@ class DatabaseService {
   }
   get productDetails(): Collection<ProductDetail> {
     return this.db.collection(process.env.DB_PRODUCT_DETAILS_COLLECTION as string)
+  }
+  get conversations(): Collection<Conversation> {
+    return this.db.collection(process.env.DB_CONVERSATIONS_COLLECTION as string)
+  }
+  get messages(): Collection<Message> {
+    return this.db.collection(process.env.DB_MESSAGES_COLLECTION as string)
   }
 }
 
