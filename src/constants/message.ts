@@ -420,3 +420,40 @@ export const PHARMACIST_MESSAGES = {
   NEW_PASSWORD_IS_REQUIRED: 'New password is required',
   PASSWORD_MUST_BE_STRONG: 'Password must be at least 6 characters long'
 } as const
+
+export const CHATS_MESSAGES = {
+  // Validation Messages
+  CONVERSATION_ID_REQUIRED: 'Conversation ID is required',
+  CONVERSATION_ID_INVALID: 'Conversation ID must be a valid ObjectId',
+  PHARMACIST_ID_REQUIRED: 'Pharmacist ID is required',
+  PHARMACIST_ID_INVALID: 'Pharmacist ID must be a valid ObjectId',
+  CONTENT_REQUIRED: 'Message content is required',
+  CONTENT_MUST_BE_STRING: 'Message content must be a string',
+  CONTENT_TOO_LONG: 'Message content must be less than 2000 characters',
+  MESSAGE_TYPE_INVALID: 'Message type must be text or image',
+  IMAGE_URL_MUST_BE_STRING: 'Image URL must be a string',
+  IMAGE_URL_INVALID: 'Image URL must be a valid URL',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+
+  // Success Messages
+  GET_CONVERSATIONS_SUCCESS: 'Get conversations successfully',
+  GET_CONVERSATION_SUCCESS: 'Get conversation successfully',
+  CREATE_CONVERSATION_SUCCESS: 'Create conversation successfully',
+  SEND_MESSAGE_SUCCESS: 'Message sent successfully',
+  GET_MESSAGES_SUCCESS: 'Get messages successfully',
+  MARK_AS_READ_SUCCESS: 'Messages marked as read successfully',
+  GET_PHARMACIST_SUCCESS: 'Get pharmacist information successfully',
+  DELETE_CONVERSATION_SUCCESS: 'Delete conversation successfully',
+
+  // Error Messages
+  CONVERSATION_NOT_FOUND: 'Conversation not found',
+  MESSAGE_NOT_FOUND: 'Message not found',
+  UNAUTHORIZED_ACCESS: 'You are not authorized to access this conversation',
+  ONLY_CUSTOMERS_CAN_CREATE_CONVERSATION: 'Only customers can create conversations with pharmacists',
+  SEND_MESSAGE_FAILED: 'Failed to send message',
+  GET_MESSAGES_FAILED: 'Failed to get messages',
+  PHARMACIST_NOT_FOUND: 'Pharmacist not found',
+  CUSTOMER_NOT_FOUND: 'Customer not found',
+  NO_PHARMACIST_AVAILABLE: 'No pharmacist available at the moment'
+} as const
