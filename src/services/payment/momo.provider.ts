@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { config } from 'dotenv'
 import Order from '~/models/schemas/Order.schema'
 import { PaymentProvider, PaymentResult } from './payment.interface'
+import { ORDERS_MESSAGES } from '~/constants/message'
 
 config()
 
@@ -15,7 +16,7 @@ export class MomoProvider implements PaymentProvider {
     async createPaymentUrl(order: Order, req?: any): Promise<string> {
         const requestId = (order._id as any).toString() + new Date().getTime()
         const orderId = (order._id as any).toString()
-        const orderInfo = `Thanh toan don hang #${order.orderNumber}`
+        const orderInfo = `${ORDERS_MESSAGES.PAYMENT_ORDER_INFO_PREFIX}${order.orderNumber}`
         const amount = order.totalAmount.toString()
         const requestType = 'captureWallet'
         const extraData = ''
@@ -55,8 +56,7 @@ export class MomoProvider implements PaymentProvider {
             const response = await axios.post(this.endpoint, requestBody)
             return response.data.payUrl
         } catch (error) {
-            console.error('Momo create payment error:', error)
-            throw new Error('Failed to create Momo payment URL')
+            throw new Error(ORDERS_MESSAGES.MOMO_CREATE_URL_FAILED)
         }
     }
 
@@ -88,7 +88,7 @@ export class MomoProvider implements PaymentProvider {
                 isSuccess: false,
                 orderId,
                 amount: Number(amount),
-                message: 'Invalid signature',
+                message: ORDERS_MESSAGES.INVALID_SIGNATURE,
                 transactionId: transId
             }
         }

@@ -3,6 +3,7 @@ import { TokenPayload } from '~/models/requests/User.request'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { UserRole } from '~/constants/enum'
+import { USERS_MESSAGES } from '~/constants/message'
 
 /**
  * Common middleware functions
@@ -17,7 +18,7 @@ export const isAdminOrPharmacist = (req: Request, res: Response, next: NextFunct
 
   if (role !== UserRole.Admin && role !== UserRole.Pharmacist) {
     throw new ErrorWithStatus({
-      message: 'Access denied. Admin or Pharmacist role required.',
+      message: USERS_MESSAGES.ADMIN_OR_PHARMACIST_REQUIRED,
       status: HTTP_STATUS.FORBIDDEN
     })
   }
@@ -33,7 +34,7 @@ export const isAdmin = (req: Request, res: Response, next: NextFunction) => {
 
   if (role !== UserRole.Admin) {
     throw new ErrorWithStatus({
-      message: 'Access denied. Admin role required.',
+      message: USERS_MESSAGES.ADMIN_REQUIRED,
       status: HTTP_STATUS.FORBIDDEN
     })
   }

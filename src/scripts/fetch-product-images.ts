@@ -57,7 +57,6 @@ async function searchProductImage(productName: string): Promise<string | null> {
 
         return null
     } catch (error) {
-        console.error(`Lỗi khi search ảnh cho "${productName}":`, error)
         return null
     }
 }
@@ -91,7 +90,6 @@ async function downloadImage(imageUrl: string, productName: string): Promise<str
 
         return `/products/${filename}`
     } catch (error) {
-        console.error(`Lỗi khi download ảnh:`, error)
         throw error
     }
 }
@@ -102,21 +100,16 @@ async function downloadImage(imageUrl: string, productName: string): Promise<str
 async function fetchProductImages(products: Array<{ name: string; sku: string }>): Promise<ProductImageResult[]> {
     const results: ProductImageResult[] = []
 
-    console.log(`🖼️  Bắt đầu tìm ảnh cho ${products.length} sản phẩm...\n`)
-
     for (const product of products) {
         try {
-            console.log(`🔍 Tìm ảnh: ${product.name}`)
 
             // Search ảnh
             const imageUrl = await searchProductImage(product.name)
 
             if (imageUrl) {
-                console.log(`  ✓ Tìm thấy: ${imageUrl.substring(0, 80)}...`)
 
                 // Download ảnh
                 const localPath = await downloadImage(imageUrl, product.sku)
-                console.log(`  ✓ Đã lưu: ${localPath}`)
 
                 results.push({
                     productName: product.name,
@@ -125,7 +118,6 @@ async function fetchProductImages(products: Array<{ name: string; sku: string }>
                     source: 'google',
                 })
             } else {
-                console.log(`  ✗ Không tìm thấy ảnh`)
 
                 // Fallback: Dùng placeholder
                 const placeholderUrl = `https://placehold.co/400x400/0066CC/white?text=${encodeURIComponent(product.name.substring(0, 20))}`
@@ -140,7 +132,6 @@ async function fetchProductImages(products: Array<{ name: string; sku: string }>
             // Delay để tránh rate limit
             await new Promise(resolve => setTimeout(resolve, 1000))
         } catch (error) {
-            console.error(`  ✗ Lỗi: ${error}`)
         }
     }
 
@@ -159,7 +150,7 @@ function saveImageMapping(results: ProductImageResult[], filename: string = 'pro
     }
 
     fs.writeFileSync(filepath, JSON.stringify(results, null, 2), 'utf-8')
-    console.log(`\n💾 Đã lưu mapping vào ${filepath}`)
+    fs.writeFileSync(filepath, JSON.stringify(results, null, 2), 'utf-8')
 }
 
 /**
@@ -167,8 +158,6 @@ function saveImageMapping(results: ProductImageResult[], filename: string = 'pro
  */
 async function main() {
     try {
-        console.log('🚀 Bắt đầu tìm và download ảnh sản phẩm...\n')
-
         // Load danh sách sản phẩm từ seed data
         const seedData = require('../seed')
         const products = seedData.default || []
@@ -179,39 +168,13 @@ async function main() {
             sku: p.sku,
         }))
 
-        console.log(`📦 Sẽ tìm ảnh cho ${testProducts.length} sản phẩm\n`)
-
-        // Kiểm tra API key
-        if (!process.env.GOOGLE_API_KEY) {
-            console.log('⚠️  Chưa có GOOGLE_API_KEY')
-            console.log('💡 Hướng dẫn lấy API key:')
-            console.log('   1. Truy cập: https://console.cloud.google.com/')
-            console.log('   2. Tạo project mới')
-            console.log('   3. Enable Custom Search API')
-            console.log('   4. Tạo credentials (API key)')
-            console.log('   5. Thêm vào .env: GOOGLE_API_KEY=your_key')
-            console.log('   6. Tạo Search Engine: https://programmablesearchengine.google.com/')
-            console.log('   7. Thêm vào .env: GOOGLE_SEARCH_ENGINE_ID=your_id\n')
-            console.log('🔄 Sẽ dùng placeholder images thay thế...\n')
-        }
-
         // Fetch images
         const results = await fetchProductImages(testProducts)
 
         // Save mapping
         saveImageMapping(results)
 
-        // Statistics
-        const downloaded = results.filter(r => r.source === 'google').length
-        const placeholders = results.filter(r => r.source === 'placeholder').length
-
-        console.log('\n✨ Hoàn thành!')
-        console.log(`📊 Thống kê:`)
-        console.log(`   - Tổng số: ${results.length}`)
-        console.log(`   - Đã download: ${downloaded}`)
-        console.log(`   - Placeholder: ${placeholders}`)
     } catch (error) {
-        console.error('❌ Lỗi:', error)
         process.exit(1)
     }
 }

@@ -167,7 +167,7 @@ export const forgotPasswordController = async (
 ) => {
   const { _id, status } = req.user as User
   const result = await usersService.forgotPassword({ userId: (_id as ObjectId).toString(), status })
-  console.log(result)
+
   return res.json(result)
 }
 export const verifyForgotPasswordTokenController = async (
@@ -227,7 +227,7 @@ export const getWishlistController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const result = await usersService.getWishlist(userId)
   return res.json({
-    message: 'Get wishlist successfully',
+    message: USERS_MESSAGES.GET_WISHLIST_SUCCESS,
     result
   })
 }
