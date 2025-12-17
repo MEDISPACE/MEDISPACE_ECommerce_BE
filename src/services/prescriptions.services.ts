@@ -60,14 +60,13 @@ class PrescriptionsService {
       const limit = Number(query.limit) || 10
       const { status, sort = 'newest', customerId } = query
 
-      console.log('getPrescriptions called with:', { page, limit, status, sort, customerId })
+
 
       const filter: Record<string, string | ObjectId> = {}
       if (status) filter.status = status
       if (customerId) {
         // Validate ObjectId
         if (!ObjectId.isValid(customerId)) {
-          console.error('Invalid customerId:', customerId)
           throw new ErrorWithStatus({
             message: 'Invalid customer ID',
             status: HTTP_STATUS.BAD_REQUEST
@@ -76,7 +75,7 @@ class PrescriptionsService {
         filter.customerId = new ObjectId(customerId)
       }
 
-      console.log('Query filter:', filter)
+
 
       const sortOption: Record<string, 1 | -1> = sort === 'newest' ? { createdAt: -1 } : { createdAt: 1 }
 
@@ -97,7 +96,7 @@ class PrescriptionsService {
         }
       }
     } catch (error) {
-      console.error('getPrescriptions error:', error)
+
       throw error
     }
   }

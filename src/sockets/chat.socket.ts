@@ -6,6 +6,7 @@ import chatsService from '~/services/chats.services'
 import databaseService from '~/services/database.services'
 import { ObjectId } from 'mongodb'
 import { config } from 'dotenv'
+import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
 
 config()
 
@@ -42,8 +43,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
             next()
         } catch (error) {
-            console.error('❌ Socket auth error:', error)
-            next(new Error('Authentication error'))
+            next(new Error(USERS_MESSAGES.UNAUTHENTICATED))
         }
     })
 
@@ -62,8 +62,17 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
         // Join user's personal room
         if (socket.userId) {
-            socket.join(`user:${socket.userId}`)
+            const userIdStr = socket.userId.toString()
+            socket.join(`user:${userIdStr}`)
         }
+
+        // Manual join personal room (Backup)
+        socket.on('user:join', () => {
+            if (socket.userId) {
+                const userIdStr = socket.userId.toString()
+                socket.join(`user:${userIdStr}`)
+            }
+        })
 
         // Join conversation room
         socket.on('conversation:join', async (conversationId: string) => {
@@ -79,23 +88,27 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         socket.on('message:send', async (data: { conversationId?: string; pharmacistId?: string; content: string; type?: 'text' | 'image'; imageUrl?: string }) => {
             try {
                 if (!socket.userId || !socket.userRole) {
-                    socket.emit('error', { message: 'Not authenticated' })
+                    socket.emit('error', { message: USERS_MESSAGES.UNAUTHENTICATED })
                     return
                 }
 
                 const message = await chatsService.sendMessage(socket.userId, socket.userRole, data)
 
-                // Emit to conversation room (anyone who joined this conversation)
+                // 0. Emit back to sender directly (Fail-safe for sender visibility)
+                socket.emit('message:new', message)
+
+                // 1. Emit to conversation room (Standard way)
                 io.to(`conversation:${message.conversationId}`).emit('message:new', message)
 
-                // For shared inbox: if customer sends, notify ALL pharmacists
-                // If pharmacist sends, notify the customer
+                // 2. Extra Redundancy: Emit strictly to receiver's personal room
                 if (socket.userRole === 'customer') {
-                    // Notify all pharmacists (broadcast to all users with role pharmacist)
+                    // Sender is Customer => Receiver is Pharmacists
+                    // Broadcast to all connected pharmacists
                     const sockets = await io.fetchSockets()
                     sockets.forEach(s => {
                         const authSocket = s as unknown as AuthenticatedSocket
                         if (authSocket.userRole === 'pharmacist') {
+                            s.emit('message:new', message)
                             s.emit('notification:new-message', {
                                 conversationId: message.conversationId,
                                 message
@@ -103,18 +116,23 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         }
                     })
                 } else {
-                    // Pharmacist sends - notify customer
+                    // Sender is Pharmacist => Receiver is Customer
                     const conversation = await chatsService.getConversationById(message.conversationId.toString())
                     if (conversation) {
-                        io.to(`user:${conversation.customerId.toString()}`).emit('notification:new-message', {
+                        const customerIdStr = conversation.customerId.toString()
+
+                        // Emit to specific user room
+                        io.to(`user:${customerIdStr}`).emit('message:new', message)
+
+                        // For redundant safety, emit to notification event too
+                        io.to(`user:${customerIdStr}`).emit('notification:new-message', {
                             conversationId: message.conversationId,
                             message
                         })
                     }
                 }
             } catch (error) {
-                console.error('Error sending message:', error)
-                socket.emit('error', { message: 'Failed to send message' })
+                socket.emit('error', { message: CHATS_MESSAGES.SEND_MESSAGE_FAILED })
             }
         })
 
@@ -148,7 +166,6 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     userId: socket.userId
                 })
             } catch (error) {
-                console.error('Error marking messages as read:', error)
             }
         })
 

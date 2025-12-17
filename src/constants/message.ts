@@ -97,7 +97,26 @@ export const USERS_MESSAGES = {
   CITY_INVALID: 'City is invalid',
   IS_DEFAULT_INVALID: 'Is default must be boolean',
   LISENSE_NUMBER_MUST_BE_STRING: 'License number must be a string',
-  LISENSE_NUMBER_LENGTH_INVALID: 'License number must be between 1 and 50 characters'
+  LISENSE_NUMBER_LENGTH_INVALID: 'License number must be between 1 and 50 characters',
+  UNAUTHENTICATED: 'Unauthenticated',
+  GET_WISHLIST_SUCCESS: 'Get wishlist successfully',
+  ADD_TO_WISHLIST_SUCCESS: 'Added to wishlist successfully',
+  REMOVE_FROM_WISHLIST_SUCCESS: 'Removed from wishlist successfully',
+  ADMIN_REQUIRED: 'Admin role required',
+  PHARMACIST_REQUIRED: 'Pharmacist role required',
+  ADMIN_OR_PHARMACIST_REQUIRED: 'Admin or Pharmacist role required'
+} as const
+
+export const ADDRESS_MESSAGES = {
+  VALIDATION_ERROR: 'Validation error',
+  MISSING_REQUIRED_FIELDS: 'Missing required fields',
+  MAX_ADDRESSES_REACHED: 'Maximum 5 addresses allowed',
+  ADDRESS_NOT_FOUND: 'Address not found',
+  ADD_ADDRESS_SUCCESS: 'Address added successfully',
+  UPDATE_ADDRESS_SUCCESS: 'Address updated successfully',
+  DELETE_ADDRESS_SUCCESS: 'Address deleted successfully',
+  SET_DEFAULT_ADDRESS_SUCCESS: 'Default address set successfully',
+  GET_ADDRESSES_SUCCESS: 'Get addresses successfully'
 } as const
 
 export const CATEGORIES_MESSAGES = {
@@ -347,7 +366,14 @@ export const ORDERS_MESSAGES = {
   // Error Messages
   CREATE_ORDER_FAILED: 'Failed to create order',
   UPDATE_ORDER_FAILED: 'Failed to update order',
-  CANCEL_ORDER_FAILED: 'Failed to cancel order'
+  CANCEL_ORDER_FAILED: 'Failed to cancel order',
+  GET_ORDER_STATS_SUCCESS: 'Get order statistics successfully',
+  GET_PAYMENT_URL_SUCCESS: 'Get payment URL successfully',
+  PAYOS_CREATE_URL_FAILED: 'Failed to create PayOS payment URL',
+  MOMO_CREATE_URL_FAILED: 'Failed to create Momo payment URL',
+  INVALID_WEBHOOK_DATA: 'Invalid Webhook Data',
+  INVALID_SIGNATURE: 'Invalid signature',
+  PAYMENT_ORDER_INFO_PREFIX: 'Thanh toan don hang #'
 } as const
 
 export const PRESCRIPTIONS_MESSAGES = {
@@ -366,7 +392,9 @@ export const PRESCRIPTIONS_MESSAGES = {
   UNAUTHORIZED_TO_VERIFY: 'Unauthorized to verify prescription',
   INVALID_MEDICATION_DATA: 'Invalid medication data',
   MISSING_DOCTOR_INFO: 'Missing doctor information',
-  INVALID_PRESCRIPTION_DATE: 'Invalid prescription date'
+  INVALID_PRESCRIPTION_DATE: 'Invalid prescription date',
+  GET_PRESCRIPTION_STATS_SUCCESS: 'Get prescription statistics successfully',
+  ACCESS_DENIED: 'Access denied'
 } as const
 
 export const PHARMACIST_MESSAGES = {
@@ -418,7 +446,11 @@ export const PHARMACIST_MESSAGES = {
   OLD_PASSWORD_INCORRECT: 'Old password is incorrect',
   OLD_PASSWORD_IS_REQUIRED: 'Old password is required',
   NEW_PASSWORD_IS_REQUIRED: 'New password is required',
-  PASSWORD_MUST_BE_STRONG: 'Password must be at least 6 characters long'
+  PASSWORD_MUST_BE_STRONG: 'Password must be at least 6 characters long',
+  LICENSE_REQUIRED: 'Pharmacist does not have a license',
+  PHARMACIST_NOT_ONLINE: 'Pharmacist is currently offline',
+  CHECK_LICENSE_FAILED: 'Failed to check pharmacist license',
+  ONLY_PHARMACIST_ACCESS: 'Only pharmacists can access this feature'
 } as const
 
 export const CHATS_MESSAGES = {
@@ -456,4 +488,64 @@ export const CHATS_MESSAGES = {
   PHARMACIST_NOT_FOUND: 'Pharmacist not found',
   CUSTOMER_NOT_FOUND: 'Customer not found',
   NO_PHARMACIST_AVAILABLE: 'No pharmacist available at the moment'
+} as const
+
+export const ADMIN_MESSAGES = {
+  GET_DASHBOARD_STATS_SUCCESS: 'Get dashboard statistics successfully',
+  GET_RECENT_ACTIVITIES_SUCCESS: 'Get recent activities successfully',
+  GET_SYSTEM_HEALTH_SUCCESS: 'Get system health successfully',
+  GET_ALL_USERS_SUCCESS: 'Get all users successfully',
+  GET_USER_STATS_SUCCESS: 'Get user statistics successfully',
+  GET_PHARMACIST_STATS_SUCCESS: 'Get pharmacist statistics successfully',
+  CREATE_USER_SUCCESS: 'User created successfully',
+  UPDATE_USER_SUCCESS: 'User updated successfully',
+  DELETE_USER_SUCCESS: 'User deleted successfully',
+  RESET_USER_PASSWORD_SUCCESS: 'User password reset successfully',
+  VERIFY_USER_EMAIL_SUCCESS: 'User email verified successfully',
+  GET_REPORTS_ANALYTICS_SUCCESS: 'Get reports analytics successfully',
+  GET_REVENUE_ANALYTICS_SUCCESS: 'Get revenue analytics successfully',
+  GET_PRODUCT_ANALYTICS_SUCCESS: 'Get product analytics successfully',
+  GET_CUSTOMER_ANALYTICS_SUCCESS: 'Get customer analytics successfully'
+} as const
+
+export const REVIEWS_MESSAGES = {
+  // Error Messages
+  ORDER_NOT_FOUND_OR_NOT_YOURS: 'Order not found or does not belong to you',
+  ORDER_NOT_DELIVERED: 'You can only review products from delivered orders',
+  PRODUCT_NOT_IN_ORDER: 'Product not found in this order',
+  REVIEW_ALREADY_EXISTS: 'You have already reviewed this product. You can edit your existing review instead.',
+  REVIEW_NOT_FOUND: 'Review not found',
+  NOT_YOUR_REVIEW: 'You can only edit your own reviews',
+  RATING_INVALID: 'Rating must be between 1 and 5',
+  TITLE_TOO_LONG: 'Title must not exceed 200 characters',
+  COMMENT_TOO_SHORT: 'Comment must be at least 10 characters',
+  COMMENT_TOO_LONG: 'Comment must not exceed 2000 characters',
+  TOO_MANY_IMAGES: 'Maximum 5 images allowed',
+  ALREADY_VOTED_HELPFUL: 'You have already marked this review as helpful',
+  REJECTION_REASON_REQUIRED: 'Rejection reason is required',
+  RATING_REQUIRED: 'Rating is required',
+  TITLE_MUST_BE_STRING: 'Title must be a string',
+  COMMENT_REQUIRED: 'Review comment is required',
+  COMMENT_MUST_BE_STRING: 'Comment must be a string',
+  COMMENT_LENGTH_INVALID: 'Comment must be between 10 and 2000 characters',
+  IMAGES_MUST_BE_ARRAY: 'Images must be an array',
+  REVIEW_ID_REQUIRED: 'Review ID is required',
+  REVIEW_ID_INVALID: 'Invalid review ID format',
+  STATUS_REQUIRED: 'Status is required',
+  STATUS_INVALID: 'Status must be either approved or rejected',
+  NOTES_MUST_BE_STRING: 'Notes must be a string',
+  SORT_BY_INVALID: 'Sort by must be one of: newest, oldest, highest, lowest, helpful',
+
+  // Success
+  CREATE_REVIEW_SUCCESS: 'Review created successfully. It will be visible after moderation.',
+  GET_PRODUCT_REVIEWS_SUCCESS: 'Get product reviews successfully',
+  GET_PRODUCT_REVIEW_STATS_SUCCESS: 'Get product review stats successfully',
+  GET_USER_REVIEWS_SUCCESS: 'Get user reviews successfully',
+  UPDATE_REVIEW_SUCCESS: 'Review updated successfully. It will be re-moderated if content changed.',
+  DELETE_REVIEW_SUCCESS: 'Review deleted successfully',
+  MARK_REVIEW_HELPFUL_SUCCESS: 'Review marked as helpful',
+  GET_ADMIN_REVIEWS_SUCCESS: 'Get admin reviews successfully',
+  GET_ADMIN_REVIEW_STATS_SUCCESS: 'Get admin review stats successfully',
+  MODERATE_REVIEW_SUCCESS: 'Review moderated successfully',
+  BULK_MODERATE_SUCCESS: 'Bulk moderate reviews completed successfully'
 } as const

@@ -37,7 +37,7 @@ class OrderService {
       // This logic depends on how we store prescriptions. 
       // For now, we assume frontend handles the upload and we might check a flag or recent upload here.
       // If we skip this check for now:
-      // console.log('Order contains prescription items')
+
     }
 
     const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
@@ -69,21 +69,17 @@ class OrderService {
     try {
       await emailService.sendOrderConfirmationEmail(shippingAddress.email, { ...order, _id: result.insertedId })
     } catch (error) {
-      console.error('Failed to send order confirmation email:', error)
+
     }
 
     // Generate Payment URL if applicable
     let paymentUrl = undefined
     if (paymentMethod !== PaymentMethod.COD && req) {
       try {
-        console.log('Generating payment URL for method:', paymentMethod)
         paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
-        console.log('Generated payment URL:', paymentUrl)
       } catch (error) {
-        console.error('Failed to generate payment URL:', error)
+        // error suppressed
       }
-    } else {
-      console.log('Skipping payment URL generation. Method:', paymentMethod, 'Req:', !!req)
     }
 
     return {
@@ -105,14 +101,14 @@ class OrderService {
 
     if (order.paymentStatus === 'paid') {
       throw new ErrorWithStatus({
-        message: 'Order is already paid',
+        message: ORDERS_MESSAGES.INVALID_PAYMENT_STATUS,
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
 
     if (order.paymentMethod === PaymentMethod.COD) {
       throw new ErrorWithStatus({
-        message: 'Cannot generate payment URL for COD order',
+        message: ORDERS_MESSAGES.INVALID_PAYMENT_METHOD,
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
@@ -279,6 +275,7 @@ class OrderService {
     }
   }
 }
+
 
 const orderService = new OrderService()
 export default orderService
