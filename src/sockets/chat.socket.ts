@@ -62,12 +62,24 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
         // Join user's personal room
         if (socket.userId) {
-            socket.join(`user:${socket.userId}`)
+            const userIdStr = socket.userId.toString()
+            socket.join(`user:${userIdStr}`)
+            console.log(`User ${userIdStr} joined personal room: user:${userIdStr}`)
         }
+
+        // Manual join personal room (Backup)
+        socket.on('user:join', () => {
+            if (socket.userId) {
+                const userIdStr = socket.userId.toString()
+                socket.join(`user:${userIdStr}`)
+                console.log(`[Manual] User ${userIdStr} joined personal room`)
+            }
+        })
 
         // Join conversation room
         socket.on('conversation:join', async (conversationId: string) => {
             socket.join(`conversation:${conversationId}`)
+            console.log(`Socket ${socket.id} joined conversation:${conversationId}`)
         })
 
         // Leave conversation room
@@ -83,19 +95,25 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     return
                 }
 
+                console.log(`User ${socket.userId} sending message to convo ${data.conversationId}`)
+
                 const message = await chatsService.sendMessage(socket.userId, socket.userRole, data)
 
-                // Emit to conversation room (anyone who joined this conversation)
+                // 0. Emit back to sender directly (Fail-safe for sender visibility)
+                socket.emit('message:new', message)
+
+                // 1. Emit to conversation room (Standard way)
                 io.to(`conversation:${message.conversationId}`).emit('message:new', message)
 
-                // For shared inbox: if customer sends, notify ALL pharmacists
-                // If pharmacist sends, notify the customer
+                // 2. Extra Redundancy: Emit strictly to receiver's personal room
                 if (socket.userRole === 'customer') {
-                    // Notify all pharmacists (broadcast to all users with role pharmacist)
+                    // Sender is Customer => Receiver is Pharmacists
+                    // Broadcast to all connected pharmacists
                     const sockets = await io.fetchSockets()
                     sockets.forEach(s => {
                         const authSocket = s as unknown as AuthenticatedSocket
                         if (authSocket.userRole === 'pharmacist') {
+                            s.emit('message:new', message)
                             s.emit('notification:new-message', {
                                 conversationId: message.conversationId,
                                 message
@@ -103,10 +121,17 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         }
                     })
                 } else {
-                    // Pharmacist sends - notify customer
+                    // Sender is Pharmacist => Receiver is Customer
                     const conversation = await chatsService.getConversationById(message.conversationId.toString())
                     if (conversation) {
-                        io.to(`user:${conversation.customerId.toString()}`).emit('notification:new-message', {
+                        const customerIdStr = conversation.customerId.toString()
+                        console.log(`Emitting to customer room: user:${customerIdStr}`)
+
+                        // Emit to specific user room
+                        io.to(`user:${customerIdStr}`).emit('message:new', message)
+
+                        // For redundant safety, emit to notification event too
+                        io.to(`user:${customerIdStr}`).emit('notification:new-message', {
                             conversationId: message.conversationId,
                             message
                         })

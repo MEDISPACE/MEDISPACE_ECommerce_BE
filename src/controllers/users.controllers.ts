@@ -52,7 +52,7 @@ export const loginController = async (req: Request<ParamsDictionary, unknown, Lo
   res.cookie('refreshToken', result.refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
     maxAge: refreshTokenExpiresIn
   })
 
@@ -73,7 +73,7 @@ export const oauthController = async (req: Request, res: Response) => {
   res.cookie('refreshToken', result.refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
     maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
   })
 
@@ -90,7 +90,7 @@ export const logoutController = async (req: Request<ParamsDictionary, unknown, L
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
+    sameSite: 'lax' // Must match the sameSite setting used when setting the cookie
   })
 
   return res.json(result)
@@ -149,7 +149,7 @@ export const refreshTokenController = async (
   res.cookie('refreshToken', result.refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
     maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days default
   })
 
