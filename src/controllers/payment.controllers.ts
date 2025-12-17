@@ -7,12 +7,12 @@ import { ObjectId } from 'mongodb'
 // Momo Return
 export const momoReturnController = async (req: Request, res: Response) => {
     try {
-        console.log('Momo Return Params:', req.query)
+
         const result = await paymentService.verifyReturn(PaymentMethod.Momo, req.query)
         const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${result.orderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
         return res.redirect(redirectUrl)
     } catch (error) {
-        console.error('Momo Return Error:', error)
+
         return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
     }
 }
@@ -20,12 +20,12 @@ export const momoReturnController = async (req: Request, res: Response) => {
 // VNPay Return
 export const vnpayReturnController = async (req: Request, res: Response) => {
     try {
-        console.log('VNPay Return Params:', req.query)
+
         const result = await paymentService.verifyReturn(PaymentMethod.VNPay, req.query)
         const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${result.orderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
         return res.redirect(redirectUrl)
     } catch (error) {
-        console.error('VNPay Return Error:', error)
+
         return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
     }
 }
@@ -33,7 +33,7 @@ export const vnpayReturnController = async (req: Request, res: Response) => {
 // Momo IPN
 export const momoIpnController = async (req: Request, res: Response) => {
     try {
-        console.log('Momo IPN Body:', req.body)
+
         const result = await paymentService.verifyIpn(PaymentMethod.Momo, req.body)
 
         if (result.isSuccess) {
@@ -42,7 +42,7 @@ export const momoIpnController = async (req: Request, res: Response) => {
         }
         return res.status(400).json({ message: 'Signature verification failed' })
     } catch (error) {
-        console.error('Momo IPN Error:', error)
+
         return res.status(500).json({ message: 'Internal Server Error' })
     }
 }
@@ -50,7 +50,7 @@ export const momoIpnController = async (req: Request, res: Response) => {
 // VNPay IPN
 export const vnpayIpnController = async (req: Request, res: Response) => {
     try {
-        console.log('VNPay IPN Params:', req.query)
+
         const result = await paymentService.verifyIpn(PaymentMethod.VNPay, req.query)
 
         if (result.isSuccess) {
@@ -59,7 +59,7 @@ export const vnpayIpnController = async (req: Request, res: Response) => {
         }
         return res.status(200).json({ RspCode: '97', Message: 'Fail checksum' })
     } catch (error) {
-        console.error('VNPay IPN Error:', error)
+
         return res.status(200).json({ RspCode: '99', Message: 'Unknown error' })
     }
 }
@@ -67,7 +67,7 @@ export const vnpayIpnController = async (req: Request, res: Response) => {
 // PayOS IPN
 export const payOSIpnController = async (req: Request, res: Response) => {
     try {
-        console.log('PayOS IPN Body:', req.body)
+
         const result = await paymentService.verifyIpn(PaymentMethod.PayOS, req.body)
 
         if (result.isSuccess && result.transactionId) {
@@ -79,7 +79,7 @@ export const payOSIpnController = async (req: Request, res: Response) => {
         }
         return res.json({ success: false })
     } catch (error) {
-        console.error('PayOS IPN Error:', error)
+
         return res.json({ success: false })
     }
 }

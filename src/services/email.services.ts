@@ -29,10 +29,9 @@ class EmailService {
                 subject: subject,
                 html: fullHtml,
             })
-            console.log(`Email sent to ${to}: ${info.messageId}`)
             return info
         } catch (error) {
-            console.error(`Error sending email to ${to}:`, error)
+
             // Log error but don't throw to prevent blocking the main flow
         }
     }

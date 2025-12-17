@@ -6,6 +6,7 @@ import chatsService from '~/services/chats.services'
 import databaseService from '~/services/database.services'
 import { ObjectId } from 'mongodb'
 import { config } from 'dotenv'
+import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
 
 config()
 
@@ -42,8 +43,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
             next()
         } catch (error) {
-            console.error('❌ Socket auth error:', error)
-            next(new Error('Authentication error'))
+            next(new Error(USERS_MESSAGES.UNAUTHENTICATED))
         }
     })
 
@@ -64,7 +64,6 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         if (socket.userId) {
             const userIdStr = socket.userId.toString()
             socket.join(`user:${userIdStr}`)
-            console.log(`User ${userIdStr} joined personal room: user:${userIdStr}`)
         }
 
         // Manual join personal room (Backup)
@@ -72,14 +71,12 @@ export const initChatSocket = (httpServer: HTTPServer) => {
             if (socket.userId) {
                 const userIdStr = socket.userId.toString()
                 socket.join(`user:${userIdStr}`)
-                console.log(`[Manual] User ${userIdStr} joined personal room`)
             }
         })
 
         // Join conversation room
         socket.on('conversation:join', async (conversationId: string) => {
             socket.join(`conversation:${conversationId}`)
-            console.log(`Socket ${socket.id} joined conversation:${conversationId}`)
         })
 
         // Leave conversation room
@@ -91,11 +88,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         socket.on('message:send', async (data: { conversationId?: string; pharmacistId?: string; content: string; type?: 'text' | 'image'; imageUrl?: string }) => {
             try {
                 if (!socket.userId || !socket.userRole) {
-                    socket.emit('error', { message: 'Not authenticated' })
+                    socket.emit('error', { message: USERS_MESSAGES.UNAUTHENTICATED })
                     return
                 }
-
-                console.log(`User ${socket.userId} sending message to convo ${data.conversationId}`)
 
                 const message = await chatsService.sendMessage(socket.userId, socket.userRole, data)
 
@@ -125,7 +120,6 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     const conversation = await chatsService.getConversationById(message.conversationId.toString())
                     if (conversation) {
                         const customerIdStr = conversation.customerId.toString()
-                        console.log(`Emitting to customer room: user:${customerIdStr}`)
 
                         // Emit to specific user room
                         io.to(`user:${customerIdStr}`).emit('message:new', message)
@@ -138,8 +132,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     }
                 }
             } catch (error) {
-                console.error('Error sending message:', error)
-                socket.emit('error', { message: 'Failed to send message' })
+                socket.emit('error', { message: CHATS_MESSAGES.SEND_MESSAGE_FAILED })
             }
         })
 
@@ -173,7 +166,6 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     userId: socket.userId
                 })
             } catch (error) {
-                console.error('Error marking messages as read:', error)
             }
         })
 

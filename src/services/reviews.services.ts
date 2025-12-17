@@ -4,6 +4,7 @@ import databaseService from './database.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ReviewStatus } from '~/constants/enum'
+import { REVIEWS_MESSAGES } from '~/constants/message'
 
 /**
  * Review Service for Medical E-commerce
@@ -40,7 +41,6 @@ class ReviewService {
         // Rule 1: Verified Purchase (HIGHEST PRIORITY)
         // If user has verified purchase, proceed to other checks
         if (!isVerifiedPurchase) {
-            console.log('⏳ Pending: Not a verified purchase')
             return false
         }
 
@@ -50,7 +50,6 @@ class ReviewService {
         const rejectedCount = userReviews.filter(r => r.status === ReviewStatus.Rejected).length
 
         if (approvedCount >= 3 && rejectedCount === 0) {
-            console.log('✅ Auto-approve: Trusted user (3+ approved, 0 rejected)')
             return true
         }
 
@@ -69,7 +68,6 @@ class ReviewService {
         const hasSpam = spamPatterns.some(pattern => pattern.test(textToCheck))
 
         if (hasSpam) {
-            console.log('⏳ Pending: Spam pattern detected')
             return false
         }
 
@@ -93,35 +91,28 @@ class ReviewService {
         const hasSensitive = sensitiveKeywords.some(keyword => lowerText.includes(keyword))
 
         if (hasSensitive) {
-            console.log('⏳ Pending: Sensitive medical content detected')
             return false
         }
 
-        // Rule 5: Content Length Check
         if (reviewData.comment.length < 10) {
-            console.log('⏳ Pending: Comment too short (<10 chars)')
             return false
         }
 
         if (reviewData.comment.length > 2000) {
-            console.log('⏳ Pending: Comment too long (>2000 chars)')
             return false
         }
 
         // Rule 6: Extreme Ratings with Short Comments (potential fake)
         if ((reviewData.rating === 1 || reviewData.rating === 5) && reviewData.comment.length < 50) {
-            console.log('⏳ Pending: Extreme rating with short comment')
             return false
         }
 
         // Rule 7: Too Many Images (potential spam)
         if (reviewData.images && reviewData.images.length > 3) {
-            console.log('⏳ Pending: Too many images (>3)')
             return false
         }
 
         // Default: Auto-approve if passed all checks
-        console.log('✅ Auto-approve: Passed all safety checks')
         return true
     }
 
@@ -153,7 +144,7 @@ class ReviewService {
 
         if (!order) {
             throw new ErrorWithStatus({
-                message: 'Order not found or does not belong to you',
+                message: REVIEWS_MESSAGES.ORDER_NOT_FOUND_OR_NOT_YOURS,
                 status: HTTP_STATUS.NOT_FOUND
             })
         }
@@ -161,7 +152,7 @@ class ReviewService {
         // 2. Verify order is delivered (only delivered orders can be reviewed)
         if (order.orderStatus !== 'delivered') {
             throw new ErrorWithStatus({
-                message: 'You can only review products from delivered orders',
+                message: REVIEWS_MESSAGES.ORDER_NOT_DELIVERED,
                 status: HTTP_STATUS.BAD_REQUEST
             })
         }
@@ -171,7 +162,7 @@ class ReviewService {
 
         if (!productInOrder) {
             throw new ErrorWithStatus({
-                message: 'Product not found in this order',
+                message: REVIEWS_MESSAGES.PRODUCT_NOT_IN_ORDER,
                 status: HTTP_STATUS.BAD_REQUEST
             })
         }
@@ -184,7 +175,7 @@ class ReviewService {
 
         if (existingReview) {
             throw new ErrorWithStatus({
-                message: 'You have already reviewed this product. You can edit your existing review instead.',
+                message: REVIEWS_MESSAGES.REVIEW_ALREADY_EXISTS,
                 status: HTTP_STATUS.CONFLICT
             })
         }
@@ -402,7 +393,7 @@ class ReviewService {
 
         if (!review) {
             throw new ErrorWithStatus({
-                message: 'Review not found',
+                message: REVIEWS_MESSAGES.REVIEW_NOT_FOUND,
                 status: HTTP_STATUS.NOT_FOUND
             })
         }
@@ -410,7 +401,7 @@ class ReviewService {
         // 2. Verify ownership
         if (!review.userId.equals(userId)) {
             throw new ErrorWithStatus({
-                message: 'You can only edit your own reviews',
+                message: REVIEWS_MESSAGES.NOT_YOUR_REVIEW,
                 status: HTTP_STATUS.FORBIDDEN
             })
         }
@@ -423,7 +414,7 @@ class ReviewService {
         if (data.rating !== undefined) {
             if (data.rating < 1 || data.rating > 5) {
                 throw new ErrorWithStatus({
-                    message: 'Rating must be between 1 and 5',
+                    message: REVIEWS_MESSAGES.RATING_INVALID,
                     status: HTTP_STATUS.BAD_REQUEST
                 })
             }
@@ -433,7 +424,7 @@ class ReviewService {
         if (data.title !== undefined) {
             if (data.title.length > 200) {
                 throw new ErrorWithStatus({
-                    message: 'Title must not exceed 200 characters',
+                    message: REVIEWS_MESSAGES.TITLE_TOO_LONG,
                     status: HTTP_STATUS.BAD_REQUEST
                 })
             }
@@ -443,13 +434,13 @@ class ReviewService {
         if (data.comment !== undefined) {
             if (data.comment.trim().length < 10) {
                 throw new ErrorWithStatus({
-                    message: 'Comment must be at least 10 characters',
+                    message: REVIEWS_MESSAGES.COMMENT_TOO_SHORT,
                     status: HTTP_STATUS.BAD_REQUEST
                 })
             }
             if (data.comment.length > 2000) {
                 throw new ErrorWithStatus({
-                    message: 'Comment must not exceed 2000 characters',
+                    message: REVIEWS_MESSAGES.COMMENT_TOO_LONG,
                     status: HTTP_STATUS.BAD_REQUEST
                 })
             }
@@ -459,7 +450,7 @@ class ReviewService {
         if (data.images !== undefined) {
             if (data.images.length > 5) {
                 throw new ErrorWithStatus({
-                    message: 'Maximum 5 images allowed',
+                    message: REVIEWS_MESSAGES.TOO_MANY_IMAGES,
                     status: HTTP_STATUS.BAD_REQUEST
                 })
             }
@@ -495,7 +486,7 @@ class ReviewService {
 
         if (!review) {
             throw new ErrorWithStatus({
-                message: 'Review not found',
+                message: REVIEWS_MESSAGES.REVIEW_NOT_FOUND,
                 status: HTTP_STATUS.NOT_FOUND
             })
         }
@@ -503,7 +494,7 @@ class ReviewService {
         // 2. Verify ownership
         if (!review.userId.equals(userId)) {
             throw new ErrorWithStatus({
-                message: 'You can only delete your own reviews',
+                message: REVIEWS_MESSAGES.NOT_YOUR_REVIEW,
                 status: HTTP_STATUS.FORBIDDEN
             })
         }
@@ -514,7 +505,7 @@ class ReviewService {
         // 4. Update product rating
         await this.updateProductRating(review.productId)
 
-        return { message: 'Review deleted successfully' }
+        return { message: REVIEWS_MESSAGES.DELETE_REVIEW_SUCCESS }
     }
 
     /**
@@ -529,7 +520,7 @@ class ReviewService {
 
         if (!review) {
             throw new ErrorWithStatus({
-                message: 'Review not found',
+                message: REVIEWS_MESSAGES.REVIEW_NOT_FOUND,
                 status: HTTP_STATUS.NOT_FOUND
             })
         }
@@ -539,7 +530,7 @@ class ReviewService {
 
         if (alreadyVoted) {
             throw new ErrorWithStatus({
-                message: 'You have already marked this review as helpful',
+                message: REVIEWS_MESSAGES.ALREADY_VOTED_HELPFUL,
                 status: HTTP_STATUS.CONFLICT
             })
         }
@@ -572,7 +563,7 @@ class ReviewService {
 
         if (!review) {
             throw new ErrorWithStatus({
-                message: 'Review not found',
+                message: REVIEWS_MESSAGES.REVIEW_NOT_FOUND,
                 status: HTTP_STATUS.NOT_FOUND
             })
         }
@@ -580,7 +571,7 @@ class ReviewService {
         // Rejection requires notes
         if (status === 'rejected' && !notes) {
             throw new ErrorWithStatus({
-                message: 'Rejection reason is required',
+                message: REVIEWS_MESSAGES.REJECTION_REASON_REQUIRED,
                 status: HTTP_STATUS.BAD_REQUEST
             })
         }
