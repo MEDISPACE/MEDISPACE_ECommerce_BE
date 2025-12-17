@@ -6,7 +6,7 @@ import { TokenType, UserRole, UserStatus } from '~/constants/enum'
 import { signToken } from '~/utils/jwt'
 import RefreshToken from '~/models/schemas/RefreshToken.schema'
 import { ObjectId } from 'mongodb'
-import { USERS_MESSAGES } from '~/constants/message'
+import { USERS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import axios from 'axios'
@@ -259,7 +259,7 @@ class UsersService {
   async verifyEmail(userId: string) {
     // Fetch user to get role
     const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
-    if (!user) throw new ErrorWithStatus({ message: 'User not found', status: HTTP_STATUS.NOT_FOUND })
+    if (!user) throw new ErrorWithStatus({ message: USERS_MESSAGES.USER_NOT_FOUND, status: HTTP_STATUS.NOT_FOUND })
 
     const [token] = await Promise.all([
       this.signAccessAndRefreshToken({ userId, verify: UserStatus.Verified, role: user.role }),
@@ -441,7 +441,7 @@ class UsersService {
     const product = await databaseService.products.findOne({ _id: new ObjectId(productId) })
     if (!product) {
       throw new ErrorWithStatus({
-        message: 'Product not found',
+        message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
       })
     }
@@ -451,7 +451,7 @@ class UsersService {
       { $addToSet: { wishlist: new ObjectId(productId) } }
     )
 
-    return { message: 'Added to wishlist successfully' }
+    return { message: USERS_MESSAGES.ADD_TO_WISHLIST_SUCCESS }
   }
 
   async removeFromWishlist(userId: string, productId: string) {
@@ -460,7 +460,7 @@ class UsersService {
       { $pull: { wishlist: new ObjectId(productId) } }
     )
 
-    return { message: 'Removed from wishlist successfully' }
+    return { message: USERS_MESSAGES.REMOVE_FROM_WISHLIST_SUCCESS }
   }
 }
 const usersService = new UsersService()
