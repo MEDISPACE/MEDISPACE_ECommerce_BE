@@ -205,7 +205,13 @@ class CategoriesService {
 
   // Lấy chi tiết category
   async getCategoryById(categoryId: string) {
-    const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryId) })
+    // Support both string and ObjectId _id (imported data may have string IDs)
+    const category = await databaseService.categories.findOne({
+      $or: [
+        { _id: categoryId as unknown as ObjectId }, // String ID
+        { _id: new ObjectId(categoryId) } // ObjectId
+      ]
+    })
     if (!category) {
       throw new ErrorWithStatus({
         message: CATEGORIES_MESSAGES.CATEGORY_NOT_FOUND,
@@ -214,6 +220,7 @@ class CategoriesService {
     }
     return category
   }
+
 
   // Lấy chi tiết category theo slug
   async getCategoryBySlug(slug: string) {

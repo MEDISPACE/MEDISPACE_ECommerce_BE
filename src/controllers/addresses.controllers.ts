@@ -3,7 +3,7 @@ import { ParamsDictionary } from 'express-serve-static-core'
 import { TokenPayload } from '~/models/requests/User.request'
 import { Address } from '~/models/requests/User.request'
 import usersService from '~/services/users.services'
-import { USERS_MESSAGES } from '~/constants/message'
+import { USERS_MESSAGES, ADDRESS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 
 export const getAddressesController = async (req: Request, res: Response) => {
@@ -11,7 +11,7 @@ export const getAddressesController = async (req: Request, res: Response) => {
   const user = await usersService.getMe(userId)
 
   return res.json({
-    message: USERS_MESSAGES.GET_ME_SUCCESS,
+    message: ADDRESS_MESSAGES.GET_ADDRESSES_SUCCESS,
     addresses: user.addresses || []
   })
 }
@@ -24,7 +24,7 @@ export const addAddressController = async (req: Request, res: Response) => {
   const { name, phone, province, district, ward, address, type } = addressData
   if (!name || !phone || !province || !district || !ward || !address || !type) {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      message: 'Missing required fields'
+      message: ADDRESS_MESSAGES.MISSING_REQUIRED_FIELDS
     })
   }
 
@@ -34,7 +34,7 @@ export const addAddressController = async (req: Request, res: Response) => {
   // Check limit (max 5 addresses)
   if (addresses.length >= 5) {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({
-      message: 'Maximum 5 addresses allowed'
+      message: ADDRESS_MESSAGES.MAX_ADDRESSES_REACHED
     })
   }
 
@@ -56,7 +56,7 @@ export const addAddressController = async (req: Request, res: Response) => {
   await usersService.updateMe(userId, { addresses: updatedAddresses })
 
   return res.status(HTTP_STATUS.CREATED).json({
-    message: 'Address added successfully',
+    message: ADDRESS_MESSAGES.ADD_ADDRESS_SUCCESS,
     address: newAddress
   })
 }
@@ -75,7 +75,7 @@ export const updateAddressController = async (
   const addressIndex = addresses.findIndex((addr) => addr.id === addressId)
   if (addressIndex === -1) {
     return res.status(HTTP_STATUS.NOT_FOUND).json({
-      message: 'Address not found'
+      message: ADDRESS_MESSAGES.ADDRESS_NOT_FOUND
     })
   }
 
@@ -95,7 +95,7 @@ export const updateAddressController = async (
   await usersService.updateMe(userId, { addresses: updatedAddresses })
 
   return res.json({
-    message: 'Address updated successfully',
+    message: ADDRESS_MESSAGES.UPDATE_ADDRESS_SUCCESS,
     address: updatedAddresses[addressIndex]
   })
 }
@@ -111,7 +111,7 @@ export const deleteAddressController = async (req: Request<ParamsDictionary>, re
 
   if (filteredAddresses.length === addresses.length) {
     return res.status(HTTP_STATUS.NOT_FOUND).json({
-      message: 'Address not found'
+      message: ADDRESS_MESSAGES.ADDRESS_NOT_FOUND
     })
   }
 
@@ -119,7 +119,7 @@ export const deleteAddressController = async (req: Request<ParamsDictionary>, re
   await usersService.updateMe(userId, { addresses: filteredAddresses })
 
   return res.json({
-    message: 'Address deleted successfully'
+    message: ADDRESS_MESSAGES.DELETE_ADDRESS_SUCCESS
   })
 }
 
@@ -138,7 +138,7 @@ export const setDefaultAddressController = async (req: Request<ParamsDictionary>
   const addressExists = updatedAddresses.some((addr) => addr.id === addressId && addr.isDefault)
   if (!addressExists) {
     return res.status(HTTP_STATUS.NOT_FOUND).json({
-      message: 'Address not found'
+      message: ADDRESS_MESSAGES.ADDRESS_NOT_FOUND
     })
   }
 
@@ -146,6 +146,6 @@ export const setDefaultAddressController = async (req: Request<ParamsDictionary>
   await usersService.updateMe(userId, { addresses: updatedAddresses })
 
   return res.json({
-    message: 'Default address set successfully'
+    message: ADDRESS_MESSAGES.SET_DEFAULT_ADDRESS_SUCCESS
   })
 }

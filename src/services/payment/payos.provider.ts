@@ -2,6 +2,7 @@ const { PayOS } = require('@payos/node')
 import { config } from 'dotenv'
 import Order from '~/models/schemas/Order.schema'
 import { PaymentProvider, PaymentResult } from './payment.interface'
+import { ORDERS_MESSAGES } from '~/constants/message'
 
 config()
 
@@ -54,12 +55,10 @@ export class PayOSProvider implements PaymentProvider {
                     const link = await this.payOS.paymentRequests.create(paymentData)
                     return link.checkoutUrl
                 } catch (innerError) {
-                    console.error('PayOS create payment inner error:', innerError)
                     throw innerError
                 }
             }
-            console.error('PayOS create payment error:', error)
-            throw new Error('Failed to create PayOS payment URL')
+            throw new Error(ORDERS_MESSAGES.PAYOS_CREATE_URL_FAILED)
         }
     }
 
@@ -102,12 +101,11 @@ export class PayOSProvider implements PaymentProvider {
                 message: webhookData.desc
             }
         } catch (error) {
-            console.error('PayOS verify IPN error:', error)
             return {
                 isSuccess: false,
                 orderId: '',
                 amount: 0,
-                message: 'Invalid Webhook Data'
+                message: ORDERS_MESSAGES.INVALID_WEBHOOK_DATA
             }
         }
     }

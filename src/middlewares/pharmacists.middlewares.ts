@@ -8,7 +8,7 @@ import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
 import { checkSchema, ParamSchema } from 'express-validator'
 import { validate } from '~/utils/validation'
-import { USERS_MESSAGES } from '~/constants/message'
+import { USERS_MESSAGES, PHARMACIST_MESSAGES } from '~/constants/message'
 import { hashPassword } from '~/utils/crypto'
 
 // Extend Request interface để thêm pharmacist property
@@ -28,23 +28,14 @@ declare global {
 export const authenticatePharmacist = (req: Request, res: Response, next: NextFunction) => {
   const { role } = req.decoded_authorization as TokenPayload
 
-  // Debug log
-  // console.log('🔍 authenticatePharmacist - role from token:', role)
-  // console.log('🔍 UserRole.Pharmacist:', UserRole.Pharmacist)
-  // console.log('🔍 Comparison:', role === UserRole.Pharmacist)
-
-  // Kiểm tra role có phải Pharmacist không
   if (role !== UserRole.Pharmacist) {
-    // console.log('❌ Access denied - role mismatch')
     return next(
       new ErrorWithStatus({
-        message: 'Chỉ dược sĩ mới có quyền truy cập chức năng này',
+        message: PHARMACIST_MESSAGES.ONLY_PHARMACIST_ACCESS,
         status: HTTP_STATUS.FORBIDDEN
       })
     )
   }
-
-  // console.log('✅ Pharmacist authenticated successfully')
   next()
 }
 
@@ -90,7 +81,7 @@ export const updatePasswordValidator = validate(
               password: hashPassword(value)
             })
             if (!pharmacist) {
-              throw new Error('Mật khẩu hiện tại không đúng')
+              throw new Error(PHARMACIST_MESSAGES.OLD_PASSWORD_INCORRECT)
             }
             return true
           }
@@ -120,7 +111,7 @@ export const checkLicense = async (req: Request, res: Response, next: NextFuncti
     if (!pharmacist) {
       return next(
         new ErrorWithStatus({
-          message: 'Không tìm thấy thông tin dược sĩ',
+          message: PHARMACIST_MESSAGES.PHARMACIST_NOT_FOUND,
           status: HTTP_STATUS.NOT_FOUND
         })
       )
@@ -130,7 +121,7 @@ export const checkLicense = async (req: Request, res: Response, next: NextFuncti
     if (!pharmacist.lisenseNumber) {
       return next(
         new ErrorWithStatus({
-          message: 'Dược sĩ chưa có giấy phép hành nghề',
+          message: PHARMACIST_MESSAGES.LICENSE_REQUIRED,
           status: HTTP_STATUS.FORBIDDEN
         })
       )
@@ -140,7 +131,7 @@ export const checkLicense = async (req: Request, res: Response, next: NextFuncti
     if (pharmacist.isOnline === false) {
       return next(
         new ErrorWithStatus({
-          message: 'Dược sĩ hiện không online',
+          message: PHARMACIST_MESSAGES.PHARMACIST_NOT_ONLINE,
           status: HTTP_STATUS.FORBIDDEN
         })
       )
@@ -151,10 +142,9 @@ export const checkLicense = async (req: Request, res: Response, next: NextFuncti
 
     next()
   } catch (error) {
-    console.error('Error checking pharmacist license:', error)
     return next(
       new ErrorWithStatus({
-        message: 'Lỗi khi kiểm tra giấy phép dược sĩ',
+        message: PHARMACIST_MESSAGES.CHECK_LICENSE_FAILED,
         status: HTTP_STATUS.INTERNAL_SERVER_ERROR
       })
     )

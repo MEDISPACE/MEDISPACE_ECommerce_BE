@@ -359,26 +359,16 @@ const products = [
 // Function để seed data
 export async function seedProducts() {
     try {
-        console.log('🌱 Starting seed products...')
-
         // 1. Seed Categories
-        console.log('📁 Seeding categories...')
         await databaseService.categories.insertMany(categories)
-        console.log(`✅ Inserted ${categories.length} categories`)
 
         // 2. Seed Brands
-        console.log('🏢 Seeding brands...')
         await databaseService.brands.insertMany(brands)
-        console.log(`✅ Inserted ${brands.length} brands`)
 
         // 3. Seed Products
-        console.log('📦 Seeding products...')
         await databaseService.products.insertMany(products)
-        console.log(`✅ Inserted ${products.length} products`)
 
-        console.log('🎉 Seed completed successfully!')
     } catch (error) {
-        console.error('❌ Seed failed:', error)
         throw error
     }
 }

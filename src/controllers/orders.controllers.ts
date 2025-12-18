@@ -20,12 +20,9 @@ export const createOrderController = async (
   const userId = new ObjectId(req.decoded_authorization?.userId)
   const sessionId = req.cookies?.sessionId
 
-  console.log('createOrderController - userId:', userId)
 
-  console.log('createOrderController body:', req.body)
-  console.log('createOrderController user_id:', userId)
   const { shippingAddress, paymentMethod, notes } = req.body
-  const result = await orderService.createOrder(userId, shippingAddress, paymentMethod as PaymentMethod, notes, sessionId, req)
+  const result = await orderService.createOrder(userId, shippingAddress, paymentMethod as PaymentMethod, notes || '', sessionId, req)
 
   return res.json({
     message: ORDERS_MESSAGES.CREATE_ORDER_SUCCESS,
@@ -111,7 +108,7 @@ export const getOrderStatsController = async (req: Request, res: Response) => {
   const result = await orderService.getOrderStats()
 
   return res.status(HTTP_STATUS.OK).json({
-    message: 'Get order statistics successfully',
+    message: ORDERS_MESSAGES.GET_ORDER_STATS_SUCCESS,
     result
   })
 }
@@ -124,7 +121,7 @@ export const getPaymentUrlController = async (req: Request, res: Response) => {
   const result = await orderService.getPaymentUrl(orderId, userId, req)
 
   return res.status(HTTP_STATUS.OK).json({
-    message: 'Get payment URL successfully',
+    message: ORDERS_MESSAGES.GET_PAYMENT_URL_SUCCESS,
     result
   })
 }
