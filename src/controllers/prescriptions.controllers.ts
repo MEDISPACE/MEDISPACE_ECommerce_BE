@@ -31,7 +31,7 @@ export const getPrescriptionsController = async (
 ) => {
   try {
     const { userId } = req.decoded_authorization as TokenPayload
-    console.log('getPrescriptionsController - userId:', userId)
+
 
     const result = await prescriptionsService.getPrescriptions({
       ...req.query,
@@ -43,7 +43,7 @@ export const getPrescriptionsController = async (
       result
     })
   } catch (error) {
-    console.error('getPrescriptionsController error:', error)
+
     throw error
   }
 }
@@ -56,7 +56,7 @@ export const getPrescriptionByIdController = async (req: Request<{ prescriptionI
   // Check if prescription belongs to user
   if (result.customerId.toString() !== userId) {
     return res.status(HTTP_STATUS.FORBIDDEN).json({
-      message: 'Access denied'
+      message: PRESCRIPTIONS_MESSAGES.ACCESS_DENIED
     })
   }
 
@@ -88,21 +88,14 @@ export const verifyPrescriptionController = async (
   res: Response
 ) => {
   try {
-    console.log('🔵 verifyPrescriptionController called')
-    console.log('Prescription ID:', req.params.prescriptionId)
-    console.log('Request body:', req.body)
-    console.log('Pharmacist:', req.pharmacist)
-
     const pharmacist = req.pharmacist as { _id: ObjectId; firstName: string; lastName: string }
     const result = await prescriptionsService.verifyPrescription(req.params.prescriptionId, pharmacist._id, req.body)
-
-    console.log('✅ Verification successful:', result)
     return res.status(HTTP_STATUS.OK).json({
       message: PRESCRIPTIONS_MESSAGES.VERIFY_PRESCRIPTION_SUCCESS,
       result
     })
   } catch (error) {
-    console.error('❌ verifyPrescriptionController error:', error)
+
     throw error
   }
 }
@@ -110,15 +103,15 @@ export const verifyPrescriptionController = async (
 // Get prescription statistics - Pharmacist
 export const getPrescriptionStatsController = async (req: Request, res: Response) => {
   try {
-    console.log('🔵 getPrescriptionStatsController called')
+
     const result = await prescriptionsService.getPrescriptionStats()
 
     return res.status(HTTP_STATUS.OK).json({
-      message: 'Get prescription statistics successfully',
+      message: PRESCRIPTIONS_MESSAGES.GET_PRESCRIPTION_STATS_SUCCESS,
       result
     })
   } catch (error) {
-    console.error('❌ getPrescriptionStatsController error:', error)
+
     throw error
   }
 }

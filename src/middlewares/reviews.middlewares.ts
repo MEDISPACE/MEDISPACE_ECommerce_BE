@@ -4,6 +4,7 @@ import { validate } from '~/utils/validation'
 import databaseService from '~/services/database.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
+import { REVIEWS_MESSAGES, PRODUCTS_MESSAGES, ORDERS_MESSAGES, CARTS_MESSAGES } from '~/constants/message'
 
 /**
  * Validation middleware for review operations
@@ -16,18 +17,18 @@ export const createReviewValidator = validate(
       productId: {
         in: ['body'],
         notEmpty: {
-          errorMessage: 'Product ID is required'
+          errorMessage: CARTS_MESSAGES.PRODUCT_ID_IS_REQUIRED
         },
         custom: {
           options: async (value) => {
             if (!ObjectId.isValid(value)) {
-              throw new Error('Invalid product ID format')
+              throw new Error(PRODUCTS_MESSAGES.PRODUCT_ID_INVALID)
             }
 
             // Check if product exists
             const product = await databaseService.products.findOne({ _id: new ObjectId(value) })
             if (!product) {
-              throw new Error('Product not found')
+              throw new Error(PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND)
             }
 
             return true
@@ -37,12 +38,12 @@ export const createReviewValidator = validate(
       orderId: {
         in: ['body'],
         notEmpty: {
-          errorMessage: 'Order ID is required'
+          errorMessage: ORDERS_MESSAGES.ORDER_ID_REQUIRED
         },
         custom: {
           options: (value) => {
             if (!ObjectId.isValid(value)) {
-              throw new Error('Invalid order ID format')
+              throw new Error(ORDERS_MESSAGES.ORDER_ID_INVALID)
             }
             return true
           }
@@ -51,11 +52,11 @@ export const createReviewValidator = validate(
       rating: {
         in: ['body'],
         notEmpty: {
-          errorMessage: 'Rating is required'
+          errorMessage: REVIEWS_MESSAGES.RATING_REQUIRED
         },
         isInt: {
           options: { min: 1, max: 5 },
-          errorMessage: 'Rating must be an integer between 1 and 5'
+          errorMessage: REVIEWS_MESSAGES.RATING_INVALID
         },
         toInt: true
       },
@@ -63,25 +64,25 @@ export const createReviewValidator = validate(
         in: ['body'],
         optional: true,
         isString: {
-          errorMessage: 'Title must be a string'
+          errorMessage: REVIEWS_MESSAGES.TITLE_MUST_BE_STRING
         },
         isLength: {
           options: { max: 200 },
-          errorMessage: 'Title must not exceed 200 characters'
+          errorMessage: REVIEWS_MESSAGES.TITLE_TOO_LONG
         },
         trim: true
       },
       comment: {
         in: ['body'],
         notEmpty: {
-          errorMessage: 'Review comment is required'
+          errorMessage: REVIEWS_MESSAGES.COMMENT_REQUIRED
         },
         isString: {
-          errorMessage: 'Comment must be a string'
+          errorMessage: REVIEWS_MESSAGES.COMMENT_MUST_BE_STRING
         },
         isLength: {
           options: { min: 10, max: 2000 },
-          errorMessage: 'Comment must be between 10 and 2000 characters'
+          errorMessage: REVIEWS_MESSAGES.COMMENT_LENGTH_INVALID
         },
         trim: true
       },
@@ -89,12 +90,12 @@ export const createReviewValidator = validate(
         in: ['body'],
         optional: true,
         isArray: {
-          errorMessage: 'Images must be an array'
+          errorMessage: REVIEWS_MESSAGES.IMAGES_MUST_BE_ARRAY
         },
         custom: {
           options: (value) => {
             if (value && value.length > 5) {
-              throw new Error('Maximum 5 images allowed')
+              throw new Error(REVIEWS_MESSAGES.TOO_MANY_IMAGES)
             }
             return true
           }
@@ -112,18 +113,18 @@ export const updateReviewValidator = validate(
       reviewId: {
         in: ['params'],
         notEmpty: {
-          errorMessage: 'Review ID is required'
+          errorMessage: REVIEWS_MESSAGES.REVIEW_ID_REQUIRED
         },
         custom: {
           options: async (value) => {
             if (!ObjectId.isValid(value)) {
-              throw new Error('Invalid review ID format')
+              throw new Error(REVIEWS_MESSAGES.REVIEW_ID_INVALID)
             }
 
             // Check if review exists
             const review = await databaseService.reviews.findOne({ _id: new ObjectId(value) })
             if (!review) {
-              throw new Error('Review not found')
+              throw new Error(REVIEWS_MESSAGES.REVIEW_NOT_FOUND)
             }
 
             return true
@@ -135,7 +136,7 @@ export const updateReviewValidator = validate(
         optional: true,
         isInt: {
           options: { min: 1, max: 5 },
-          errorMessage: 'Rating must be an integer between 1 and 5'
+          errorMessage: REVIEWS_MESSAGES.RATING_INVALID
         },
         toInt: true
       },
@@ -143,11 +144,11 @@ export const updateReviewValidator = validate(
         in: ['body'],
         optional: true,
         isString: {
-          errorMessage: 'Title must be a string'
+          errorMessage: REVIEWS_MESSAGES.TITLE_MUST_BE_STRING
         },
         isLength: {
           options: { max: 200 },
-          errorMessage: 'Title must not exceed 200 characters'
+          errorMessage: REVIEWS_MESSAGES.TITLE_TOO_LONG
         },
         trim: true
       },
@@ -155,11 +156,11 @@ export const updateReviewValidator = validate(
         in: ['body'],
         optional: true,
         isString: {
-          errorMessage: 'Comment must be a string'
+          errorMessage: REVIEWS_MESSAGES.COMMENT_MUST_BE_STRING
         },
         isLength: {
           options: { min: 10, max: 2000 },
-          errorMessage: 'Comment must be between 10 and 2000 characters'
+          errorMessage: REVIEWS_MESSAGES.COMMENT_LENGTH_INVALID
         },
         trim: true
       },
@@ -167,12 +168,12 @@ export const updateReviewValidator = validate(
         in: ['body'],
         optional: true,
         isArray: {
-          errorMessage: 'Images must be an array'
+          errorMessage: REVIEWS_MESSAGES.IMAGES_MUST_BE_ARRAY
         },
         custom: {
           options: (value) => {
             if (value && value.length > 5) {
-              throw new Error('Maximum 5 images allowed')
+              throw new Error(REVIEWS_MESSAGES.TOO_MANY_IMAGES)
             }
             return true
           }
@@ -190,17 +191,17 @@ export const reviewIdValidator = validate(
       reviewId: {
         in: ['params'],
         notEmpty: {
-          errorMessage: 'Review ID is required'
+          errorMessage: REVIEWS_MESSAGES.REVIEW_ID_REQUIRED
         },
         custom: {
           options: async (value) => {
             if (!ObjectId.isValid(value)) {
-              throw new Error('Invalid review ID format')
+              throw new Error(REVIEWS_MESSAGES.REVIEW_ID_INVALID)
             }
 
             const review = await databaseService.reviews.findOne({ _id: new ObjectId(value) })
             if (!review) {
-              throw new Error('Review not found')
+              throw new Error(REVIEWS_MESSAGES.REVIEW_NOT_FOUND)
             }
 
             return true
@@ -219,17 +220,17 @@ export const productIdValidator = validate(
       productId: {
         in: ['params'],
         notEmpty: {
-          errorMessage: 'Product ID is required'
+          errorMessage: CARTS_MESSAGES.PRODUCT_ID_IS_REQUIRED
         },
         custom: {
           options: async (value) => {
             if (!ObjectId.isValid(value)) {
-              throw new Error('Invalid product ID format')
+              throw new Error(PRODUCTS_MESSAGES.PRODUCT_ID_INVALID)
             }
 
             const product = await databaseService.products.findOne({ _id: new ObjectId(value) })
             if (!product) {
-              throw new Error('Product not found')
+              throw new Error(PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND)
             }
 
             return true
@@ -241,7 +242,7 @@ export const productIdValidator = validate(
         optional: true,
         isInt: {
           options: { min: 1 },
-          errorMessage: 'Page must be a positive integer'
+          errorMessage: PRODUCTS_MESSAGES.PAGE_INVALID
         },
         toInt: true
       },
@@ -250,7 +251,7 @@ export const productIdValidator = validate(
         optional: true,
         isInt: {
           options: { min: 1, max: 50 },
-          errorMessage: 'Limit must be between 1 and 50'
+          errorMessage: PRODUCTS_MESSAGES.LIMIT_INVALID
         },
         toInt: true
       },
@@ -259,7 +260,7 @@ export const productIdValidator = validate(
         optional: true,
         isIn: {
           options: [['newest', 'oldest', 'highest', 'lowest', 'helpful']],
-          errorMessage: 'Sort by must be one of: newest, oldest, highest, lowest, helpful'
+          errorMessage: REVIEWS_MESSAGES.SORT_BY_INVALID
         }
       }
     },
@@ -274,17 +275,17 @@ export const moderateReviewValidator = validate(
       reviewId: {
         in: ['params'],
         notEmpty: {
-          errorMessage: 'Review ID is required'
+          errorMessage: REVIEWS_MESSAGES.REVIEW_ID_REQUIRED
         },
         custom: {
           options: async (value) => {
             if (!ObjectId.isValid(value)) {
-              throw new Error('Invalid review ID format')
+              throw new Error(REVIEWS_MESSAGES.REVIEW_ID_INVALID)
             }
 
             const review = await databaseService.reviews.findOne({ _id: new ObjectId(value) })
             if (!review) {
-              throw new Error('Review not found')
+              throw new Error(REVIEWS_MESSAGES.REVIEW_NOT_FOUND)
             }
 
             return true
@@ -294,25 +295,25 @@ export const moderateReviewValidator = validate(
       status: {
         in: ['body'],
         notEmpty: {
-          errorMessage: 'Status is required'
+          errorMessage: REVIEWS_MESSAGES.STATUS_REQUIRED
         },
         isIn: {
           options: [['approved', 'rejected']],
-          errorMessage: 'Status must be either approved or rejected'
+          errorMessage: REVIEWS_MESSAGES.STATUS_INVALID
         }
       },
       notes: {
         in: ['body'],
         optional: true,
         isString: {
-          errorMessage: 'Notes must be a string'
+          errorMessage: REVIEWS_MESSAGES.NOTES_MUST_BE_STRING
         },
         trim: true,
         custom: {
           options: (value, { req }) => {
             // Rejection requires notes
             if (req.body.status === 'rejected' && (!value || value.trim().length === 0)) {
-              throw new Error('Rejection reason is required')
+              throw new Error(REVIEWS_MESSAGES.REJECTION_REASON_REQUIRED)
             }
             return true
           }

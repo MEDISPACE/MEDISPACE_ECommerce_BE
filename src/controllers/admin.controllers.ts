@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { NextFunction } from 'express-serve-static-core'
 import adminService from '~/services/admin.services'
+import { ADMIN_MESSAGES } from '~/constants/message'
 
 /**
  * Get dashboard statistics
@@ -12,7 +13,7 @@ export const getDashboardStatsController = async (req: Request, res: Response, n
   try {
     const stats = await adminService.getDashboardStats()
     return res.json({
-      message: 'Get dashboard statistics successfully',
+      message: ADMIN_MESSAGES.GET_DASHBOARD_STATS_SUCCESS,
       result: stats
     })
   } catch (error) {
@@ -32,7 +33,7 @@ export const getRecentActivitiesController = async (req: Request, res: Response,
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 10
     const activities = await adminService.getRecentActivities(limit)
     return res.json({
-      message: 'Get recent activities successfully',
+      message: ADMIN_MESSAGES.GET_RECENT_ACTIVITIES_SUCCESS,
       result: activities
     })
   } catch (error) {
@@ -50,7 +51,7 @@ export const getSystemHealthController = async (req: Request, res: Response, nex
   try {
     const health = await adminService.getSystemHealth()
     return res.json({
-      message: 'Get system health successfully',
+      message: ADMIN_MESSAGES.GET_SYSTEM_HEALTH_SUCCESS,
       result: health
     })
   } catch (error) {
@@ -82,7 +83,7 @@ export const getAllUsersController = async (req: Request, res: Response, next: N
 
     const result = await adminService.getAllUsers(params)
     return res.json({
-      message: 'Get all users successfully',
+      message: ADMIN_MESSAGES.GET_ALL_USERS_SUCCESS,
       result
     })
   } catch (error) {
@@ -100,7 +101,7 @@ export const getUserStatsController = async (req: Request, res: Response, next: 
   try {
     const stats = await adminService.getUserStats()
     return res.json({
-      message: 'Get user statistics successfully',
+      message: ADMIN_MESSAGES.GET_USER_STATS_SUCCESS,
       result: stats
     })
   } catch (error) {
@@ -118,7 +119,7 @@ export const getPharmacistStatsController = async (req: Request, res: Response, 
   try {
     const stats = await adminService.getPharmacistStats()
     return res.json({
-      message: 'Get pharmacist statistics successfully',
+      message: ADMIN_MESSAGES.GET_PHARMACIST_STATS_SUCCESS,
       result: stats
     })
   } catch (error) {
@@ -137,7 +138,7 @@ export const createUserController = async (req: Request, res: Response, next: Ne
   try {
     const user = await adminService.createUser(req.body)
     return res.status(201).json({
-      message: 'User created successfully',
+      message: ADMIN_MESSAGES.CREATE_USER_SUCCESS,
       result: user
     })
   } catch (error) {
@@ -157,7 +158,7 @@ export const updateUserController = async (req: Request, res: Response, next: Ne
     const { userId } = req.params
     const user = await adminService.updateUser(userId, req.body)
     return res.json({
-      message: 'User updated successfully',
+      message: ADMIN_MESSAGES.UPDATE_USER_SUCCESS,
       result: user
     })
   } catch (error) {
@@ -377,7 +378,7 @@ export const getReportsAnalyticsController = async (req: Request, res: Response,
     const { timeRange = 'month' } = req.query
     const result = await adminService.getReportsAnalytics(timeRange as string)
     return res.json({
-      message: 'Get reports analytics successfully',
+      message: ADMIN_MESSAGES.GET_REPORTS_ANALYTICS_SUCCESS,
       result
     })
   } catch (error) {
@@ -397,7 +398,7 @@ export const getRevenueAnalyticsController = async (req: Request, res: Response,
     const { timeRange = 'month' } = req.query
     const result = await adminService.getRevenueAnalytics(timeRange as string)
     return res.json({
-      message: 'Get revenue analytics successfully',
+      message: ADMIN_MESSAGES.GET_REVENUE_ANALYTICS_SUCCESS,
       result
     })
   } catch (error) {
@@ -417,7 +418,7 @@ export const getProductAnalyticsController = async (req: Request, res: Response,
     const { timeRange = 'month' } = req.query
     const result = await adminService.getProductAnalytics(timeRange as string)
     return res.json({
-      message: 'Get product analytics successfully',
+      message: ADMIN_MESSAGES.GET_PRODUCT_ANALYTICS_SUCCESS,
       result
     })
   } catch (error) {
@@ -437,7 +438,7 @@ export const getCustomerAnalyticsController = async (req: Request, res: Response
     const { timeRange = 'month' } = req.query
     const result = await adminService.getCustomerAnalytics(timeRange as string)
     return res.json({
-      message: 'Get customer analytics successfully',
+      message: ADMIN_MESSAGES.GET_CUSTOMER_ANALYTICS_SUCCESS,
       result
     })
   } catch (error) {

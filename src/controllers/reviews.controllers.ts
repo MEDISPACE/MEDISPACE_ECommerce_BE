@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { ObjectId } from 'mongodb'
 import reviewService from '~/services/reviews.services'
 import { TokenPayload } from '~/models/requests/User.request'
+import { REVIEWS_MESSAGES } from '~/constants/message'
 
 /**
  * Review Controllers for Medical E-commerce
@@ -29,7 +30,7 @@ export const createReviewController = async (req: Request, res: Response, next: 
         )
 
         return res.status(201).json({
-            message: 'Review created successfully. It will be visible after moderation.',
+            message: REVIEWS_MESSAGES.CREATE_REVIEW_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -51,7 +52,7 @@ export const getProductReviewsController = async (req: Request, res: Response, n
         const result = await reviewService.getReviewsByProductId(new ObjectId(productId), page, limit, sortBy)
 
         return res.status(200).json({
-            message: 'Get product reviews successfully',
+            message: REVIEWS_MESSAGES.GET_PRODUCT_REVIEWS_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -70,7 +71,7 @@ export const getProductReviewStatsController = async (req: Request, res: Respons
         const stats = await reviewService.getProductReviewStats(new ObjectId(productId))
 
         return res.status(200).json({
-            message: 'Get product review stats successfully',
+            message: REVIEWS_MESSAGES.GET_PRODUCT_REVIEW_STATS_SUCCESS,
             data: stats
         })
     } catch (error) {
@@ -89,7 +90,7 @@ export const getUserReviewsController = async (req: Request, res: Response, next
         const reviews = await reviewService.getReviewsByUserId(new ObjectId(userId))
 
         return res.status(200).json({
-            message: 'Get user reviews successfully',
+            message: REVIEWS_MESSAGES.GET_USER_REVIEWS_SUCCESS,
             data: reviews
         })
     } catch (error) {
@@ -115,7 +116,7 @@ export const updateReviewController = async (req: Request, res: Response, next: 
         })
 
         return res.status(200).json({
-            message: 'Review updated successfully. It will be re-moderated if content changed.',
+            message: REVIEWS_MESSAGES.UPDATE_REVIEW_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -135,7 +136,7 @@ export const deleteReviewController = async (req: Request, res: Response, next: 
         const result = await reviewService.deleteReview(new ObjectId(reviewId), new ObjectId(userId))
 
         return res.status(200).json({
-            message: 'Review deleted successfully',
+            message: REVIEWS_MESSAGES.DELETE_REVIEW_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -155,7 +156,7 @@ export const markReviewHelpfulController = async (req: Request, res: Response, n
         const result = await reviewService.markReviewHelpful(new ObjectId(reviewId), new ObjectId(userId))
 
         return res.status(200).json({
-            message: 'Review marked as helpful',
+            message: REVIEWS_MESSAGES.MARK_REVIEW_HELPFUL_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -176,7 +177,7 @@ export const moderateReviewController = async (req: Request, res: Response, next
         const result = await reviewService.moderateReview(new ObjectId(reviewId), new ObjectId(userId), status, notes)
 
         return res.status(200).json({
-            message: `Review ${status} successfully`,
+            message: REVIEWS_MESSAGES.MODERATE_REVIEW_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -200,7 +201,7 @@ export const getAdminReviewsController = async (req: Request, res: Response, nex
         })
 
         return res.status(200).json({
-            message: 'Get admin reviews successfully',
+            message: REVIEWS_MESSAGES.GET_ADMIN_REVIEWS_SUCCESS,
             data: result
         })
     } catch (error) {
@@ -217,7 +218,7 @@ export const getAdminReviewStatsController = async (req: Request, res: Response,
         const stats = await reviewService.getAdminReviewStats()
 
         return res.status(200).json({
-            message: 'Get admin review stats successfully',
+            message: REVIEWS_MESSAGES.GET_ADMIN_REVIEW_STATS_SUCCESS,
             data: stats
         })
     } catch (error) {
@@ -241,7 +242,7 @@ export const bulkModerateController = async (req: Request, res: Response, next: 
         )
 
         return res.status(200).json({
-            message: `Bulk ${action} completed successfully`,
+            message: REVIEWS_MESSAGES.BULK_MODERATE_SUCCESS,
             data: result
         })
     } catch (error) {
