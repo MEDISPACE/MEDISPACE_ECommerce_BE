@@ -188,7 +188,7 @@ const pageSchema = {
 const limitSchema = {
   optional: true,
   isInt: {
-    options: { min: 1, max: 100 },
+    options: { min: 1, max: 5000 },
     errorMessage: PRODUCTS_MESSAGES.LIMIT_INVALID
   }
 }
@@ -233,7 +233,23 @@ const priceSchema = {
   optional: true,
   isFloat: {
     options: { min: 0 },
-    errorMessage: 'Giá sản phẩm phải lớn hơn hoặc bằng 0'
+    errorMessage: PRODUCTS_MESSAGES.PRICE_INVALID
+  }
+}
+
+const originalPriceSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: PRODUCTS_MESSAGES.ORIGINAL_PRICE_INVALID
+  }
+}
+
+const costPriceSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: PRODUCTS_MESSAGES.COST_PRICE_INVALID
   }
 }
 
@@ -249,6 +265,8 @@ export const createProductValidator = validate(
       categoryId: categoryIdSchema,
       brandId: brandIdSchema,
       price: priceSchema,
+      originalPrice: originalPriceSchema,
+      costPrice: costPriceSchema,
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
@@ -283,6 +301,8 @@ export const updateProductValidator = validate(
       },
       brandId: brandIdSchema,
       price: priceSchema,
+      originalPrice: originalPriceSchema,
+      costPrice: costPriceSchema,
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
