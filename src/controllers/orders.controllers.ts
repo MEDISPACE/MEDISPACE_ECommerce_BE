@@ -21,8 +21,19 @@ export const createOrderController = async (
   const sessionId = req.cookies?.sessionId
 
 
-  const { shippingAddress, paymentMethod, notes } = req.body
-  const result = await orderService.createOrder(userId, shippingAddress, paymentMethod as PaymentMethod, notes || '', sessionId, req)
+
+  const { items, shippingAddress, paymentMethod, notes, isDirectBuy } = req.body
+
+  const result = await orderService.createOrder(
+    userId,
+    shippingAddress,
+    paymentMethod as PaymentMethod,
+    notes || '',
+    sessionId,
+    req,
+    items,
+    isDirectBuy
+  )
 
   return res.json({
     message: ORDERS_MESSAGES.CREATE_ORDER_SUCCESS,

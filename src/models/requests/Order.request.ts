@@ -1,5 +1,11 @@
 // Order Request Types
 export interface CreateOrderReqBody {
+  items?: {
+    productId: string
+    quantity: number
+    unit?: string
+  }[]
+  isDirectBuy?: boolean
   shippingAddress: {
     firstName: string
     lastName: string
