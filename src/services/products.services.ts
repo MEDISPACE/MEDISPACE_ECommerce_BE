@@ -155,14 +155,45 @@ class ProductsService {
     const filter: Record<string, unknown> = {}
 
     if (query.categoryId) {
-      // Accept either an ObjectId string or a category slug
-      if (ObjectId.isValid(query.categoryId)) {
-        filter.categoryId = new ObjectId(query.categoryId)
-      } else {
-        const category = await categoriesService.getCategoryBySlug(query.categoryId)
-        filter.categoryId = category._id
+      try {
+        // Find the target category and all its descendants
+        let targetCategory
+        if (ObjectId.isValid(query.categoryId)) {
+          targetCategory = await categoriesService.getCategoryById(query.categoryId)
+        } else {
+          targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
+        }
+
+        // Get all categories that are descendants of this category (including itself)
+        // Using path to find all subcategories: path starts with this category's path
+        const categoryPath = targetCategory.path === '/'
+          ? `/${targetCategory.slug}`
+          : `${targetCategory.path}/${targetCategory.slug}`
+
+        // Escape special regex characters in the path
+        const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+        // Find all categories whose path starts with this category's path
+        const descendantCategories = await databaseService.categories
+          .find({
+            $or: [
+              { _id: targetCategory._id }, // Include the category itself
+              { path: { $regex: `^${escapedPath}` } } // All descendants
+            ]
+          })
+          .toArray()
+
+        const categoryIds = descendantCategories.map(cat => cat._id)
+
+        // Filter products that belong to any of these categories
+        filter.categoryId = { $in: categoryIds }
+      } catch (error) {
+        // If category not found, return empty result (no products)
+        filter.categoryId = null
       }
     }
+
+
 
     if (query.brandId) {
       filter.brandId = new ObjectId(query.brandId)
@@ -272,9 +303,27 @@ class ProductsService {
           }
         },
         {
+          $lookup: {
+            from: 'productDetails',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'details'
+          }
+        },
+        {
+          $lookup: {
+            from: 'productMedia',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'media'
+          }
+        },
+        {
           $addFields: {
             category: { $arrayElemAt: ['$category', 0] },
-            brand: { $arrayElemAt: ['$brand', 0] }
+            brand: { $arrayElemAt: ['$brand', 0] },
+            details: { $arrayElemAt: ['$details', 0] },
+            media: { $arrayElemAt: ['$media', 0] }
           }
         }
       ])
@@ -289,6 +338,7 @@ class ProductsService {
 
     return products[0]
   }
+
 
   // Get product by slug with populated category and brand data
   async getProductBySlug(slug: string) {
@@ -312,9 +362,27 @@ class ProductsService {
           }
         },
         {
+          $lookup: {
+            from: 'productDetails',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'details'
+          }
+        },
+        {
+          $lookup: {
+            from: 'productMedia',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'media'
+          }
+        },
+        {
           $addFields: {
             category: { $arrayElemAt: ['$category', 0] },
-            brand: { $arrayElemAt: ['$brand', 0] }
+            brand: { $arrayElemAt: ['$brand', 0] },
+            details: { $arrayElemAt: ['$details', 0] },
+            media: { $arrayElemAt: ['$media', 0] }
           }
         }
       ])
@@ -329,6 +397,7 @@ class ProductsService {
 
     return products[0]
   }
+
 
   // Update product
   async updateProduct(productId: string, payload: UpdateProductReqBody, lastModifiedBy: ObjectId) {
