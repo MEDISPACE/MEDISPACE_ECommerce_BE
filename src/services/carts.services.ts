@@ -106,7 +106,7 @@ class CartService {
   }
 
   // Add item to cart
-  async addItemToCart(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string) {
+  async addItemToCart(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string, requestedUnit?: string, requestedPrice?: number) {
     // Verify product exists and get details
     const product = await productsService.getProductById(productId.toString())
     if (!product) {
@@ -130,15 +130,37 @@ class CartService {
     // Convert cart to Cart instance for methods
     const cartInstance = new Cart(cart)
 
-    // Add item
+    // Use requested unit/price if provided, otherwise use default variant
+    let unitPrice: number
+    let unit: string
+
+    if (requestedUnit && requestedPrice) {
+      // Use the unit and price passed from frontend (selected by user)
+      unit = requestedUnit
+      unitPrice = requestedPrice
+    } else if (requestedUnit) {
+      // Find the price for the requested unit from product variants
+      const variant = product.priceVariants?.find((v: any) => v.unit === requestedUnit)
+      unit = requestedUnit
+      unitPrice = variant?.price || product.priceVariants?.[0]?.price || 0
+    } else {
+      // Fall back to default variant
+      const defaultVariant = product.priceVariants?.find((v: any) => v.isDefault) || product.priceVariants?.[0]
+      unitPrice = defaultVariant?.price || product.price || 0
+      unit = defaultVariant?.unit || 'Sản phẩm'
+    }
+
+    // Add item with correct parameters, including priceVariants for unit selector
     cartInstance.addItem(
       productId,
       product.name,
       product.sku,
+      unit,
       quantity,
-      product.price || 0, // Assuming price field exists
+      unitPrice,
       product.requiresPrescription || false,
-      product.featuredImage
+      product.featuredImage,
+      product.priceVariants
     )
 
     // Update cart in database using _id
@@ -201,6 +223,62 @@ class CartService {
     // Convert to Cart instance and update
     const cartInstance = new Cart(cart)
     cartInstance.updateItemQuantity(productId, quantity)
+
+    // Update in database
+    await databaseService.carts.updateOne(
+      { _id: cart._id },
+      {
+        $set: {
+          items: cartInstance.items,
+          itemCount: cartInstance.itemCount,
+          uniqueProductCount: cartInstance.uniqueProductCount,
+          subtotal: cartInstance.subtotal,
+          totalAmount: cartInstance.totalAmount,
+          requiresPrescription: cartInstance.requiresPrescription,
+          updatedAt: new Date(),
+          lastActivityAt: new Date()
+        }
+      }
+    )
+
+    return cartInstance
+  }
+
+  // Update item unit (change unit and price)
+  async updateItemUnit(productId: ObjectId, unit: string, userId?: ObjectId, sessionId?: string) {
+    // Get product to find the price for the selected unit
+    const product = await productsService.getProductById(productId.toString())
+    if (!product) {
+      throw new ErrorWithStatus({
+        message: CARTS_MESSAGES.PRODUCT_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    // Find the price variant for the selected unit
+    const variant = product.priceVariants?.find((v: any) => v.unit === unit)
+    if (!variant) {
+      throw new ErrorWithStatus({
+        message: 'Đơn vị không hợp lệ',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    // Get cart
+    const { cart } = await this.getCart(userId, sessionId)
+
+    // Check if item exists in cart
+    const itemExists = cart.items.some((item: CartItem) => item.productId.toString() === productId.toString())
+    if (!itemExists) {
+      throw new ErrorWithStatus({
+        message: CARTS_MESSAGES.ITEM_NOT_FOUND_IN_CART,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    // Convert to Cart instance and update
+    const cartInstance = new Cart(cart)
+    cartInstance.updateItemUnit(productId, unit, variant.price)
 
     // Update in database
     await databaseService.carts.updateOne(

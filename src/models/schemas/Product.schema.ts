@@ -1,5 +1,14 @@
 import { ObjectId } from 'mongodb'
 
+// Price Variant for multi-unit pricing (Viên, Vỉ, Hộp, Tuýp, Chai...)
+export interface PriceVariant {
+  unit: string           // Đơn vị: "Viên", "Vỉ", "Hộp", "Tuýp", "Chai", "Gói", "Túi", "Cái", "Thùng"...
+  price: number          // Giá bán (bắt buộc)
+  originalPrice?: number // Giá niêm yết/gốc (trước giảm giá)
+  costPrice?: number     // Giá vốn (nội bộ, chỉ admin/pharmacist thấy)
+  isDefault: boolean     // Đơn vị mặc định hiển thị
+}
+
 interface ProductType {
   _id?: ObjectId
   name: string
@@ -12,10 +21,8 @@ interface ProductType {
   categoryId: ObjectId
   brandId?: ObjectId
 
-  // Pricing
-  price: number
-  originalPrice?: number  // Giá gốc (trước giảm giá)
-  costPrice?: number      // Giá vốn (chỉ admin thấy)
+  // Pricing - Multi-unit pricing (REQUIRED, at least 1 variant)
+  priceVariants: PriceVariant[]
 
   // Inventory Summary
   stockQuantity: number
@@ -59,10 +66,8 @@ export default class Product {
   categoryId: ObjectId
   brandId?: ObjectId
 
-  // Pricing
-  price: number
-  originalPrice?: number
-  costPrice?: number
+  // Pricing - Multi-unit pricing (REQUIRED)
+  priceVariants: PriceVariant[]
 
   // Inventory Summary
   stockQuantity: number
@@ -105,9 +110,7 @@ export default class Product {
     this.categoryId = product.categoryId
     this.brandId = product.brandId
 
-    this.price = product.price
-    this.originalPrice = product.originalPrice
-    this.costPrice = product.costPrice
+    this.priceVariants = product.priceVariants
 
     this.stockQuantity = product.stockQuantity || 0
     this.maxOrderQuantity = product.maxOrderQuantity || 10

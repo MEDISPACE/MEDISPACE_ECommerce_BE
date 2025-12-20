@@ -118,7 +118,7 @@ class ProductsService {
       shortDescription: payload.shortDescription,
       categoryId: new ObjectId(payload.categoryId),
       brandId: payload.brandId ? new ObjectId(payload.brandId) : undefined,
-      price: payload.price || 0,
+      priceVariants: payload.priceVariants || [{ unit: 'Sản phẩm', price: 0, isDefault: true }],
       stockQuantity: payload.stockQuantity || 0,
       maxOrderQuantity: payload.maxOrderQuantity || 10,
       status: payload.status || 'active',
@@ -164,11 +164,13 @@ class ProductsService {
           targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
         }
 
-        // Get all categories that are descendants of this category (including itself)
-        // Using path to find all subcategories: path starts with this category's path
-        const categoryPath = targetCategory.path === '/'
-          ? `/${targetCategory.slug}`
-          : `${targetCategory.path}/${targetCategory.slug}`
+
+        // Category path should be used directly - path already represents the full hierarchy
+        // For parent category with path '/thuc-pham-chuc-nang', we want to find:
+        // - Categories with path STARTING with '/thuc-pham-chuc-nang' (subcategories)
+        // - Or the parent category itself (by _id)
+        const categoryPath = targetCategory.path
+
 
         // Escape special regex characters in the path
         const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -178,16 +180,18 @@ class ProductsService {
           .find({
             $or: [
               { _id: targetCategory._id }, // Include the category itself
-              { path: { $regex: `^${escapedPath}` } } // All descendants
+              { path: { $regex: `^${escapedPath}/` } } // All direct descendants (path starts with parent path + /)
             ]
           })
           .toArray()
+
 
         const categoryIds = descendantCategories.map(cat => cat._id)
 
         // Filter products that belong to any of these categories
         filter.categoryId = { $in: categoryIds }
       } catch (error) {
+        console.error('Error finding category:', error)
         // If category not found, return empty result (no products)
         filter.categoryId = null
       }
