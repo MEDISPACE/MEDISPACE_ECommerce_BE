@@ -57,14 +57,14 @@ export const addToCartController = async (req: Request<ParamsDictionary, unknown
 
 // Update cart item quantity
 export const updateCartItemController = async (
-  req: Request<ParamsDictionary, unknown, UpdateCartItemReqBody>,
+  req: Request<ParamsDictionary, unknown, UpdateCartItemReqBody & { unit?: string }>,
   res: Response
 ) => {
   const { userId, sessionId } = getUserAndSession(req)
   const { productId } = req.params as { productId: string }
-  const { quantity } = req.body
+  const { quantity, unit } = req.body
 
-  const result = await cartService.updateItemQuantity(new ObjectId(productId), quantity, userId, sessionId)
+  const result = await cartService.updateItemQuantity(new ObjectId(productId), quantity, userId, sessionId, unit)
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.UPDATE_CART_ITEM_SUCCESS,
@@ -74,14 +74,14 @@ export const updateCartItemController = async (
 
 // Update cart item unit
 export const updateCartItemUnitController = async (
-  req: Request<ParamsDictionary, unknown, { unit: string }>,
+  req: Request<ParamsDictionary, unknown, { unit: string; currentUnit?: string }>,
   res: Response
 ) => {
   const { userId, sessionId } = getUserAndSession(req)
   const { productId } = req.params as { productId: string }
-  const { unit } = req.body
+  const { unit, currentUnit } = req.body
 
-  const result = await cartService.updateItemUnit(new ObjectId(productId), unit, userId, sessionId)
+  const result = await cartService.updateItemUnit(new ObjectId(productId), unit, userId, sessionId, currentUnit)
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.UPDATE_CART_ITEM_SUCCESS,
@@ -90,11 +90,12 @@ export const updateCartItemUnitController = async (
 }
 
 // Remove item from cart
-export const removeCartItemController = async (req: Request<ParamsDictionary>, res: Response) => {
+export const removeCartItemController = async (req: Request<ParamsDictionary, unknown, unknown, { unit?: string }>, res: Response) => {
   const { userId, sessionId } = getUserAndSession(req)
   const { productId } = req.params as { productId: string }
+  const { unit } = req.query
 
-  const result = await cartService.removeItemFromCart(new ObjectId(productId), userId, sessionId)
+  const result = await cartService.removeItemFromCart(new ObjectId(productId), userId, sessionId, unit as string)
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.REMOVE_CART_ITEM_SUCCESS,

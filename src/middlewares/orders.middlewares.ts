@@ -86,6 +86,18 @@ const paymentStatusSchema = {
 export const createOrderValidator = validate(
   checkSchema(
     {
+      items: {
+        optional: true,
+        isArray: {
+          errorMessage: ORDERS_MESSAGES.ITEMS_MUST_BE_ARRAY
+        }
+      },
+      isDirectBuy: {
+        optional: true,
+        isBoolean: {
+          errorMessage: ORDERS_MESSAGES.IS_DIRECT_BUY_MUST_BE_BOOLEAN
+        }
+      },
       shippingAddress: shippingAddressSchema,
       paymentMethod: {
         ...paymentMethodSchema,

@@ -4,9 +4,10 @@ import databaseService from './database.services'
 import cartService from './carts.services'
 import emailService from './email.services'
 import paymentService from './payment.services'
+import productsService from './products.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
-import { ORDERS_MESSAGES } from '~/constants/message'
+import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
 import { PaymentMethod } from '~/constants/enum'
 
 class OrderService {
@@ -17,28 +18,100 @@ class OrderService {
     paymentMethod: PaymentMethod,
     notes: string,
     sessionId?: string,
-    req?: any
+    req?: any,
+    selectedItems?: { productId: string; quantity: number; unit?: string }[],
+    isDirectBuy?: boolean
   ) {
-    // Check if cart is empty
-    const cartResult = await cartService.getCart(userId, sessionId)
-    const cart = cartResult.cart
+    let orderItems: any[] = []
 
-    if (!cart || cart.items.length === 0) {
-      throw new ErrorWithStatus({
-        message: ORDERS_MESSAGES.CART_EMPTY,
-        status: HTTP_STATUS.BAD_REQUEST
-      })
+    if (isDirectBuy && selectedItems && selectedItems.length > 0) {
+      // Direct buy: fetch items directly from products
+      for (const item of selectedItems) {
+        const product = await productsService.getProductById(item.productId)
+        if (!product) {
+          throw new ErrorWithStatus({
+            message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
+            status: HTTP_STATUS.NOT_FOUND
+          })
+        }
+
+        // Validate stock
+        if (product.stockQuantity < item.quantity) {
+          throw new ErrorWithStatus({
+            message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
+
+        // Calc price based on unit
+        let price = product.price || 0
+        if (item.unit && product.priceVariants) {
+          const v = product.priceVariants.find((v: any) => v.unit === item.unit)
+          if (v) price = v.price
+        }
+
+        orderItems.push({
+          productId: product._id,
+          name: product.name,
+          sku: product.sku,
+          unit: item.unit || product.unit,
+          quantity: item.quantity,
+          unitPrice: price,
+          totalPrice: price * item.quantity,
+          prescriptionRequired: product.prescriptionRequired,
+          image: product.image || (product.images && product.images.length > 0 ? product.images[0] : undefined)
+        })
+      }
+    } else {
+      // Normal checkout from cart
+      const cartResult = await cartService.getCart(userId, sessionId)
+      const cart = cartResult.cart
+
+      if (!cart || cart.items.length === 0) {
+        throw new ErrorWithStatus({
+          message: ORDERS_MESSAGES.CART_EMPTY,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
+      // Filter cart items based on selected items
+      orderItems = cart.items
+      if (selectedItems && selectedItems.length > 0) {
+        orderItems = cart.items.filter(cartItem => {
+          const cartItemId = cartItem.productId.toString()
+          // Treat null/undefined/empty string as equivalent for unit comparison
+          const cartItemUnit = cartItem.unit || undefined
+
+          return selectedItems.some(selectedItem => {
+            const selectedId = selectedItem.productId
+            const selectedUnit = selectedItem.unit || undefined
+
+            // Compare ID
+            if (selectedId !== cartItemId) return false
+
+            // Compare Unit
+            return selectedUnit === cartItemUnit
+          })
+        })
+
+        if (orderItems.length === 0) {
+          throw new ErrorWithStatus({
+            message: ORDERS_MESSAGES.CART_EMPTY, // Use 'No valid items found' message ideally but stick to constants
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
+      }
     }
 
-    // Check prescription requirement
-    const hasPrescriptionItem = cart.items.some((item) => item.prescriptionRequired)
-    if (hasPrescriptionItem) {
-      // Check if user has uploaded prescription
-      // This logic depends on how we store prescriptions. 
-      // For now, we assume frontend handles the upload and we might check a flag or recent upload here.
-      // If we skip this check for now:
+    // Recalculate totals based on orderItems (common for both flows)
+    const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0)
+    // Simple logic for tax/shipping just for demo/consistency
+    const taxAmount = subtotal * 0.1 // 10% VAT
+    const shippingFee = subtotal > 300000 ? 0 : 30000
+    const discountAmount = 0
+    const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
 
-    }
+    // Check prescription requirement logic if needed
 
     const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
 
@@ -46,30 +119,45 @@ class OrderService {
       _id: new ObjectId(),
       userId,
       orderNumber,
-      items: cart.items,
-      itemCount: cart.itemCount,
+      items: orderItems,
+      itemCount: orderItems.length,
       shippingAddress,
       paymentMethod,
       paymentStatus: 'pending',
       orderStatus: 'pending',
-      subtotal: cart.subtotal,
-      taxAmount: cart.taxAmount,
-      shippingFee: cart.shippingFee,
-      discountAmount: cart.discountAmount,
-      totalAmount: cart.totalAmount,
+      subtotal,
+      taxAmount,
+      shippingFee,
+      discountAmount,
+      totalAmount,
       notes
     })
 
     const result = await databaseService.orders.insertOne(order)
 
-    // Clear cart
-    await cartService.clearCart(userId)
+    // Clear cart or remove selected items ONLY if NOT direct buy
+    if (!isDirectBuy) {
+      if (selectedItems && selectedItems.length > 0) {
+        // Remove only selected items from cart
+        for (const item of selectedItems) {
+          await cartService.removeItemFromCart(
+            new ObjectId(item.productId),
+            userId,
+            sessionId,
+            (item as any).unit
+          )
+        }
+      } else {
+        // Clear entire cart
+        await cartService.clearCart(userId)
+      }
+    }
 
     // Send order confirmation email
     try {
       await emailService.sendOrderConfirmationEmail(shippingAddress.email, { ...order, _id: result.insertedId })
     } catch (error) {
-
+      // ignore
     }
 
     // Generate Payment URL if applicable
@@ -275,7 +363,6 @@ class OrderService {
     }
   }
 }
-
 
 const orderService = new OrderService()
 export default orderService
