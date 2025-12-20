@@ -175,7 +175,7 @@ export const getCategoriesValidator = validate(
       in: ['query'],
       optional: true,
       isInt: {
-        options: { min: 1, max: 100 },
+        options: { min: 1, max: 500 },
         errorMessage: CATEGORIES_MESSAGES.LIMIT_INVALID
       }
     },
