@@ -8,20 +8,12 @@ import productsService from './products.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
-import { PaymentMethod } from '~/constants/enum'
+import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 
 class OrderService {
   // Create order from cart
-  async createOrder(
-    userId: ObjectId,
-    shippingAddress: ShippingAddress,
-    paymentMethod: PaymentMethod,
-    notes: string,
-    sessionId?: string,
-    req?: any,
-    selectedItems?: { productId: string; quantity: number; unit?: string }[],
-    isDirectBuy?: boolean
-  ) {
+  async createOrder(userId: ObjectId, payload: any) {
+    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod } = payload
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -104,10 +96,29 @@ class OrderService {
     }
 
     // Recalculate totals based on orderItems (common for both flows)
+    // Recalculate totals based on orderItems (common for both flows)
     const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0)
-    // Simple logic for tax/shipping just for demo/consistency
-    const taxAmount = subtotal * 0.1 // 10% VAT
-    const shippingFee = subtotal > 300000 ? 0 : 30000
+
+    // Calculate Shipping Fee
+    const method = shippingMethod || ShippingMethod.Standard
+    let baseShippingFee = 30000
+
+    if (method === ShippingMethod.Fast) {
+      baseShippingFee = 45000
+    } else if (method === ShippingMethod.Express) {
+      baseShippingFee = 60000
+    }
+
+    // Apply Freeship logic: >= 300k -> Discount 30k ship
+    let shippingDiscount = 0
+    if (subtotal >= 300000) {
+      shippingDiscount = 30000
+    }
+
+    const shippingFee = Math.max(0, baseShippingFee - shippingDiscount)
+
+    // Tax logic: Prices already include VAT, so no extra tax added
+    const taxAmount = 0
     const discountAmount = 0
     const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
 
