@@ -4,6 +4,7 @@ import Brand from './models/schemas/Brand.schema'
 import Product from './models/schemas/Product.schema'
 import ProductMedia from './models/schemas/ProductMedia.schema'
 import { ObjectId } from 'mongodb'
+import { seedBlogData } from './services/seed.blog'
 
 // Seed categories - Phân cấp theo Long Châu
 const categoriesData = [
@@ -1351,6 +1352,9 @@ async function seedDatabase() {
 
     await databaseService.productMedia.insertOne(productMedia)
   }
+
+  // Seed blog data (health categories and articles)
+  await seedBlogData()
 
   process.exit(0)
 }
