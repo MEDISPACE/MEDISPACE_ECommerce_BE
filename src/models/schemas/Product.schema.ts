@@ -14,6 +14,8 @@ interface ProductType {
 
   // Pricing
   price: number
+  originalPrice?: number  // Giá gốc (trước giảm giá)
+  costPrice?: number      // Giá vốn (chỉ admin thấy)
 
   // Inventory Summary
   stockQuantity: number
@@ -59,6 +61,8 @@ export default class Product {
 
   // Pricing
   price: number
+  originalPrice?: number
+  costPrice?: number
 
   // Inventory Summary
   stockQuantity: number
@@ -102,6 +106,8 @@ export default class Product {
     this.brandId = product.brandId
 
     this.price = product.price
+    this.originalPrice = product.originalPrice
+    this.costPrice = product.costPrice
 
     this.stockQuantity = product.stockQuantity || 0
     this.maxOrderQuantity = product.maxOrderQuantity || 10

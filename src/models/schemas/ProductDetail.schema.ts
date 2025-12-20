@@ -10,6 +10,7 @@ interface ProductDetailType {
   packSize: string // e.g., '30 tablets', '100ml bottle'
   strength?: string // e.g., '500mg', '10mg/ml'
   manufacturer: string
+  registrationNumber?: string // Số đăng ký (GPLH/GPNK) e.g., 'VN-15990-12'
 
   // Medical Usage
   indications?: string // What it treats
@@ -31,6 +32,7 @@ export default class ProductDetail {
   packSize: string
   strength?: string
   manufacturer: string
+  registrationNumber?: string
 
   // Medical Usage
   indications?: string
@@ -51,6 +53,7 @@ export default class ProductDetail {
     this.packSize = productDetail.packSize
     this.strength = productDetail.strength
     this.manufacturer = productDetail.manufacturer
+    this.registrationNumber = productDetail.registrationNumber
 
     this.indications = productDetail.indications
     this.dosageInstructions = productDetail.dosageInstructions

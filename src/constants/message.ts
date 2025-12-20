@@ -208,6 +208,9 @@ export const PRODUCTS_MESSAGES = {
   FEATURED_IMAGE_MUST_BE_STRING: 'Featured image must be a string',
   FEATURED_IMAGE_URL_INVALID: 'Featured image must be a valid URL',
   PRODUCT_ID_INVALID: 'Product ID must be a valid ObjectId',
+  PRICE_INVALID: 'Price must be a non-negative number',
+  ORIGINAL_PRICE_INVALID: 'Original price must be a non-negative number',
+  COST_PRICE_INVALID: 'Cost price must be a non-negative number',
 
   // Product Detail Validation
   DOSAGE_FORM_IS_REQUIRED: 'Dosage form is required',
