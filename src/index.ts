@@ -20,6 +20,8 @@ import adminRouter from './routes/admin.routes'
 import mediasRouter from './routes/medias.route'
 import reviewsRouter from './routes/reviews.routes'
 import chatsRouter from './routes/chats.routes'
+import articlesRouter from './routes/articles.routes'
+import healthCategoriesRouter from './routes/healthCategories.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 import { initFolder } from './utils/file'
@@ -61,6 +63,8 @@ app.use('/admin', adminRouter)
 app.use('/medias', mediasRouter)
 app.use('/reviews', reviewsRouter)
 app.use('/chats', chatsRouter)
+app.use('/articles', articlesRouter)
+app.use('/health-categories', healthCategoriesRouter)
 
 
 // Register central error handler so validation and other errors return JSON

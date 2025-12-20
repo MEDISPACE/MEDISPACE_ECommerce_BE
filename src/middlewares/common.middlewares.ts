@@ -41,3 +41,7 @@ export const isAdmin = (req: Request, res: Response, next: NextFunction) => {
 
   next()
 }
+
+// Export aliases for consistency with other routers
+export const adminValidator = isAdmin
+export const pharmacistOrAdminValidator = isAdminOrPharmacist
