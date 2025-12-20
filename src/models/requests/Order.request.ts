@@ -18,6 +18,7 @@ export interface CreateOrderReqBody {
     postalCode?: string
   }
   paymentMethod: string // 'cod', 'bank_transfer', 'credit_card', 'e_wallet'
+  shippingMethod?: string // 'standard', 'fast', 'express'
   notes?: string
 }
 

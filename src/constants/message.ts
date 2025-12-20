@@ -358,7 +358,9 @@ export const ORDERS_MESSAGES = {
   TRACKING_NUMBER_TOO_LONG: 'Tracking number must be less than 100 characters',
   ORDER_NUMBER_EXISTS: 'Order number already exists',
   ITEMS_MUST_BE_ARRAY: 'Items must be an array',
-  IS_DIRECT_BUY_MUST_BE_BOOLEAN: 'isDirectBuy must be a boolean',
+  IS_DIRECT_BUY_MUST_BE_BOOLEAN: 'Is direct buy must be a boolean',
+  SHIPPING_METHOD_INVALID: 'Invalid shipping method',
+  SHIPPING_METHOD_REQUIRED: 'Shipping method is required',
 
   // Success Messages
   CREATE_ORDER_SUCCESS: 'Order created successfully',
