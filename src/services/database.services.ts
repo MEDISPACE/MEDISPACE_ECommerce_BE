@@ -15,6 +15,8 @@ import Review from '~/models/schemas/Review.schema'
 import ProductDetail from '~/models/schemas/ProductDetail.schema'
 import Conversation from '~/models/schemas/Conversation.schema'
 import Message from '~/models/schemas/Message.schema'
+import Article from '~/models/schemas/Article.schema'
+import HealthCategory from '~/models/schemas/HealthCategory.schema'
 
 config()
 
@@ -81,6 +83,12 @@ class DatabaseService {
   }
   get messages(): Collection<Message> {
     return this.db.collection(process.env.DB_MESSAGES_COLLECTION as string)
+  }
+  get articles(): Collection<Article> {
+    return this.db.collection(process.env.DB_ARTICLES_COLLECTION as string)
+  }
+  get healthCategories(): Collection<HealthCategory> {
+    return this.db.collection(process.env.DB_HEALTH_CATEGORIES_COLLECTION as string)
   }
 }
 
