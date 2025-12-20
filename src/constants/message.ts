@@ -552,3 +552,78 @@ export const REVIEWS_MESSAGES = {
   MODERATE_REVIEW_SUCCESS: 'Review moderated successfully',
   BULK_MODERATE_SUCCESS: 'Bulk moderate reviews completed successfully'
 } as const
+
+export const ARTICLES_MESSAGES = {
+  // Validation Messages
+  ARTICLE_ID_INVALID: 'Article ID must be a valid ObjectId',
+  ARTICLE_NOT_FOUND: 'Article not found',
+  TITLE_IS_REQUIRED: 'Article title is required',
+  TITLE_MUST_BE_STRING: 'Article title must be a string',
+  TITLE_LENGTH_INVALID: 'Article title must be between 1 and 200 characters',
+  SLUG_MUST_BE_STRING: 'Article slug must be a string',
+  SLUG_FORMAT_INVALID: 'Article slug must contain only lowercase letters, numbers, and hyphens',
+  SLUG_LENGTH_INVALID: 'Article slug must be between 1 and 200 characters',
+  SLUG_ALREADY_EXISTS: 'Article with this slug already exists',
+  EXCERPT_IS_REQUIRED: 'Article excerpt is required',
+  EXCERPT_MUST_BE_STRING: 'Article excerpt must be a string',
+  EXCERPT_LENGTH_INVALID: 'Article excerpt must be between 10 and 500 characters',
+  CONTENT_IS_REQUIRED: 'Article content is required',
+  CONTENT_MUST_BE_STRING: 'Article content must be a string',
+  CONTENT_LENGTH_INVALID: 'Article content must be at least 50 characters',
+  CATEGORY_ID_IS_REQUIRED: 'Category ID is required',
+  CATEGORY_ID_INVALID: 'Category ID must be a valid ObjectId',
+  FEATURED_IMAGE_MUST_BE_STRING: 'Featured image must be a string',
+  FEATURED_IMAGE_URL_INVALID: 'Featured image must be a valid URL',
+  STATUS_INVALID: 'Status must be draft, pending, published, or archived',
+  IS_FEATURED_INVALID: 'Is featured must be a boolean',
+  IS_PINNED_INVALID: 'Is pinned must be a boolean',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+  SEARCH_MUST_BE_STRING: 'Search query must be a string',
+  SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
+  SORT_BY_INVALID: 'Sort by must be createdAt, publishedAt, viewCount, or title',
+  SORT_ORDER_INVALID: 'Sort order must be asc or desc',
+
+  // Success Messages
+  CREATE_ARTICLE_SUCCESS: 'Article created successfully',
+  UPDATE_ARTICLE_SUCCESS: 'Article updated successfully',
+  DELETE_ARTICLE_SUCCESS: 'Article deleted successfully',
+  GET_ARTICLES_SUCCESS: 'Get articles successfully',
+  GET_ARTICLE_SUCCESS: 'Get article successfully',
+  PUBLISH_ARTICLE_SUCCESS: 'Article published successfully',
+  ARCHIVE_ARTICLE_SUCCESS: 'Article archived successfully',
+  INCREMENT_VIEW_SUCCESS: 'Article view count updated',
+  GET_RELATED_ARTICLES_SUCCESS: 'Get related articles successfully'
+} as const
+
+export const HEALTH_CATEGORIES_MESSAGES = {
+  // Validation Messages
+  CATEGORY_ID_INVALID: 'Health category ID must be a valid ObjectId',
+  CATEGORY_NOT_FOUND: 'Health category not found',
+  CATEGORY_ALREADY_EXISTS: 'Health category with this name or slug already exists',
+  NAME_IS_REQUIRED: 'Category name is required',
+  NAME_MUST_BE_STRING: 'Category name must be a string',
+  NAME_LENGTH_INVALID: 'Category name must be between 1 and 100 characters',
+  SLUG_MUST_BE_STRING: 'Category slug must be a string',
+  SLUG_FORMAT_INVALID: 'Category slug must contain only lowercase letters, numbers, and hyphens',
+  SLUG_LENGTH_INVALID: 'Category slug must be between 1 and 100 characters',
+  DESCRIPTION_IS_REQUIRED: 'Description is required',
+  DESCRIPTION_MUST_BE_STRING: 'Description must be a string',
+  DESCRIPTION_LENGTH_INVALID: 'Description must be between 1 and 500 characters',
+  ORDER_INVALID: 'Order must be a non-negative number',
+  IS_ACTIVE_INVALID: 'Is active must be a boolean',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+  SEARCH_MUST_BE_STRING: 'Search query must be a string',
+  SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
+  SORT_BY_INVALID: 'Sort by must be name, order, articleCount, or createdAt',
+  SORT_ORDER_INVALID: 'Sort order must be asc or desc',
+
+  // Success Messages
+  CREATE_CATEGORY_SUCCESS: 'Health category created successfully',
+  UPDATE_CATEGORY_SUCCESS: 'Health category updated successfully',
+  DELETE_CATEGORY_SUCCESS: 'Health category deleted successfully',
+  GET_CATEGORIES_SUCCESS: 'Get health categories successfully',
+  GET_CATEGORY_SUCCESS: 'Get health category successfully'
+} as const
+
