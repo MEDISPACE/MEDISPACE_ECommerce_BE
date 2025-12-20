@@ -4,11 +4,18 @@ export interface CartItem {
   productId: ObjectId
   name: string
   sku: string
+  unit: string           // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
-  unitPrice: number
-  totalPrice: number
+  unitPrice: number      // Giá mỗi đơn vị
+  totalPrice: number     // quantity * unitPrice
   prescriptionRequired: boolean
   image?: string
+  priceVariants?: Array<{
+    unit: string
+    price: number
+    originalPrice?: number
+    isDefault?: boolean
+  }>
 }
 
 export interface AppliedCoupon {
@@ -121,26 +128,37 @@ export default class Cart {
     productId: ObjectId,
     name: string,
     sku: string,
+    unit: string,
     quantity: number,
     unitPrice: number,
     prescriptionRequired: boolean,
-    image?: string
+    image?: string,
+    priceVariants?: Array<{ unit: string; price: number; originalPrice?: number; isDefault?: boolean }>
   ) {
-    const existingItem = this.items.find((item) => item.productId.toString() === productId.toString())
+    // Check if same product with same unit already exists
+    const existingItem = this.items.find(
+      (item) => item.productId.toString() === productId.toString() && item.unit === unit
+    )
 
     if (existingItem) {
       existingItem.quantity += quantity
       existingItem.totalPrice = existingItem.quantity * existingItem.unitPrice
+      // Update priceVariants if provided
+      if (priceVariants) {
+        existingItem.priceVariants = priceVariants
+      }
     } else {
       this.items.push({
         productId,
         name,
         sku,
+        unit,
         quantity,
         unitPrice,
         totalPrice: quantity * unitPrice,
         prescriptionRequired,
-        image
+        image,
+        priceVariants
       })
     }
 
@@ -153,6 +171,17 @@ export default class Cart {
     if (item) {
       item.quantity = quantity
       item.totalPrice = quantity * item.unitPrice
+      this.calculateTotals()
+    }
+  }
+
+  // Update item unit and price
+  updateItemUnit(productId: ObjectId, unit: string, unitPrice: number) {
+    const item = this.items.find((item) => item.productId.toString() === productId.toString())
+    if (item) {
+      item.unit = unit
+      item.unitPrice = unitPrice
+      item.totalPrice = item.quantity * unitPrice
       this.calculateTotals()
     }
   }

@@ -3,6 +3,7 @@ import {
   getCartController,
   addToCartController,
   updateCartItemController,
+  updateCartItemUnitController,
   removeCartItemController,
   clearCartController,
   getCheckoutDataController
@@ -48,6 +49,21 @@ cartsRouter.put(
   cartItemValidator,
   updateCartItemValidator,
   wrapRequestHandler(updateCartItemController)
+)
+
+/**
+ * Description: Update cart item unit
+ * Path: /cart/update-unit/:productId
+ * Method: PUT
+ * Params: { productId: string }
+ * Body: { unit: string }
+ * Headers: { Authorization: Bearer <access_token> } (optional for guest users)
+ */
+cartsRouter.put(
+  '/update-unit/:productId',
+  optionalAuth,
+  cartItemValidator,
+  wrapRequestHandler(updateCartItemUnitController)
 )
 
 /**
