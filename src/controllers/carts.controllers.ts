@@ -45,9 +45,9 @@ export const getCartController = async (req: Request, res: Response) => {
 // Add item to cart
 export const addToCartController = async (req: Request<ParamsDictionary, unknown, AddToCartReqBody>, res: Response) => {
   const { userId, sessionId } = getUserAndSession(req)
-  const { productId, quantity } = req.body
+  const { productId, quantity, unit, price } = req.body
 
-  const result = await cartService.addItemToCart(new ObjectId(productId), quantity, userId, sessionId)
+  const result = await cartService.addItemToCart(new ObjectId(productId), quantity, userId, sessionId, unit, price)
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.ADD_TO_CART_SUCCESS,
@@ -65,6 +65,23 @@ export const updateCartItemController = async (
   const { quantity } = req.body
 
   const result = await cartService.updateItemQuantity(new ObjectId(productId), quantity, userId, sessionId)
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: CARTS_MESSAGES.UPDATE_CART_ITEM_SUCCESS,
+    result
+  })
+}
+
+// Update cart item unit
+export const updateCartItemUnitController = async (
+  req: Request<ParamsDictionary, unknown, { unit: string }>,
+  res: Response
+) => {
+  const { userId, sessionId } = getUserAndSession(req)
+  const { productId } = req.params as { productId: string }
+  const { unit } = req.body
+
+  const result = await cartService.updateItemUnit(new ObjectId(productId), unit, userId, sessionId)
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.UPDATE_CART_ITEM_SUCCESS,

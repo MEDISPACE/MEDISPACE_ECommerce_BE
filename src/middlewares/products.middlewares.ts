@@ -264,9 +264,52 @@ export const createProductValidator = validate(
       shortDescription: shortDescriptionSchema,
       categoryId: categoryIdSchema,
       brandId: brandIdSchema,
-      price: priceSchema,
-      originalPrice: originalPriceSchema,
-      costPrice: costPriceSchema,
+      // priceVariants is REQUIRED
+      priceVariants: {
+        isArray: {
+          options: { min: 1 },
+          errorMessage: 'priceVariants must be an array with at least 1 variant'
+        },
+        notEmpty: {
+          errorMessage: 'priceVariants is required'
+        }
+      },
+      'priceVariants.*.unit': {
+        in: ['body'],
+        isString: true,
+        notEmpty: {
+          errorMessage: 'Unit is required for each price variant'
+        }
+      },
+      'priceVariants.*.price': {
+        in: ['body'],
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Price must be a positive number'
+        }
+      },
+      'priceVariants.*.originalPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Original price must be a positive number'
+        }
+      },
+      'priceVariants.*.costPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Cost price must be a positive number'
+        }
+      },
+      'priceVariants.*.isDefault': {
+        in: ['body'],
+        isBoolean: {
+          errorMessage: 'isDefault must be a boolean'
+        }
+      },
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
@@ -300,9 +343,51 @@ export const updateProductValidator = validate(
         notEmpty: undefined
       },
       brandId: brandIdSchema,
-      price: priceSchema,
-      originalPrice: originalPriceSchema,
-      costPrice: costPriceSchema,
+      priceVariants: {
+        optional: true,
+        isArray: {
+          errorMessage: 'priceVariants must be an array'
+        }
+      },
+      'priceVariants.*.unit': {
+        in: ['body'],
+        optional: true,
+        isString: true,
+        notEmpty: {
+          errorMessage: 'Unit is required for each price variant'
+        }
+      },
+      'priceVariants.*.price': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Price must be a positive number'
+        }
+      },
+      'priceVariants.*.originalPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Original price must be a positive number'
+        }
+      },
+      'priceVariants.*.costPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Cost price must be a positive number'
+        }
+      },
+      'priceVariants.*.isDefault': {
+        in: ['body'],
+        optional: true,
+        isBoolean: {
+          errorMessage: 'isDefault must be a boolean'
+        }
+      },
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
