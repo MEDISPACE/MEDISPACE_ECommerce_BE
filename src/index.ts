@@ -33,6 +33,7 @@ const app = express()
 
 databaseService.connect()
 cleanupService.startCartCleanup()
+cleanupService.startAbandonedOrderCleanup() // Cleanup abandoned orders every hour
 initFolder() // Tạo thư mục temp cho upload
 
 // Parse cookies
@@ -71,6 +72,7 @@ app.use('/ghn', ghnRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
+
 
 // Create HTTP server for Socket.IO
 import { createServer } from 'http'
