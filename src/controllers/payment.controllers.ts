@@ -1,49 +1,47 @@
 import { Request, Response } from 'express'
 import paymentService from '~/services/payment.services'
 import orderService from '~/services/orders.services'
+import cartService from '~/services/carts.services'
+import databaseService from '~/services/database.services'
+import emailService from '~/services/email.services'
 import { PaymentMethod } from '~/constants/enum'
 import { ObjectId } from 'mongodb'
-
-// Momo Return
-export const momoReturnController = async (req: Request, res: Response) => {
-    try {
-
-        const result = await paymentService.verifyReturn(PaymentMethod.Momo, req.query)
-        const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${result.orderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
-        return res.redirect(redirectUrl)
-    } catch (error) {
-
-        return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
-    }
-}
 
 // VNPay Return
 export const vnpayReturnController = async (req: Request, res: Response) => {
     try {
 
         const result = await paymentService.verifyReturn(PaymentMethod.VNPay, req.query)
+        if (result.isSuccess) {
+            await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
+
+            // Clear purchased items from cart after successful payment
+            try {
+                const order = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
+                if (order && order.items && order.items.length > 0) {
+                    for (const item of order.items) {
+                        await cartService.removeItemFromCart(
+                            new ObjectId(item.productId),
+                            order.userId,
+                            undefined,
+                            (item as any).unit
+                        )
+                    }
+                }
+
+                // Send order confirmation email after successful payment
+                if (order && order.shippingAddress?.email) {
+                    await emailService.sendOrderConfirmationEmail(order.shippingAddress.email, order)
+                }
+            } catch (error) {
+                console.error('Failed to clear cart or send email after payment success:', error)
+            }
+        }
         const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${result.orderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
         return res.redirect(redirectUrl)
     } catch (error) {
 
         return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
-    }
-}
-
-// Momo IPN
-export const momoIpnController = async (req: Request, res: Response) => {
-    try {
-
-        const result = await paymentService.verifyIpn(PaymentMethod.Momo, req.body)
-
-        if (result.isSuccess) {
-            await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
-            return res.status(204).json({})
-        }
-        return res.status(400).json({ message: 'Signature verification failed' })
-    } catch (error) {
-
-        return res.status(500).json({ message: 'Internal Server Error' })
     }
 }
 
@@ -70,36 +68,26 @@ export const payOSIpnController = async (req: Request, res: Response) => {
 
         const result = await paymentService.verifyIpn(PaymentMethod.PayOS, req.body)
 
-        if (result.isSuccess && result.transactionId) {
-            const order = await orderService.getOrderByOrderNumber(result.transactionId)
-            if (order && order._id) {
-                await orderService.updatePaymentStatus(order._id, 'paid')
-            }
-            return res.json({ success: true })
+        if (result.isSuccess) {
+            await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
+            return res.status(200).json({ success: true })
         }
-        return res.json({ success: false })
+        return res.status(400).json({ success: false, message: 'Invalid signature' })
     } catch (error) {
 
-        return res.json({ success: false })
+        return res.status(500).json({ success: false, message: 'Internal Server Error' })
     }
 }
 
 // PayOS Return
 export const payOSReturnController = async (req: Request, res: Response) => {
     try {
-        const { orderId, status, code } = req.query
 
-        // Verify payment status from PayOS
-        const isSuccess = status === 'PAID' || code === '00'
-
-        if (isSuccess && orderId) {
-            // Update payment status immediately on return
-            await orderService.updatePaymentStatus(new ObjectId(orderId as string), 'paid')
-        }
-
-        const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${orderId}&paymentStatus=${isSuccess ? 'success' : 'failed'}`
+        const result = await paymentService.verifyReturn(PaymentMethod.PayOS, req.query)
+        const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${result.orderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
         return res.redirect(redirectUrl)
     } catch (error) {
+
         return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
     }
 }
