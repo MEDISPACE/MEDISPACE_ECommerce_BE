@@ -116,8 +116,12 @@ class CartService {
       })
     }
 
-    // Check stock availability
-    if (product.stockQuantity < quantity) {
+    // Check stock availability with unit conversion
+    const variant = product.priceVariants?.find((v: any) => v.unit === requestedUnit)
+    const quantityPerUnit = variant?.quantityPerUnit || 1
+    const requiredStock = quantity * quantityPerUnit
+
+    if (product.stockQuantity < requiredStock) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
         status: HTTP_STATUS.BAD_REQUEST
@@ -201,7 +205,12 @@ class CartService {
       })
     }
 
-    if (product.stockQuantity < quantity) {
+    // Check stock availability with unit conversion
+    const variant = product.priceVariants?.find((v: any) => v.unit === unit)
+    const quantityPerUnit = variant?.quantityPerUnit || 1
+    const requiredStock = quantity * quantityPerUnit
+
+    if (product.stockQuantity < requiredStock) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
         status: HTTP_STATUS.BAD_REQUEST
@@ -380,9 +389,14 @@ class CartService {
         })
       }
 
-      if (product.stockQuantity < item.quantity) {
+      // Check stock with unit conversion
+      const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+      const quantityPerUnit = variant?.quantityPerUnit || 1
+      const requiredStock = item.quantity * quantityPerUnit
+
+      if (product.stockQuantity < requiredStock) {
         throw new ErrorWithStatus({
-          message: `Insufficient stock for ${item.name}. Available: ${product.stockQuantity}`,
+          message: `Insufficient stock for ${item.name}. Available: ${Math.floor(product.stockQuantity / quantityPerUnit)} ${item.unit}`,
           status: HTTP_STATUS.BAD_REQUEST
         })
       }

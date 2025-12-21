@@ -566,6 +566,22 @@ class PharmacistService {
       updateData.notes = notes
     }
 
+    // Restore stock when order is cancelled
+    if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
+      for (const item of order.items || []) {
+        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+        if (product) {
+          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+          const quantityPerUnit = variant?.quantityPerUnit || 1
+          const stockToRestore = item.quantity * quantityPerUnit
+          await databaseService.products.updateOne(
+            { _id: new ObjectId(item.productId) },
+            { $inc: { stockQuantity: stockToRestore } }
+          )
+        }
+      }
+    }
+
     const result = await databaseService.orders.findOneAndUpdate(
       { _id: orderObjectId },
       { $set: updateData },
