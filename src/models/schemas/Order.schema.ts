@@ -45,6 +45,7 @@ export interface OrderType {
 
   notes?: string
   trackingNumber?: string
+  estimatedDeliveryDate?: string
 
   createdAt?: Date
   updatedAt?: Date
@@ -74,6 +75,7 @@ export default class Order {
 
   notes?: string
   trackingNumber?: string
+  estimatedDeliveryDate?: string
 
   createdAt?: Date
   updatedAt?: Date
@@ -104,6 +106,7 @@ export default class Order {
 
     this.notes = order.notes
     this.trackingNumber = order.trackingNumber
+    this.estimatedDeliveryDate = order.estimatedDeliveryDate
 
     this.createdAt = order.createdAt || date
     this.updatedAt = order.updatedAt || date

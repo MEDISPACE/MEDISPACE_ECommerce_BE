@@ -9,13 +9,9 @@ const GHN_SHOP_ID = Number(process.env.GHN_SHOP_ID)
 
 class GHNService {
     private client
+    private shopDistrictId: number | null = null
 
     constructor() {
-        console.log('GHN Service Initialized')
-        console.log('API URL:', GHN_API_URL)
-        console.log('Token:', GHN_API_TOKEN ? `${GHN_API_TOKEN.substring(0, 5)}...` : 'Missing')
-        console.log('ShopID:', GHN_SHOP_ID)
-
         this.client = axios.create({
             baseURL: GHN_API_URL,
             headers: {
@@ -26,62 +22,169 @@ class GHNService {
         })
     }
 
-    async getProvinces() {
-        try {
-            const response = await this.client.get('/master-data/province')
-            return response.data.data
-        } catch (error) {
-            console.error('Error fetching provinces:', error)
-            throw error
+    private async getFromDistrictId(): Promise<number> {
+        if (process.env.GHN_FROM_DISTRICT_ID) {
+            return Number(process.env.GHN_FROM_DISTRICT_ID)
         }
+        return 3695
+    }
+
+    private getFromWardCode(): string {
+        return process.env.GHN_FROM_WARD_CODE || ""
+    }
+
+    async getProvinces() {
+        const response = await this.client.get('/master-data/province')
+        return response.data.data
     }
 
     async getDistricts(provinceId: number) {
-        try {
-            const response = await this.client.get('/master-data/district', {
-                params: { province_id: provinceId }
-            })
-            return response.data.data
-        } catch (error) {
-            console.error('Error fetching districts:', error)
-            throw error
-        }
+        const response = await this.client.get('/master-data/district', {
+            params: { province_id: provinceId }
+        })
+        return response.data.data
     }
 
     async getWards(districtId: number) {
-        try {
-            const response = await this.client.get('/master-data/ward', {
-                params: { district_id: districtId }
-            })
-            return response.data.data
-        } catch (error) {
-            console.error('Error fetching wards:', error)
-            throw error
-        }
+        const response = await this.client.get('/master-data/ward', {
+            params: { district_id: districtId }
+        })
+        return response.data.data
     }
 
     async calculateFee(payload: {
         to_district_id: number
         to_ward_code: string
-        weight: number // gram
+        weight: number
         service_id?: number
-        service_type_id?: number // 2: Standard
+        service_type_id?: number
         insurance_value?: number
     }) {
         try {
-            // Default to Standard Service (service_type_id = 2) if not provided
-            const finalPayload = {
+            const fromDistrictId = await this.getFromDistrictId()
+
+            const finalPayload: any = {
                 ...payload,
-                service_type_id: payload.service_type_id || 2,
-                from_district_id: Number(process.env.GHN_FROM_DISTRICT_ID) || 1454, // Example: District 12
-                shop_id: GHN_SHOP_ID
+                from_district_id: fromDistrictId,
+                shop_id: GHN_SHOP_ID,
+                weight: (payload.weight && payload.weight > 0) ? payload.weight : 1000,
+                length: 20,
+                width: 15,
+                height: 10
             }
+
             const response = await this.client.post('/v2/shipping-order/fee', finalPayload)
             return response.data.data
-        } catch (error) {
-            console.error('Error calculating fee:', error)
+        } catch (error: any) {
+            const msg = error.response?.data?.message || error.message
+            if (!msg.includes('Cân nặng không hợp lệ')) {
+                console.warn(`Fee calculation failed for service ${payload.service_id}:`, msg)
+            }
             throw error
         }
+    }
+
+    async getAvailableServices(toDistrictId: number) {
+        try {
+            const fromDistrictId = await this.getFromDistrictId()
+            const response = await this.client.post('/v2/shipping-order/available-services', {
+                shop_id: GHN_SHOP_ID,
+                from_district: fromDistrictId,
+                to_district: toDistrictId
+            })
+            return response.data.data
+        } catch (error) {
+            return []
+        }
+    }
+
+    async getLeadTime(toDistrictId: number, toWardCode: string, serviceId: number) {
+        try {
+            const fromDistrictId = await this.getFromDistrictId()
+            const fromWardCode = this.getFromWardCode()
+
+            const body = {
+                shop_id: GHN_SHOP_ID,
+                from_district_id: fromDistrictId,
+                from_ward_code: fromWardCode,
+                to_district_id: toDistrictId,
+                to_ward_code: toWardCode,
+                service_id: serviceId
+            }
+
+            const response = await this.client.post('/v2/shipping-order/leadtime', body)
+            return response.data.data
+        } catch (error: any) {
+            return null
+        }
+    }
+
+    async getShippingOptions(payload: {
+        to_district_id: number,
+        to_ward_code: string,
+        weight: number
+    }) {
+        const services = await this.getAvailableServices(payload.to_district_id)
+
+        if (!services || services.length === 0) {
+            return []
+        }
+
+        const fromDistrictId = await this.getFromDistrictId()
+
+        const promises = services.map(async (service: any) => {
+            try {
+                const [feeData, leadTimeData] = await Promise.all([
+                    this.calculateFee({
+                        to_district_id: payload.to_district_id,
+                        to_ward_code: payload.to_ward_code,
+                        weight: payload.weight,
+                        service_id: service.service_id
+                    }).catch(() => null),
+
+                    this.getLeadTime(
+                        payload.to_district_id,
+                        payload.to_ward_code,
+                        service.service_id
+                    ).catch(() => null)
+                ])
+
+                if (!feeData) return null
+
+                let estimatedDateStr = '3-5 ngày'
+
+                if (leadTimeData && leadTimeData.leadtime > 0) {
+                    const date = new Date(leadTimeData.leadtime * 1000)
+                    estimatedDateStr = date.toLocaleDateString('vi-VN', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'numeric'
+                    })
+                } else {
+                    if (payload.to_district_id === fromDistrictId) {
+                        estimatedDateStr = '1-2 ngày'
+                    } else {
+                        estimatedDateStr = '2-4 ngày'
+                    }
+                }
+
+                return {
+                    id: service.service_id,
+                    name: service.short_name,
+                    price: feeData.total,
+                    description: `GHN ${service.short_name}`,
+                    estimatedDays: estimatedDateStr,
+                    leadTimeUnix: leadTimeData?.leadtime
+                }
+            } catch (e) {
+                return null
+            }
+        })
+
+        const results = await Promise.all(promises)
+        return results
+            .filter(r => r !== null)
+            .sort((a: any, b: any) => a.price - b.price)
     }
 }
 
