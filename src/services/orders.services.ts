@@ -14,7 +14,7 @@ import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 class OrderService {
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
-    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod } = payload
+    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod, estimatedDeliveryDate } = payload
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -157,7 +157,8 @@ class OrderService {
       shippingFee,
       discountAmount,
       totalAmount,
-      notes
+      notes,
+      estimatedDeliveryDate
     })
 
     const result = await databaseService.orders.insertOne(order)
