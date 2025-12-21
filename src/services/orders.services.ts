@@ -14,7 +14,7 @@ import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 class OrderService {
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
-    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod, estimatedDeliveryDate } = payload
+    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod, shippingFee: providedShippingFee, estimatedDeliveryDate } = payload
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -100,36 +100,43 @@ class OrderService {
     const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0)
 
     // Calculate Shipping Fee
-    const method = shippingMethod || ShippingMethod.Standard
-    let baseShippingFee = 30000
+    // Use frontend-provided shippingFee if available (to ensure consistency with checkout page)
+    let shippingFee: number
 
-    if (method === ShippingMethod.Fast) {
-      baseShippingFee = 45000
-    } else if (method === ShippingMethod.Express) {
-      baseShippingFee = 60000
-    } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
-      try {
-        const feeData = await ghnService.calculateFee({
-          to_district_id: shippingAddress.districtId,
-          to_ward_code: shippingAddress.wardCode,
-          weight: 2000, // Estimated 2kg
-          service_type_id: 2 // Standard
-        })
-        if (feeData && feeData.total) {
-          baseShippingFee = feeData.total
+    if (typeof providedShippingFee === 'number' && providedShippingFee >= 0) {
+      // Use the shipping fee calculated by frontend
+      shippingFee = providedShippingFee
+    } else {
+      // Fallback: calculate shipping fee on backend
+      const method = shippingMethod || ShippingMethod.Standard
+      let baseShippingFee = 30000
+
+      if (method === ShippingMethod.Fast) {
+        baseShippingFee = 45000
+      } else if (method === ShippingMethod.Express) {
+        baseShippingFee = 60000
+      } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
+        try {
+          const feeData = await ghnService.calculateFee({
+            to_district_id: shippingAddress.districtId,
+            to_ward_code: shippingAddress.wardCode,
+            weight: 2000, // Estimated 2kg
+            service_type_id: 2 // Standard
+          })
+          if (feeData && feeData.total) {
+            baseShippingFee = feeData.total
+          }
+        } catch (error) {
+          console.error('GHN Fee Calculation Failed:', error)
+          // Fallback to default 30000 is already set
         }
-      } catch (error) {
-        console.error('GHN Fee Calculation Failed:', error)
-        // Fallback to default 30000 is already set
       }
-    }
 
-    // Apply Freeship logic: >= 300k -> Free shipping (100% off)
-    // Synchronized with Frontend logic
-    let shippingFee = Math.max(0, baseShippingFee)
-
-    if (subtotal >= 300000) {
-      shippingFee = 0
+      // Apply Freeship logic: >= 300k -> Free shipping (100% off)
+      shippingFee = Math.max(0, baseShippingFee)
+      if (subtotal >= 300000) {
+        shippingFee = 0
+      }
     }
 
     // Tax logic: Prices already include VAT, so no extra tax added
