@@ -16,6 +16,9 @@ export interface CreateOrderReqBody {
     district: string
     province: string
     postalCode?: string
+    provinceId?: number
+    districtId?: number
+    wardCode?: string
   }
   paymentMethod: string // 'cod', 'bank_transfer', 'credit_card', 'e_wallet'
   shippingMethod?: string // 'standard', 'fast', 'express'
