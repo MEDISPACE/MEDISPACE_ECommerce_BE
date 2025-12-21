@@ -114,8 +114,10 @@ export const createOrderValidator = validate(
         }
       },
       shippingMethod: {
-        ...shippingMethodSchema,
-        optional: true
+        optional: true,
+        isString: {
+          errorMessage: 'Invalid shipping method format' // Relaxed validation
+        }
       },
       notes: {
         optional: true,

@@ -97,7 +97,6 @@ class OrderService {
     }
 
     // Recalculate totals based on orderItems (common for both flows)
-    // Recalculate totals based on orderItems (common for both flows)
     const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0)
 
     // Calculate Shipping Fee
@@ -125,13 +124,13 @@ class OrderService {
       }
     }
 
-    // Apply Freeship logic: >= 300k -> Discount 30k ship
-    let shippingDiscount = 0
-    if (subtotal >= 300000) {
-      shippingDiscount = 30000
-    }
+    // Apply Freeship logic: >= 300k -> Free shipping (100% off)
+    // Synchronized with Frontend logic
+    let shippingFee = Math.max(0, baseShippingFee)
 
-    const shippingFee = Math.max(0, baseShippingFee - shippingDiscount)
+    if (subtotal >= 300000) {
+      shippingFee = 0
+    }
 
     // Tax logic: Prices already include VAT, so no extra tax added
     const taxAmount = 0
@@ -164,7 +163,8 @@ class OrderService {
     const result = await databaseService.orders.insertOne(order)
 
     // Clear cart or remove selected items ONLY if NOT direct buy
-    if (!isDirectBuy) {
+    // AND payment method is COD. For online payment, we clear items ONLY after successful payment (in return controller)
+    if (!isDirectBuy && paymentMethod === PaymentMethod.COD) {
       if (selectedItems && selectedItems.length > 0) {
         // Remove only selected items from cart
         for (const item of selectedItems) {
@@ -181,11 +181,14 @@ class OrderService {
       }
     }
 
-    // Send order confirmation email
-    try {
-      await emailService.sendOrderConfirmationEmail(shippingAddress.email, { ...order, _id: result.insertedId })
-    } catch (error) {
-      // ignore
+    // Send order confirmation email only for COD orders immediately
+    // For online payment, email will be sent after payment success (in return controller)
+    if (paymentMethod === PaymentMethod.COD) {
+      try {
+        await emailService.sendOrderConfirmationEmail(shippingAddress.email, { ...order, _id: result.insertedId })
+      } catch (error) {
+        // ignore
+      }
     }
 
     // Generate Payment URL if applicable
@@ -330,6 +333,11 @@ class OrderService {
 
     if (newStatus === 'paid') {
       updateData.paidAt = new Date()
+      // Also confirm the order when payment is successful
+      // Only update if order is still in pending/pending_payment status
+      if (order.orderStatus === 'pending' || order.orderStatus === 'pending_payment') {
+        updateData.orderStatus = 'confirmed'
+      }
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
