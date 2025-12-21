@@ -2,7 +2,6 @@ import { config } from 'dotenv'
 import Order from '~/models/schemas/Order.schema'
 import { PaymentMethod } from '~/constants/enum'
 import { PaymentProvider } from './payment/payment.interface'
-import { MomoProvider } from './payment/momo.provider'
 import { VNPayProvider } from './payment/vnpay.provider'
 import { PayOSProvider } from './payment/payos.provider'
 
@@ -12,10 +11,9 @@ class PaymentService {
     private providers: Map<string, PaymentProvider> = new Map()
 
     constructor() {
-        this.providers.set(PaymentMethod.Momo, new MomoProvider())
         this.providers.set(PaymentMethod.VNPay, new VNPayProvider())
         this.providers.set(PaymentMethod.PayOS, new PayOSProvider())
-        // Map 'bank_transfer' to VNPay for now if that was the intention, or handle separately
+        // Map 'bank_transfer' to VNPay
         this.providers.set(PaymentMethod.BankTransfer, new VNPayProvider())
     }
 
