@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+.env*
+.editorconfig
+.prettier*
+eslint.config.mts
+nodemon.json
+docs
+data
+uploads
+scripts
