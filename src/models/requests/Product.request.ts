@@ -1,4 +1,14 @@
 // Product Request Types
+
+// Price Variant for multi-unit pricing
+export interface PriceVariantReqBody {
+  unit: string
+  price: number
+  originalPrice?: number
+  costPrice?: number
+  isDefault: boolean
+}
+
 export interface CreateProductReqBody {
   name: string
   slug?: string
@@ -7,6 +17,7 @@ export interface CreateProductReqBody {
   shortDescription: string
   categoryId: string
   brandId?: string
+  priceVariants: PriceVariantReqBody[]  // REQUIRED
   stockQuantity?: number
   maxOrderQuantity?: number
   status?: 'active' | 'discontinued' | 'out_of_stock'
@@ -23,6 +34,7 @@ export interface UpdateProductReqBody {
   shortDescription?: string
   categoryId?: string
   brandId?: string
+  priceVariants?: PriceVariantReqBody[]
   stockQuantity?: number
   maxOrderQuantity?: number
   status?: 'active' | 'discontinued' | 'out_of_stock'

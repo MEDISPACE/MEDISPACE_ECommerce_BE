@@ -37,7 +37,7 @@ class ProductsService {
     const query: { $or: Array<{ name?: string; sku?: string; barcode?: string }>; _id?: { $ne: ObjectId } } = {
       $or: [{ name }, { sku }]
     }
-    
+
     if (barcode) {
       query.$or.push({ barcode })
     }
@@ -84,7 +84,7 @@ class ProductsService {
   // Validate brand exists and is active (if provided)
   private async validateBrand(brandId?: string) {
     if (!brandId) return null
-    
+
     const brand = await brandsService.getBrandById(brandId)
     if (!brand.isActive) {
       throw new ErrorWithStatus({
@@ -118,6 +118,7 @@ class ProductsService {
       shortDescription: payload.shortDescription,
       categoryId: new ObjectId(payload.categoryId),
       brandId: payload.brandId ? new ObjectId(payload.brandId) : undefined,
+      priceVariants: payload.priceVariants || [{ unit: 'Sản phẩm', price: 0, isDefault: true }],
       stockQuantity: payload.stockQuantity || 0,
       maxOrderQuantity: payload.maxOrderQuantity || 10,
       status: payload.status || 'active',
@@ -147,15 +148,56 @@ class ProductsService {
   // Get products with pagination and filters
   async getProducts(query: GetProductsQuery) {
     const page = parseInt(query.page || '1')
-    const limit = parseInt(query.limit || '20')
+    const limit = parseInt(query.limit || '1000') // Increased default limit to get all products for frontend filtering
     const skip = (page - 1) * limit
 
     // Build filter
     const filter: Record<string, unknown> = {}
 
     if (query.categoryId) {
-      filter.categoryId = new ObjectId(query.categoryId)
+      try {
+        // Find the target category and all its descendants
+        let targetCategory
+        if (ObjectId.isValid(query.categoryId)) {
+          targetCategory = await categoriesService.getCategoryById(query.categoryId)
+        } else {
+          targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
+        }
+
+
+        // Category path should be used directly - path already represents the full hierarchy
+        // For parent category with path '/thuc-pham-chuc-nang', we want to find:
+        // - Categories with path STARTING with '/thuc-pham-chuc-nang' (subcategories)
+        // - Or the parent category itself (by _id)
+        const categoryPath = targetCategory.path
+
+
+        // Escape special regex characters in the path
+        const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+        // Find all categories whose path starts with this category's path
+        const descendantCategories = await databaseService.categories
+          .find({
+            $or: [
+              { _id: targetCategory._id }, // Include the category itself
+              { path: { $regex: `^${escapedPath}/` } } // All direct descendants (path starts with parent path + /)
+            ]
+          })
+          .toArray()
+
+
+        const categoryIds = descendantCategories.map(cat => cat._id)
+
+        // Filter products that belong to any of these categories
+        filter.categoryId = { $in: categoryIds }
+      } catch (error) {
+        console.error('Error finding category:', error)
+        // If category not found, return empty result (no products)
+        filter.categoryId = null
+      }
     }
+
+
 
     if (query.brandId) {
       filter.brandId = new ObjectId(query.brandId)
@@ -265,9 +307,27 @@ class ProductsService {
           }
         },
         {
+          $lookup: {
+            from: 'productDetails',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'details'
+          }
+        },
+        {
+          $lookup: {
+            from: 'productMedia',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'media'
+          }
+        },
+        {
           $addFields: {
             category: { $arrayElemAt: ['$category', 0] },
-            brand: { $arrayElemAt: ['$brand', 0] }
+            brand: { $arrayElemAt: ['$brand', 0] },
+            details: { $arrayElemAt: ['$details', 0] },
+            media: { $arrayElemAt: ['$media', 0] }
           }
         }
       ])
@@ -282,6 +342,66 @@ class ProductsService {
 
     return products[0]
   }
+
+
+  // Get product by slug with populated category and brand data
+  async getProductBySlug(slug: string) {
+    const products = await databaseService.products
+      .aggregate([
+        { $match: { slug } },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'categoryId',
+            foreignField: '_id',
+            as: 'category'
+          }
+        },
+        {
+          $lookup: {
+            from: 'brands',
+            localField: 'brandId',
+            foreignField: '_id',
+            as: 'brand'
+          }
+        },
+        {
+          $lookup: {
+            from: 'productDetails',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'details'
+          }
+        },
+        {
+          $lookup: {
+            from: 'productMedia',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'media'
+          }
+        },
+        {
+          $addFields: {
+            category: { $arrayElemAt: ['$category', 0] },
+            brand: { $arrayElemAt: ['$brand', 0] },
+            details: { $arrayElemAt: ['$details', 0] },
+            media: { $arrayElemAt: ['$media', 0] }
+          }
+        }
+      ])
+      .toArray()
+
+    if (!products.length) {
+      throw new ErrorWithStatus({
+        message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    return products[0]
+  }
+
 
   // Update product
   async updateProduct(productId: string, payload: UpdateProductReqBody, lastModifiedBy: ObjectId) {

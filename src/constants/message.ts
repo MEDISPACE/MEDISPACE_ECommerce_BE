@@ -78,6 +78,7 @@ export const USERS_MESSAGES = {
     'Username must be 4-15 characters long and can only contain letters, numbers, and underscores',
   USERNAME_ALREADY_EXISTS: 'Username already exists',
   CURRENT_PASSWORD_IS_INCORRECT: 'Current password is incorrect',
+  OLD_PASSWORD_NOT_MATCH: 'Old password is incorrect',
   CHANGE_PASSWORD_SUCCESS: 'Change password successful',
   CONFIRM_PASSWORD_DO_NOT_MATCH: 'Confirm password do not match',
   GMAIL_NOT_VERIFIED: 'Gmail account is not verified',
@@ -96,7 +97,26 @@ export const USERS_MESSAGES = {
   CITY_INVALID: 'City is invalid',
   IS_DEFAULT_INVALID: 'Is default must be boolean',
   LISENSE_NUMBER_MUST_BE_STRING: 'License number must be a string',
-  LISENSE_NUMBER_LENGTH_INVALID: 'License number must be between 1 and 50 characters'
+  LISENSE_NUMBER_LENGTH_INVALID: 'License number must be between 1 and 50 characters',
+  UNAUTHENTICATED: 'Unauthenticated',
+  GET_WISHLIST_SUCCESS: 'Get wishlist successfully',
+  ADD_TO_WISHLIST_SUCCESS: 'Added to wishlist successfully',
+  REMOVE_FROM_WISHLIST_SUCCESS: 'Removed from wishlist successfully',
+  ADMIN_REQUIRED: 'Admin role required',
+  PHARMACIST_REQUIRED: 'Pharmacist role required',
+  ADMIN_OR_PHARMACIST_REQUIRED: 'Admin or Pharmacist role required'
+} as const
+
+export const ADDRESS_MESSAGES = {
+  VALIDATION_ERROR: 'Validation error',
+  MISSING_REQUIRED_FIELDS: 'Missing required fields',
+  MAX_ADDRESSES_REACHED: 'Maximum 5 addresses allowed',
+  ADDRESS_NOT_FOUND: 'Address not found',
+  ADD_ADDRESS_SUCCESS: 'Address added successfully',
+  UPDATE_ADDRESS_SUCCESS: 'Address updated successfully',
+  DELETE_ADDRESS_SUCCESS: 'Address deleted successfully',
+  SET_DEFAULT_ADDRESS_SUCCESS: 'Default address set successfully',
+  GET_ADDRESSES_SUCCESS: 'Get addresses successfully'
 } as const
 
 export const CATEGORIES_MESSAGES = {
@@ -108,7 +128,7 @@ export const CATEGORIES_MESSAGES = {
   CANNOT_DELETE_CATEGORY_WITH_PRODUCTS: 'Cannot delete category that contains products',
   INVALID_PARENT_CATEGORY: 'Invalid parent category - would create circular reference',
   MAX_LEVEL_EXCEEDED: 'Maximum category level exceeded (max 3 levels)',
-  
+
   // Field validation messages
   NAME_IS_REQUIRED: 'Category name is required',
   NAME_MUST_BE_STRING: 'Category name must be a string',
@@ -132,7 +152,7 @@ export const CATEGORIES_MESSAGES = {
   LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
   LEVEL_INVALID: 'Level must be between 0 and 10',
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
-  
+
   // Success messages
   CREATE_CATEGORY_SUCCESS: 'Category created successfully',
   UPDATE_CATEGORY_SUCCESS: 'Category updated successfully',
@@ -147,7 +167,7 @@ export const CATEGORIES_MESSAGES = {
 
 export const PRODUCTS_MESSAGES = {
   VALIDATION_ERROR: 'Validation error',
-  
+
   // Product Messages
   PRODUCT_NOT_FOUND: 'Product not found',
   PRODUCT_ALREADY_EXISTS: 'Product with this name or SKU already exists',
@@ -158,7 +178,7 @@ export const PRODUCTS_MESSAGES = {
   INSUFFICIENT_STOCK: 'Insufficient stock quantity',
   PRODUCT_DETAIL_NOT_FOUND: 'Product detail not found',
   PRODUCT_MEDIA_NOT_FOUND: 'Product media not found',
-  
+
   // Validation Messages
   NAME_IS_REQUIRED: 'Product name is required',
   NAME_MUST_BE_STRING: 'Product name must be a string',
@@ -188,7 +208,10 @@ export const PRODUCTS_MESSAGES = {
   FEATURED_IMAGE_MUST_BE_STRING: 'Featured image must be a string',
   FEATURED_IMAGE_URL_INVALID: 'Featured image must be a valid URL',
   PRODUCT_ID_INVALID: 'Product ID must be a valid ObjectId',
-  
+  PRICE_INVALID: 'Price must be a non-negative number',
+  ORIGINAL_PRICE_INVALID: 'Original price must be a non-negative number',
+  COST_PRICE_INVALID: 'Cost price must be a non-negative number',
+
   // Product Detail Validation
   DOSAGE_FORM_IS_REQUIRED: 'Dosage form is required',
   DOSAGE_FORM_INVALID: 'Dosage form must be tablet, capsule, syrup, injection, cream, or drops',
@@ -210,7 +233,7 @@ export const PRODUCTS_MESSAGES = {
   STRENGTH_LENGTH_INVALID: 'Strength must be up to 100 characters',
   INDICATIONS_MUST_BE_STRING: 'Indications must be a string',
   INDICATIONS_LENGTH_INVALID: 'Indications must be up to 1000 characters',
-  
+
   // Query Validation
   PAGE_INVALID: 'Page must be a positive integer',
   LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
@@ -220,7 +243,7 @@ export const PRODUCTS_MESSAGES = {
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
   MIN_STOCK_INVALID: 'Min stock must be a non-negative number',
   MAX_STOCK_INVALID: 'Max stock must be a non-negative number',
-  
+
   // Success Messages
   CREATE_PRODUCT_SUCCESS: 'Product created successfully',
   UPDATE_PRODUCT_SUCCESS: 'Product updated successfully',
@@ -238,12 +261,37 @@ export const PRODUCTS_MESSAGES = {
   DELETE_PRODUCT_MEDIA_SUCCESS: 'Product media deleted successfully'
 } as const
 
+export const CARTS_MESSAGES = {
+  VALIDATION_ERROR: 'Validation error',
+
+  // Cart operations
+  GET_CART_SUCCESS: 'Get cart successfully',
+  ADD_TO_CART_SUCCESS: 'Add to cart successfully',
+  UPDATE_CART_ITEM_SUCCESS: 'Update cart item successfully',
+  REMOVE_CART_ITEM_SUCCESS: 'Remove cart item successfully',
+  CLEAR_CART_SUCCESS: 'Clear cart successfully',
+  GET_CHECKOUT_DATA_SUCCESS: 'Get checkout data successfully',
+
+  // Validation messages
+  PRODUCT_ID_IS_REQUIRED: 'Product ID is required',
+  PRODUCT_ID_INVALID: 'Product ID must be a valid ObjectId',
+  QUANTITY_IS_REQUIRED: 'Quantity is required',
+  QUANTITY_INVALID: 'Quantity must be a positive number',
+  QUANTITY_MUST_BE_BETWEEN_1_AND_10: 'Quantity must be between 1 and 10',
+  PRODUCT_NOT_FOUND: 'Product not found',
+  INSUFFICIENT_STOCK: 'Insufficient stock quantity',
+  CART_ITEM_NOT_FOUND: 'Cart item not found',
+  INVALID_SESSION_ID: 'Invalid session ID',
+  CART_NOT_FOUND: 'Cart not found',
+  ITEM_NOT_FOUND_IN_CART: 'Item not found in cart'
+} as const
+
 export const BRANDS_MESSAGES = {
   VALIDATION_ERROR: 'Validation error',
   BRAND_NOT_FOUND: 'Brand not found',
   BRAND_ALREADY_EXISTS: 'Brand with this name or slug already exists',
   CANNOT_DELETE_BRAND_WITH_PRODUCTS: 'Cannot delete brand that has products',
-  
+
   // Validation Messages
   NAME_IS_REQUIRED: 'Brand name is required',
   NAME_MUST_BE_STRING: 'Brand name must be a string',
@@ -268,7 +316,7 @@ export const BRANDS_MESSAGES = {
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
   SORT_BY_INVALID: 'Sort by must be name, createdAt, or productCount',
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
-  
+
   // Success Messages
   CREATE_BRAND_SUCCESS: 'Brand created successfully',
   UPDATE_BRAND_SUCCESS: 'Brand updated successfully',
@@ -277,3 +325,309 @@ export const BRANDS_MESSAGES = {
   GET_BRAND_SUCCESS: 'Get brand successfully',
   TOGGLE_BRAND_STATUS_SUCCESS: 'Toggle brand status successfully'
 } as const
+
+export const ORDERS_MESSAGES = {
+  // Validation Messages
+  ORDER_ID_INVALID: 'Invalid order ID',
+  ORDER_ID_REQUIRED: 'Order ID is required',
+  ORDER_NOT_FOUND: 'Order not found',
+  CART_EMPTY: 'Cart is empty',
+  PRESCRIPTION_REQUIRED: 'Prescription required for some items in cart',
+  INVALID_ORDER_STATUS: 'Invalid order status',
+  INVALID_PAYMENT_STATUS: 'Invalid payment status',
+  INVALID_PAYMENT_METHOD: 'Invalid payment method',
+  ORDER_STATUS_INVALID: 'Invalid order status',
+  PAYMENT_STATUS_INVALID: 'Invalid payment status',
+  PAYMENT_METHOD_INVALID: 'Invalid payment method',
+  SHIPPING_ADDRESS_INVALID: 'Invalid shipping address',
+  SHIPPING_ADDRESS_REQUIRED: 'Shipping address is required',
+  FIRST_NAME_REQUIRED: 'First name is required',
+  LAST_NAME_REQUIRED: 'Last name is required',
+  PHONE_REQUIRED: 'Phone number is required',
+  EMAIL_REQUIRED: 'Email is required',
+  ADDRESS_REQUIRED: 'Address is required',
+  WARD_REQUIRED: 'Ward is required',
+  DISTRICT_REQUIRED: 'District is required',
+  PROVINCE_REQUIRED: 'Province is required',
+  PAYMENT_METHOD_REQUIRED: 'Payment method is required',
+  ORDER_STATUS_REQUIRED: 'Order status is required',
+  PAYMENT_STATUS_REQUIRED: 'Payment status is required',
+  NOTES_MUST_BE_STRING: 'Notes must be a string',
+  NOTES_TOO_LONG: 'Notes must be less than 500 characters',
+  TRACKING_NUMBER_MUST_BE_STRING: 'Tracking number must be a string',
+  TRACKING_NUMBER_TOO_LONG: 'Tracking number must be less than 100 characters',
+  ORDER_NUMBER_EXISTS: 'Order number already exists',
+  ITEMS_MUST_BE_ARRAY: 'Items must be an array',
+  IS_DIRECT_BUY_MUST_BE_BOOLEAN: 'Is direct buy must be a boolean',
+  SHIPPING_METHOD_INVALID: 'Invalid shipping method',
+  SHIPPING_METHOD_REQUIRED: 'Shipping method is required',
+
+  // Success Messages
+  CREATE_ORDER_SUCCESS: 'Order created successfully',
+  GET_ORDERS_SUCCESS: 'Get orders successfully',
+  GET_ORDER_SUCCESS: 'Get order successfully',
+  UPDATE_ORDER_STATUS_SUCCESS: 'Order status updated successfully',
+  UPDATE_PAYMENT_STATUS_SUCCESS: 'Payment status updated successfully',
+  CANCEL_ORDER_SUCCESS: 'Order cancelled successfully',
+
+  // Error Messages
+  CREATE_ORDER_FAILED: 'Failed to create order',
+  UPDATE_ORDER_FAILED: 'Failed to update order',
+  CANCEL_ORDER_FAILED: 'Failed to cancel order',
+  GET_ORDER_STATS_SUCCESS: 'Get order statistics successfully',
+  GET_PAYMENT_URL_SUCCESS: 'Get payment URL successfully',
+  PAYOS_CREATE_URL_FAILED: 'Failed to create PayOS payment URL',
+  MOMO_CREATE_URL_FAILED: 'Failed to create Momo payment URL',
+  INVALID_WEBHOOK_DATA: 'Invalid Webhook Data',
+  INVALID_SIGNATURE: 'Invalid signature',
+  PAYMENT_ORDER_INFO_PREFIX: 'Thanh toan don hang #'
+} as const
+
+export const PRESCRIPTIONS_MESSAGES = {
+  // Success Messages
+  UPLOAD_PRESCRIPTION_SUCCESS: 'Upload prescription successfully',
+  GET_PRESCRIPTIONS_SUCCESS: 'Get prescriptions successfully',
+  GET_PRESCRIPTION_SUCCESS: 'Get prescription successfully',
+  VERIFY_PRESCRIPTION_SUCCESS: 'Verify prescription successfully',
+  GET_PENDING_PRESCRIPTIONS_SUCCESS: 'Get pending prescriptions successfully',
+
+  // Error Messages
+  UPLOAD_PRESCRIPTION_FAILED: 'Failed to upload prescription',
+  PRESCRIPTION_NOT_FOUND: 'Prescription not found',
+  INVALID_PRESCRIPTION_STATUS: 'Invalid prescription status',
+  PRESCRIPTION_ALREADY_VERIFIED: 'Prescription already verified',
+  UNAUTHORIZED_TO_VERIFY: 'Unauthorized to verify prescription',
+  INVALID_MEDICATION_DATA: 'Invalid medication data',
+  MISSING_DOCTOR_INFO: 'Missing doctor information',
+  INVALID_PRESCRIPTION_DATE: 'Invalid prescription date',
+  GET_PRESCRIPTION_STATS_SUCCESS: 'Get prescription statistics successfully',
+  ACCESS_DENIED: 'Access denied'
+} as const
+
+export const PHARMACIST_MESSAGES = {
+  // Dashboard
+  GET_DASHBOARD_STATS_SUCCESS: 'Get dashboard stats successfully',
+  GET_RECENT_ACTIVITIES_SUCCESS: 'Get recent activities successfully',
+
+  // Profile
+  GET_PROFILE_SUCCESS: 'Get pharmacist profile successfully',
+  UPDATE_PROFILE_SUCCESS: 'Update pharmacist profile successfully',
+  UPDATE_SETTINGS_SUCCESS: 'Update pharmacist settings successfully',
+
+  // Patient
+  GET_PATIENT_INFO_SUCCESS: 'Get patient information successfully',
+  GET_PATIENT_HISTORY_SUCCESS: 'Get patient history successfully',
+  PATIENT_NOT_FOUND: 'Patient not found',
+
+  // Medical Info
+  GET_MEDICAL_INFO_SUCCESS: 'Get patient medical information successfully',
+  UPDATE_MEDICAL_INFO_SUCCESS: 'Update patient medical information successfully',
+  ADD_ALLERGY_SUCCESS: 'Add allergy to patient successfully',
+
+  // Patient Notes
+  CREATE_NOTE_SUCCESS: 'Create patient note successfully',
+  GET_NOTES_SUCCESS: 'Get patient notes successfully',
+  UPDATE_NOTE_SUCCESS: 'Update patient note successfully',
+
+  // Medications
+  GET_MEDICATIONS_SUCCESS: 'Get patient medications successfully',
+  CHECK_INTERACTIONS_SUCCESS: 'Check drug interactions successfully',
+
+  // Order Management
+  CREATE_ORDER_SUCCESS: 'Create order successfully',
+  GET_ORDERS_SUCCESS: 'Get orders successfully',
+  GET_ORDER_DETAILS_SUCCESS: 'Get order details successfully',
+  UPDATE_ORDER_STATUS_SUCCESS: 'Update order status successfully',
+  ORDER_NOT_FOUND: 'Order not found',
+  GET_ORDER_STATS_SUCCESS: 'Get order statistics successfully',
+
+  // Settings & Profile
+  UPDATE_PASSWORD_SUCCESS: 'Update password successfully',
+  GET_WORKING_STATS_SUCCESS: 'Get working statistics successfully',
+  UPDATE_ONLINE_STATUS_SUCCESS: 'Update online status successfully',
+
+  // Error Messages
+  UNAUTHORIZED_ACCESS: 'Unauthorized access',
+  INVALID_PHARMACIST_ID: 'Invalid pharmacist ID',
+  PHARMACIST_NOT_FOUND: 'Pharmacist not found',
+  OLD_PASSWORD_INCORRECT: 'Old password is incorrect',
+  OLD_PASSWORD_IS_REQUIRED: 'Old password is required',
+  NEW_PASSWORD_IS_REQUIRED: 'New password is required',
+  PASSWORD_MUST_BE_STRONG: 'Password must be at least 6 characters long',
+  LICENSE_REQUIRED: 'Pharmacist does not have a license',
+  PHARMACIST_NOT_ONLINE: 'Pharmacist is currently offline',
+  CHECK_LICENSE_FAILED: 'Failed to check pharmacist license',
+  ONLY_PHARMACIST_ACCESS: 'Only pharmacists can access this feature'
+} as const
+
+export const CHATS_MESSAGES = {
+  // Validation Messages
+  CONVERSATION_ID_REQUIRED: 'Conversation ID is required',
+  CONVERSATION_ID_INVALID: 'Conversation ID must be a valid ObjectId',
+  PHARMACIST_ID_REQUIRED: 'Pharmacist ID is required',
+  PHARMACIST_ID_INVALID: 'Pharmacist ID must be a valid ObjectId',
+  CONTENT_REQUIRED: 'Message content is required',
+  CONTENT_MUST_BE_STRING: 'Message content must be a string',
+  CONTENT_TOO_LONG: 'Message content must be less than 2000 characters',
+  MESSAGE_TYPE_INVALID: 'Message type must be text or image',
+  IMAGE_URL_MUST_BE_STRING: 'Image URL must be a string',
+  IMAGE_URL_INVALID: 'Image URL must be a valid URL',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+
+  // Success Messages
+  GET_CONVERSATIONS_SUCCESS: 'Get conversations successfully',
+  GET_CONVERSATION_SUCCESS: 'Get conversation successfully',
+  CREATE_CONVERSATION_SUCCESS: 'Create conversation successfully',
+  SEND_MESSAGE_SUCCESS: 'Message sent successfully',
+  GET_MESSAGES_SUCCESS: 'Get messages successfully',
+  MARK_AS_READ_SUCCESS: 'Messages marked as read successfully',
+  GET_PHARMACIST_SUCCESS: 'Get pharmacist information successfully',
+  DELETE_CONVERSATION_SUCCESS: 'Delete conversation successfully',
+
+  // Error Messages
+  CONVERSATION_NOT_FOUND: 'Conversation not found',
+  MESSAGE_NOT_FOUND: 'Message not found',
+  UNAUTHORIZED_ACCESS: 'You are not authorized to access this conversation',
+  ONLY_CUSTOMERS_CAN_CREATE_CONVERSATION: 'Only customers can create conversations with pharmacists',
+  SEND_MESSAGE_FAILED: 'Failed to send message',
+  GET_MESSAGES_FAILED: 'Failed to get messages',
+  PHARMACIST_NOT_FOUND: 'Pharmacist not found',
+  CUSTOMER_NOT_FOUND: 'Customer not found',
+  NO_PHARMACIST_AVAILABLE: 'No pharmacist available at the moment'
+} as const
+
+export const ADMIN_MESSAGES = {
+  GET_DASHBOARD_STATS_SUCCESS: 'Get dashboard statistics successfully',
+  GET_RECENT_ACTIVITIES_SUCCESS: 'Get recent activities successfully',
+  GET_SYSTEM_HEALTH_SUCCESS: 'Get system health successfully',
+  GET_ALL_USERS_SUCCESS: 'Get all users successfully',
+  GET_USER_STATS_SUCCESS: 'Get user statistics successfully',
+  GET_PHARMACIST_STATS_SUCCESS: 'Get pharmacist statistics successfully',
+  CREATE_USER_SUCCESS: 'User created successfully',
+  UPDATE_USER_SUCCESS: 'User updated successfully',
+  DELETE_USER_SUCCESS: 'User deleted successfully',
+  RESET_USER_PASSWORD_SUCCESS: 'User password reset successfully',
+  VERIFY_USER_EMAIL_SUCCESS: 'User email verified successfully',
+  GET_REPORTS_ANALYTICS_SUCCESS: 'Get reports analytics successfully',
+  GET_REVENUE_ANALYTICS_SUCCESS: 'Get revenue analytics successfully',
+  GET_PRODUCT_ANALYTICS_SUCCESS: 'Get product analytics successfully',
+  GET_CUSTOMER_ANALYTICS_SUCCESS: 'Get customer analytics successfully'
+} as const
+
+export const REVIEWS_MESSAGES = {
+  // Error Messages
+  ORDER_NOT_FOUND_OR_NOT_YOURS: 'Order not found or does not belong to you',
+  ORDER_NOT_DELIVERED: 'You can only review products from delivered orders',
+  PRODUCT_NOT_IN_ORDER: 'Product not found in this order',
+  REVIEW_ALREADY_EXISTS: 'You have already reviewed this product. You can edit your existing review instead.',
+  REVIEW_NOT_FOUND: 'Review not found',
+  NOT_YOUR_REVIEW: 'You can only edit your own reviews',
+  RATING_INVALID: 'Rating must be between 1 and 5',
+  TITLE_TOO_LONG: 'Title must not exceed 200 characters',
+  COMMENT_TOO_SHORT: 'Comment must be at least 10 characters',
+  COMMENT_TOO_LONG: 'Comment must not exceed 2000 characters',
+  TOO_MANY_IMAGES: 'Maximum 5 images allowed',
+  ALREADY_VOTED_HELPFUL: 'You have already marked this review as helpful',
+  REJECTION_REASON_REQUIRED: 'Rejection reason is required',
+  RATING_REQUIRED: 'Rating is required',
+  TITLE_MUST_BE_STRING: 'Title must be a string',
+  COMMENT_REQUIRED: 'Review comment is required',
+  COMMENT_MUST_BE_STRING: 'Comment must be a string',
+  COMMENT_LENGTH_INVALID: 'Comment must be between 10 and 2000 characters',
+  IMAGES_MUST_BE_ARRAY: 'Images must be an array',
+  REVIEW_ID_REQUIRED: 'Review ID is required',
+  REVIEW_ID_INVALID: 'Invalid review ID format',
+  STATUS_REQUIRED: 'Status is required',
+  STATUS_INVALID: 'Status must be either approved or rejected',
+  NOTES_MUST_BE_STRING: 'Notes must be a string',
+  SORT_BY_INVALID: 'Sort by must be one of: newest, oldest, highest, lowest, helpful',
+
+  // Success
+  CREATE_REVIEW_SUCCESS: 'Review created successfully. It will be visible after moderation.',
+  GET_PRODUCT_REVIEWS_SUCCESS: 'Get product reviews successfully',
+  GET_PRODUCT_REVIEW_STATS_SUCCESS: 'Get product review stats successfully',
+  GET_USER_REVIEWS_SUCCESS: 'Get user reviews successfully',
+  UPDATE_REVIEW_SUCCESS: 'Review updated successfully. It will be re-moderated if content changed.',
+  DELETE_REVIEW_SUCCESS: 'Review deleted successfully',
+  MARK_REVIEW_HELPFUL_SUCCESS: 'Review marked as helpful',
+  GET_ADMIN_REVIEWS_SUCCESS: 'Get admin reviews successfully',
+  GET_ADMIN_REVIEW_STATS_SUCCESS: 'Get admin review stats successfully',
+  MODERATE_REVIEW_SUCCESS: 'Review moderated successfully',
+  BULK_MODERATE_SUCCESS: 'Bulk moderate reviews completed successfully'
+} as const
+
+export const ARTICLES_MESSAGES = {
+  // Validation Messages
+  ARTICLE_ID_INVALID: 'Article ID must be a valid ObjectId',
+  ARTICLE_NOT_FOUND: 'Article not found',
+  TITLE_IS_REQUIRED: 'Article title is required',
+  TITLE_MUST_BE_STRING: 'Article title must be a string',
+  TITLE_LENGTH_INVALID: 'Article title must be between 1 and 200 characters',
+  SLUG_MUST_BE_STRING: 'Article slug must be a string',
+  SLUG_FORMAT_INVALID: 'Article slug must contain only lowercase letters, numbers, and hyphens',
+  SLUG_LENGTH_INVALID: 'Article slug must be between 1 and 200 characters',
+  SLUG_ALREADY_EXISTS: 'Article with this slug already exists',
+  EXCERPT_IS_REQUIRED: 'Article excerpt is required',
+  EXCERPT_MUST_BE_STRING: 'Article excerpt must be a string',
+  EXCERPT_LENGTH_INVALID: 'Article excerpt must be between 10 and 500 characters',
+  CONTENT_IS_REQUIRED: 'Article content is required',
+  CONTENT_MUST_BE_STRING: 'Article content must be a string',
+  CONTENT_LENGTH_INVALID: 'Article content must be at least 50 characters',
+  CATEGORY_ID_IS_REQUIRED: 'Category ID is required',
+  CATEGORY_ID_INVALID: 'Category ID must be a valid ObjectId',
+  FEATURED_IMAGE_MUST_BE_STRING: 'Featured image must be a string',
+  FEATURED_IMAGE_URL_INVALID: 'Featured image must be a valid URL',
+  STATUS_INVALID: 'Status must be draft, pending, published, or archived',
+  IS_FEATURED_INVALID: 'Is featured must be a boolean',
+  IS_PINNED_INVALID: 'Is pinned must be a boolean',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+  SEARCH_MUST_BE_STRING: 'Search query must be a string',
+  SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
+  SORT_BY_INVALID: 'Sort by must be createdAt, publishedAt, viewCount, or title',
+  SORT_ORDER_INVALID: 'Sort order must be asc or desc',
+
+  // Success Messages
+  CREATE_ARTICLE_SUCCESS: 'Article created successfully',
+  UPDATE_ARTICLE_SUCCESS: 'Article updated successfully',
+  DELETE_ARTICLE_SUCCESS: 'Article deleted successfully',
+  GET_ARTICLES_SUCCESS: 'Get articles successfully',
+  GET_ARTICLE_SUCCESS: 'Get article successfully',
+  PUBLISH_ARTICLE_SUCCESS: 'Article published successfully',
+  ARCHIVE_ARTICLE_SUCCESS: 'Article archived successfully',
+  INCREMENT_VIEW_SUCCESS: 'Article view count updated',
+  GET_RELATED_ARTICLES_SUCCESS: 'Get related articles successfully'
+} as const
+
+export const HEALTH_CATEGORIES_MESSAGES = {
+  // Validation Messages
+  CATEGORY_ID_INVALID: 'Health category ID must be a valid ObjectId',
+  CATEGORY_NOT_FOUND: 'Health category not found',
+  CATEGORY_ALREADY_EXISTS: 'Health category with this name or slug already exists',
+  NAME_IS_REQUIRED: 'Category name is required',
+  NAME_MUST_BE_STRING: 'Category name must be a string',
+  NAME_LENGTH_INVALID: 'Category name must be between 1 and 100 characters',
+  SLUG_MUST_BE_STRING: 'Category slug must be a string',
+  SLUG_FORMAT_INVALID: 'Category slug must contain only lowercase letters, numbers, and hyphens',
+  SLUG_LENGTH_INVALID: 'Category slug must be between 1 and 100 characters',
+  DESCRIPTION_IS_REQUIRED: 'Description is required',
+  DESCRIPTION_MUST_BE_STRING: 'Description must be a string',
+  DESCRIPTION_LENGTH_INVALID: 'Description must be between 1 and 500 characters',
+  ORDER_INVALID: 'Order must be a non-negative number',
+  IS_ACTIVE_INVALID: 'Is active must be a boolean',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+  SEARCH_MUST_BE_STRING: 'Search query must be a string',
+  SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
+  SORT_BY_INVALID: 'Sort by must be name, order, articleCount, or createdAt',
+  SORT_ORDER_INVALID: 'Sort order must be asc or desc',
+
+  // Success Messages
+  CREATE_CATEGORY_SUCCESS: 'Health category created successfully',
+  UPDATE_CATEGORY_SUCCESS: 'Health category updated successfully',
+  DELETE_CATEGORY_SUCCESS: 'Health category deleted successfully',
+  GET_CATEGORIES_SUCCESS: 'Get health categories successfully',
+  GET_CATEGORY_SUCCESS: 'Get health category successfully'
+} as const
+
