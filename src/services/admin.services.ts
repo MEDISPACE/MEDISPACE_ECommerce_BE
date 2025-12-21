@@ -160,7 +160,11 @@ class AdminService {
         const activeProducts = products.filter(p => p.isActive).length
         const outOfStockProducts = products.filter(p => p.stockQuantity === 0).length
         const lowStockProducts = products.filter(p => p.stockQuantity > 0 && p.stockQuantity < 20).length
-        const totalProductValue = products.reduce((sum, p) => sum + (p.price * p.stockQuantity), 0)
+        const totalProductValue = products.reduce((sum, p) => {
+            const defaultVariant = p.priceVariants?.find((v: any) => v.isDefault) || p.priceVariants?.[0]
+            const price = defaultVariant?.price || 0
+            return sum + (price * p.stockQuantity)
+        }, 0)
 
         // Prescription statistics
         const [totalPrescriptions, pendingPrescriptions, approvedPrescriptions, rejectedPrescriptions] = await Promise.all([
