@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { ParamsDictionary } from 'express-serve-static-core'
 import { ObjectId } from 'mongodb'
+import { UserRole } from '~/constants/enum'
 import { TokenPayload } from '~/models/requests/User.request'
 import {
   UploadPrescriptionReqBody,
@@ -10,6 +11,7 @@ import {
 import { PRESCRIPTIONS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import prescriptionsService from '~/services/prescriptions.services'
+import databaseService from '~/services/database.services'
 
 // Upload prescription - Customer
 export const uploadPrescriptionController = async (
@@ -48,16 +50,30 @@ export const getPrescriptionsController = async (
   }
 }
 
-// Get prescription by ID - Customer
+// Get prescription by ID - Customer (owner) or Pharmacist
 export const getPrescriptionByIdController = async (req: Request<{ prescriptionId: string }>, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const result = await prescriptionsService.getPrescriptionById(req.params.prescriptionId)
 
-  // Check if prescription belongs to user
-  if (result.customerId.toString() !== userId) {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      message: PRESCRIPTIONS_MESSAGES.ACCESS_DENIED
-    })
+  // Allow access if:
+  // 1. User is the prescription owner (customer)
+  // 2. User is a pharmacist (check via req.pharmacist set by authenticatePharmacist middleware)
+  const isOwner = result.customerId.toString() === userId
+  // If accessing as pharmacist, the pharmacist middleware would have set req.pharmacist
+  // But since we don't require that middleware for this route, we check the user's role
+  const pharmacist = req.pharmacist
+  const isPharmacist = !!pharmacist
+
+  if (!isOwner && !isPharmacist) {
+    // If not owner, try to check if user is pharmacist by looking up in database
+    const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
+    const userIsPharmacist = user?.role === UserRole.Pharmacist
+
+    if (!userIsPharmacist) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        message: PRESCRIPTIONS_MESSAGES.ACCESS_DENIED
+      })
+    }
   }
 
   return res.status(HTTP_STATUS.OK).json({
