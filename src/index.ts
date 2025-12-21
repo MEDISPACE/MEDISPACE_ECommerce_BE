@@ -22,6 +22,7 @@ import reviewsRouter from './routes/reviews.routes'
 import chatsRouter from './routes/chats.routes'
 import articlesRouter from './routes/articles.routes'
 import healthCategoriesRouter from './routes/healthCategories.routes'
+import ghnRouter from './routes/ghn.routes'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 import { initFolder } from './utils/file'
@@ -65,6 +66,7 @@ app.use('/reviews', reviewsRouter)
 app.use('/chats', chatsRouter)
 app.use('/articles', articlesRouter)
 app.use('/health-categories', healthCategoriesRouter)
+app.use('/ghn', ghnRouter)
 
 
 // Register central error handler so validation and other errors return JSON

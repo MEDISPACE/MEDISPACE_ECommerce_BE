@@ -11,6 +11,9 @@ export interface Address {
   address: string
   type: 'home' | 'office' | 'other'
   isDefault: boolean
+  provinceId?: number
+  districtId?: number
+  wardCode?: string
 }
 
 export interface MedicalProfile {
