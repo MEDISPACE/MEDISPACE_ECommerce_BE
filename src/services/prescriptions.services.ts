@@ -101,11 +101,38 @@ class PrescriptionsService {
     }
   }
 
-  // Get prescription by ID
+  // Get prescription by ID with user info populated
   async getPrescriptionById(prescriptionId: string) {
-    const prescription = await databaseService.prescriptions.findOne({
-      _id: new ObjectId(prescriptionId)
-    })
+    const prescriptions = await databaseService.prescriptions
+      .aggregate([
+        {
+          $match: { _id: new ObjectId(prescriptionId) }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'customerId',
+            foreignField: '_id',
+            as: 'customerInfo'
+          }
+        },
+        {
+          $addFields: {
+            customer: { $arrayElemAt: ['$customerInfo', 0] }
+          }
+        },
+        {
+          $project: {
+            customerInfo: 0, // Remove the array field
+            'customer.password': 0, // Remove sensitive fields
+            'customer.forgotPasswordToken': 0,
+            'customer.emailVerifyToken': 0
+          }
+        }
+      ])
+      .toArray()
+
+    const prescription = prescriptions[0]
 
     if (!prescription) {
       throw new ErrorWithStatus({
