@@ -83,3 +83,23 @@ export const payOSIpnController = async (req: Request, res: Response) => {
         return res.json({ success: false })
     }
 }
+
+// PayOS Return
+export const payOSReturnController = async (req: Request, res: Response) => {
+    try {
+        const { orderId, status, code } = req.query
+
+        // Verify payment status from PayOS
+        const isSuccess = status === 'PAID' || code === '00'
+
+        if (isSuccess && orderId) {
+            // Update payment status immediately on return
+            await orderService.updatePaymentStatus(new ObjectId(orderId as string), 'paid')
+        }
+
+        const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${orderId}&paymentStatus=${isSuccess ? 'success' : 'failed'}`
+        return res.redirect(redirectUrl)
+    } catch (error) {
+        return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
+    }
+}

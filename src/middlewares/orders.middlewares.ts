@@ -4,7 +4,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 import { validate } from '~/utils/validation'
 import { ORDERS_MESSAGES } from '~/constants/message'
-import { PaymentMethod } from '~/constants/enum'
+import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 
 // Order ID validation
 const orderIdSchema = {
@@ -66,6 +66,14 @@ const paymentMethodSchema = {
   }
 }
 
+// Shipping method validation
+const shippingMethodSchema = {
+  isIn: {
+    options: [[...Object.values(ShippingMethod)]],
+    errorMessage: ORDERS_MESSAGES.SHIPPING_METHOD_INVALID
+  }
+}
+
 // Order status validation
 const orderStatusSchema = {
   isIn: {
@@ -86,12 +94,28 @@ const paymentStatusSchema = {
 export const createOrderValidator = validate(
   checkSchema(
     {
+      items: {
+        optional: true,
+        isArray: {
+          errorMessage: ORDERS_MESSAGES.ITEMS_MUST_BE_ARRAY
+        }
+      },
+      isDirectBuy: {
+        optional: true,
+        isBoolean: {
+          errorMessage: ORDERS_MESSAGES.IS_DIRECT_BUY_MUST_BE_BOOLEAN
+        }
+      },
       shippingAddress: shippingAddressSchema,
       paymentMethod: {
         ...paymentMethodSchema,
         notEmpty: {
           errorMessage: ORDERS_MESSAGES.PAYMENT_METHOD_REQUIRED
         }
+      },
+      shippingMethod: {
+        ...shippingMethodSchema,
+        optional: true
       },
       notes: {
         optional: true,
