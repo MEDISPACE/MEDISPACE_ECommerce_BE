@@ -42,6 +42,12 @@ export enum PaymentMethod {
   PayOS = 'payos'
 }
 
+export enum ShippingMethod {
+  Standard = 'standard',
+  Fast = 'fast',
+  Express = 'express'
+}
+
 export enum ReviewStatus {
   Pending = 'pending',
   Approved = 'approved',

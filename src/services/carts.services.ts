@@ -184,7 +184,7 @@ class CartService {
   }
 
   // Update item quantity
-  async updateItemQuantity(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string) {
+  async updateItemQuantity(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string, unit?: string) {
     if (quantity < 1 || quantity > 10) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
@@ -212,7 +212,13 @@ class CartService {
     const { cart } = await this.getCart(userId, sessionId)
 
     // Check if item exists in cart
-    const itemExists = cart.items.some((item: CartItem) => item.productId.toString() === productId.toString())
+    const itemExists = cart.items.some((item: CartItem) => {
+      if (unit) {
+        return item.productId.toString() === productId.toString() && item.unit === unit
+      }
+      return item.productId.toString() === productId.toString()
+    })
+
     if (!itemExists) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.ITEM_NOT_FOUND_IN_CART,
@@ -222,7 +228,7 @@ class CartService {
 
     // Convert to Cart instance and update
     const cartInstance = new Cart(cart)
-    cartInstance.updateItemQuantity(productId, quantity)
+    cartInstance.updateItemQuantity(productId, quantity, unit)
 
     // Update in database
     await databaseService.carts.updateOne(
@@ -245,7 +251,7 @@ class CartService {
   }
 
   // Update item unit (change unit and price)
-  async updateItemUnit(productId: ObjectId, unit: string, userId?: ObjectId, sessionId?: string) {
+  async updateItemUnit(productId: ObjectId, unit: string, userId?: ObjectId, sessionId?: string, currentUnit?: string) {
     // Get product to find the price for the selected unit
     const product = await productsService.getProductById(productId.toString())
     if (!product) {
@@ -268,7 +274,13 @@ class CartService {
     const { cart } = await this.getCart(userId, sessionId)
 
     // Check if item exists in cart
-    const itemExists = cart.items.some((item: CartItem) => item.productId.toString() === productId.toString())
+    const itemExists = cart.items.some((item: CartItem) => {
+      if (currentUnit) {
+        return item.productId.toString() === productId.toString() && item.unit === currentUnit
+      }
+      return item.productId.toString() === productId.toString()
+    })
+
     if (!itemExists) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.ITEM_NOT_FOUND_IN_CART,
@@ -278,7 +290,7 @@ class CartService {
 
     // Convert to Cart instance and update
     const cartInstance = new Cart(cart)
-    cartInstance.updateItemUnit(productId, unit, variant.price)
+    cartInstance.updateItemUnit(productId, unit, variant.price, currentUnit)
 
     // Update in database
     await databaseService.carts.updateOne(
@@ -301,12 +313,13 @@ class CartService {
   }
 
   // Remove item from cart
-  async removeItemFromCart(productId: ObjectId, userId?: ObjectId, sessionId?: string) {
+  // Remove item from cart
+  async removeItemFromCart(productId: ObjectId, userId?: ObjectId, sessionId?: string, unit?: string) {
     const { cart } = await this.getCart(userId, sessionId)
 
     // Convert to Cart instance and remove
     const cartInstance = new Cart(cart)
-    cartInstance.removeItem(productId)
+    cartInstance.removeItem(productId, unit)
 
     // Update in database
     await databaseService.carts.updateOne(
