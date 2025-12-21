@@ -23,9 +23,10 @@ export class PayOSProvider implements PaymentProvider {
         const orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000))
 
         const appUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+        const apiUrl = process.env.API_URL || 'http://localhost:8000'
 
-        // Append orderId to return/cancel URLs to identify the order on frontend return
-        const returnUrl = `${appUrl}/order/success?orderId=${order._id}&paymentStatus=success`
+        // Return URL goes to backend first to verify and update payment status
+        const returnUrl = `${apiUrl}/payment/payos/return?orderId=${order._id}`
         const cancelUrl = `${appUrl}/order/success?orderId=${order._id}&paymentStatus=failed`
 
         // Description format: "DH {orderNumber}"

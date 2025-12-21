@@ -166,8 +166,14 @@ export default class Cart {
   }
 
   // Update item quantity
-  updateItemQuantity(productId: ObjectId, quantity: number) {
-    const item = this.items.find((item) => item.productId.toString() === productId.toString())
+  updateItemQuantity(productId: ObjectId, quantity: number, unit?: string) {
+    const item = this.items.find((item) => {
+      if (unit) {
+        return item.productId.toString() === productId.toString() && item.unit === unit
+      }
+      return item.productId.toString() === productId.toString()
+    })
+
     if (item) {
       item.quantity = quantity
       item.totalPrice = quantity * item.unitPrice
@@ -176,19 +182,53 @@ export default class Cart {
   }
 
   // Update item unit and price
-  updateItemUnit(productId: ObjectId, unit: string, unitPrice: number) {
-    const item = this.items.find((item) => item.productId.toString() === productId.toString())
-    if (item) {
-      item.unit = unit
-      item.unitPrice = unitPrice
-      item.totalPrice = item.quantity * unitPrice
+  // When updating unit, we might merge with existing item if target unit already exists
+  updateItemUnit(productId: ObjectId, unit: string, unitPrice: number, currentUnit?: string) {
+    // If currentUnit provided, find exact item to update
+    const itemIndex = this.items.findIndex((item) => {
+      if (currentUnit) {
+        return item.productId.toString() === productId.toString() && item.unit === currentUnit
+      }
+      return item.productId.toString() === productId.toString()
+    })
+
+    if (itemIndex !== -1) {
+      const item = this.items[itemIndex]
+
+      // Check if another item with target unit already exists
+      const existingTargetItemIndex = this.items.findIndex(
+        (i, idx) => idx !== itemIndex && i.productId.toString() === productId.toString() && i.unit === unit
+      )
+
+      if (existingTargetItemIndex !== -1) {
+        // Merge with existing item
+        const targetItem = this.items[existingTargetItemIndex]
+        targetItem.quantity += item.quantity
+        targetItem.totalPrice = targetItem.quantity * targetItem.unitPrice
+        // Remove the old item
+        this.items.splice(itemIndex, 1)
+      } else {
+        // Just update the unit and price
+        item.unit = unit
+        item.unitPrice = unitPrice
+        item.totalPrice = item.quantity * unitPrice
+      }
+
       this.calculateTotals()
     }
   }
 
   // Remove item from cart
-  removeItem(productId: ObjectId) {
-    this.items = this.items.filter((item) => item.productId.toString() !== productId.toString())
+  removeItem(productId: ObjectId, unit?: string) {
+    this.items = this.items.filter((item) => {
+      if (unit) {
+        // Remove only if both productId and unit match
+        return !(item.productId.toString() === productId.toString() && item.unit === unit)
+      } else {
+        // Fallback: remove all items with productId
+        return item.productId.toString() !== productId.toString()
+      }
+    })
     this.calculateTotals()
   }
 

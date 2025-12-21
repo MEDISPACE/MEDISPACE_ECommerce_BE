@@ -1,5 +1,11 @@
 // Order Request Types
 export interface CreateOrderReqBody {
+  items?: {
+    productId: string
+    quantity: number
+    unit?: string
+  }[]
+  isDirectBuy?: boolean
   shippingAddress: {
     firstName: string
     lastName: string
@@ -12,6 +18,7 @@ export interface CreateOrderReqBody {
     postalCode?: string
   }
   paymentMethod: string // 'cod', 'bank_transfer', 'credit_card', 'e_wallet'
+  shippingMethod?: string // 'standard', 'fast', 'express'
   notes?: string
 }
 
