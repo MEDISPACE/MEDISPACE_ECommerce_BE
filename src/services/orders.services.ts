@@ -5,6 +5,7 @@ import cartService from './carts.services'
 import emailService from './email.services'
 import paymentService from './payment.services'
 import productsService from './products.services'
+import { ghnService } from './ghn.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
@@ -13,7 +14,7 @@ import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 class OrderService {
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
-    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod } = payload
+    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod, estimatedDeliveryDate } = payload
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -74,7 +75,7 @@ class OrderService {
           // Treat null/undefined/empty string as equivalent for unit comparison
           const cartItemUnit = cartItem.unit || undefined
 
-          return selectedItems.some(selectedItem => {
+          return selectedItems.some((selectedItem: any) => {
             const selectedId = selectedItem.productId
             const selectedUnit = selectedItem.unit || undefined
 
@@ -107,6 +108,21 @@ class OrderService {
       baseShippingFee = 45000
     } else if (method === ShippingMethod.Express) {
       baseShippingFee = 60000
+    } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
+      try {
+        const feeData = await ghnService.calculateFee({
+          to_district_id: shippingAddress.districtId,
+          to_ward_code: shippingAddress.wardCode,
+          weight: 2000, // Estimated 2kg
+          service_type_id: 2 // Standard
+        })
+        if (feeData && feeData.total) {
+          baseShippingFee = feeData.total
+        }
+      } catch (error) {
+        console.error('GHN Fee Calculation Failed:', error)
+        // Fallback to default 30000 is already set
+      }
     }
 
     // Apply Freeship logic: >= 300k -> Discount 30k ship
@@ -141,7 +157,8 @@ class OrderService {
       shippingFee,
       discountAmount,
       totalAmount,
-      notes
+      notes,
+      estimatedDeliveryDate
     })
 
     const result = await databaseService.orders.insertOne(order)
