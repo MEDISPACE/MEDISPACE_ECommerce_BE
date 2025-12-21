@@ -236,7 +236,7 @@ export const PRODUCTS_MESSAGES = {
 
   // Query Validation
   PAGE_INVALID: 'Page must be a positive integer',
-  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 5000',
   SEARCH_MUST_BE_STRING: 'Search query must be a string',
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
   SORT_BY_INVALID: 'Sort by must be name, createdAt, stockQuantity, or sku',

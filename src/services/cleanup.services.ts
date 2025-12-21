@@ -2,7 +2,7 @@ import * as cron from 'node-cron'
 import databaseService from './database.services'
 
 // Time in hours after which unpaid online payment orders will be cancelled
-const ABANDONED_ORDER_TIMEOUT_HOURS = 2
+const ABANDONED_ORDER_TIMEOUT_HOURS = 24
 
 class CleanupService {
   // Cleanup expired carts - chạy mỗi ngày
@@ -58,10 +58,31 @@ class CleanupService {
     const cutoffTime = new Date()
     cutoffTime.setHours(cutoffTime.getHours() - ABANDONED_ORDER_TIMEOUT_HOURS)
 
-    // Find and update orders that:
-    // 1. Have paymentStatus = 'pending'
-    // 2. Have online payment method (not 'cod')
-    // 3. Were created more than ABANDONED_ORDER_TIMEOUT_HOURS ago
+    // Find orders that need to be cancelled
+    const ordersToCancel = await databaseService.orders.find({
+      paymentStatus: 'pending',
+      paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
+      orderStatus: { $nin: ['cancelled', 'delivered'] },
+      createdAt: { $lt: cutoffTime }
+    }).toArray()
+
+    // Restore stock for each order before cancelling
+    for (const order of ordersToCancel) {
+      for (const item of order.items || []) {
+        const product = await databaseService.products.findOne({ _id: item.productId })
+        if (product) {
+          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+          const quantityPerUnit = variant?.quantityPerUnit || 1
+          const stockToRestore = item.quantity * quantityPerUnit
+          await databaseService.products.updateOne(
+            { _id: item.productId },
+            { $inc: { stockQuantity: stockToRestore } }
+          )
+        }
+      }
+    }
+
+    // Now update all orders to cancelled status
     const result = await databaseService.orders.updateMany(
       {
         paymentStatus: 'pending',
