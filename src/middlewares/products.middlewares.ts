@@ -9,7 +9,10 @@ import { validate } from '~/utils/validation'
 const productIdSchema = {
   custom: {
     options: async (value: string) => {
-      if (!ObjectId.isValid(value)) {
+      // Accept either an ObjectId or a slug (e.g. product slug like 'paracetamol-500mg')
+      const isObjectId = ObjectId.isValid(value)
+      const isSlug = typeof value === 'string' && /^[a-z0-9-]+$/.test(value)
+      if (!isObjectId && !isSlug) {
         throw new ErrorWithStatus({
           message: PRODUCTS_MESSAGES.PRODUCT_ID_INVALID,
           status: HTTP_STATUS.BAD_REQUEST
@@ -185,7 +188,7 @@ const pageSchema = {
 const limitSchema = {
   optional: true,
   isInt: {
-    options: { min: 1, max: 100 },
+    options: { min: 1, max: 5000 },
     errorMessage: PRODUCTS_MESSAGES.LIMIT_INVALID
   }
 }
@@ -226,6 +229,30 @@ const stockFilterSchema = {
   }
 }
 
+const priceSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: PRODUCTS_MESSAGES.PRICE_INVALID
+  }
+}
+
+const originalPriceSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: PRODUCTS_MESSAGES.ORIGINAL_PRICE_INVALID
+  }
+}
+
+const costPriceSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: PRODUCTS_MESSAGES.COST_PRICE_INVALID
+  }
+}
+
 // Validators
 export const createProductValidator = validate(
   checkSchema(
@@ -237,6 +264,52 @@ export const createProductValidator = validate(
       shortDescription: shortDescriptionSchema,
       categoryId: categoryIdSchema,
       brandId: brandIdSchema,
+      // priceVariants is REQUIRED
+      priceVariants: {
+        isArray: {
+          options: { min: 1 },
+          errorMessage: 'priceVariants must be an array with at least 1 variant'
+        },
+        notEmpty: {
+          errorMessage: 'priceVariants is required'
+        }
+      },
+      'priceVariants.*.unit': {
+        in: ['body'],
+        isString: true,
+        notEmpty: {
+          errorMessage: 'Unit is required for each price variant'
+        }
+      },
+      'priceVariants.*.price': {
+        in: ['body'],
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Price must be a positive number'
+        }
+      },
+      'priceVariants.*.originalPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Original price must be a positive number'
+        }
+      },
+      'priceVariants.*.costPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Cost price must be a positive number'
+        }
+      },
+      'priceVariants.*.isDefault': {
+        in: ['body'],
+        isBoolean: {
+          errorMessage: 'isDefault must be a boolean'
+        }
+      },
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
@@ -270,6 +343,51 @@ export const updateProductValidator = validate(
         notEmpty: undefined
       },
       brandId: brandIdSchema,
+      priceVariants: {
+        optional: true,
+        isArray: {
+          errorMessage: 'priceVariants must be an array'
+        }
+      },
+      'priceVariants.*.unit': {
+        in: ['body'],
+        optional: true,
+        isString: true,
+        notEmpty: {
+          errorMessage: 'Unit is required for each price variant'
+        }
+      },
+      'priceVariants.*.price': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Price must be a positive number'
+        }
+      },
+      'priceVariants.*.originalPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Original price must be a positive number'
+        }
+      },
+      'priceVariants.*.costPrice': {
+        in: ['body'],
+        optional: true,
+        isFloat: {
+          options: { min: 0 },
+          errorMessage: 'Cost price must be a positive number'
+        }
+      },
+      'priceVariants.*.isDefault': {
+        in: ['body'],
+        optional: true,
+        isBoolean: {
+          errorMessage: 'isDefault must be a boolean'
+        }
+      },
       stockQuantity: stockQuantitySchema,
       maxOrderQuantity: maxOrderQuantitySchema,
       status: statusSchema,
@@ -290,11 +408,16 @@ export const getProductsValidator = validate(
         optional: true,
         custom: {
           options: async (value: string) => {
-            if (value && !ObjectId.isValid(value)) {
-              throw new ErrorWithStatus({
-                message: PRODUCTS_MESSAGES.CATEGORY_ID_INVALID,
-                status: HTTP_STATUS.BAD_REQUEST
-              })
+            // Accept either an ObjectId or a category slug
+            if (value) {
+              const isObjectId = ObjectId.isValid(value)
+              const isSlug = typeof value === 'string' && /^[a-z0-9-]+$/.test(value)
+              if (!isObjectId && !isSlug) {
+                throw new ErrorWithStatus({
+                  message: PRODUCTS_MESSAGES.CATEGORY_ID_INVALID,
+                  status: HTTP_STATUS.BAD_REQUEST
+                })
+              }
             }
             return true
           }

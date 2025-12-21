@@ -167,9 +167,14 @@ class CategoriesService {
   }
 
   // Lấy category tree (hierarchical)
-  async getCategoryTree() {
+  async getCategoryTree({ includeInactive = false }: { includeInactive?: boolean } = {}) {
+    const filter: Record<string, any> = {}
+    if (!includeInactive) {
+      filter.isActive = true
+    }
+
     const categories = await databaseService.categories
-      .find({ isActive: true })
+      .find(filter)
       .sort({ level: 1, sortOrder: 1, name: 1 })
       .toArray()
 
@@ -200,7 +205,26 @@ class CategoriesService {
 
   // Lấy chi tiết category
   async getCategoryById(categoryId: string) {
-    const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryId) })
+    // Support both string and ObjectId _id (imported data may have string IDs)
+    const category = await databaseService.categories.findOne({
+      $or: [
+        { _id: categoryId as unknown as ObjectId }, // String ID
+        { _id: new ObjectId(categoryId) } // ObjectId
+      ]
+    })
+    if (!category) {
+      throw new ErrorWithStatus({
+        message: CATEGORIES_MESSAGES.CATEGORY_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+    return category
+  }
+
+
+  // Lấy chi tiết category theo slug
+  async getCategoryBySlug(slug: string) {
+    const category = await databaseService.categories.findOne({ slug })
     if (!category) {
       throw new ErrorWithStatus({
         message: CATEGORIES_MESSAGES.CATEGORY_NOT_FOUND,

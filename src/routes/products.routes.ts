@@ -28,12 +28,7 @@ const productsRouter = Router()
  * Body: CreateProductReqBody
  * Headers: { Authorization: Bearer <access_token> } (Admin/Pharmacist)
  */
-productsRouter.post(
-  '/',
-  accessTokenValidator,
-  createProductValidator,
-  wrapRequestHandler(createProductController)
-)
+productsRouter.post('/', accessTokenValidator, createProductValidator, wrapRequestHandler(createProductController))
 
 /**
  * Description: Get products with pagination and filters

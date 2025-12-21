@@ -11,8 +11,11 @@ import {
   getMeController,
   updateMeController,
   changePasswordController,
-  //   oauthController,
-  refreshTokenController
+  oauthController,
+  refreshTokenController,
+  getWishlistController,
+  addToWishlistController,
+  removeFromWishlistController
 } from '~/controllers/users.controllers'
 import {
   accessTokenValidator,
@@ -38,19 +41,23 @@ const usersRouter = Router()
  * Body: {name:string; email: string; password: string }
  */
 usersRouter.post('/login', loginValidator, wrapRequestHandler(loginController))
-// /**
-//  * Login with Google OAuth
-//  * Path: /oauth/google
-//  * Method: GET
-//  */
-// usersRouter.get('/oauth/google', wrapRequestHandler(oauthController))
-// /**
-//  * User registration
-//  * Path: /register
-//  * Method: POST
-//  * Body: {name:string; email: string; password: string }
-//  */
+
+/**
+ * Login with Google OAuth
+ * Path: /oauth/google
+ * Method: GET
+ * Query: { code: string }
+ */
+usersRouter.get('/oauth/google', wrapRequestHandler(oauthController))
+
+/**
+ * User registration
+ * Path: /register
+ * Method: POST
+ * Body: {name:string; email: string; password: string }
+ */
 usersRouter.post('/register', registerValidator, wrapRequestHandler(registerController))
+
 /**
  * User logout
  * Path: /logout
@@ -141,5 +148,30 @@ usersRouter.patch(
   updateMeValidator,
   wrapRequestHandler(updateMeController)
 )
+
+/**
+ * Get wishlist
+ * Path: /wishlist
+ * Method: GET
+ * Header: { Authorization: Bearer <access_token> }
+ */
+usersRouter.get('/wishlist', accessTokenValidator, wrapRequestHandler(getWishlistController))
+
+/**
+ * Add to wishlist
+ * Path: /wishlist
+ * Method: POST
+ * Header: { Authorization: Bearer <access_token> }
+ * Body: { productId: string }
+ */
+usersRouter.post('/wishlist', accessTokenValidator, wrapRequestHandler(addToWishlistController))
+
+/**
+ * Remove from wishlist
+ * Path: /wishlist/:productId
+ * Method: DELETE
+ * Header: { Authorization: Bearer <access_token> }
+ */
+usersRouter.delete('/wishlist/:productId', accessTokenValidator, wrapRequestHandler(removeFromWishlistController))
 
 export default usersRouter

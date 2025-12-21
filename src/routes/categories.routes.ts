@@ -4,7 +4,9 @@ import {
   createCategoryController,
   getCategoriesController,
   getCategoryTreeController,
+  getAdminCategoryTreeController,
   getCategoryByIdController,
+  getCategoryBySlugController,
   getCategoryBreadcrumbController,
   getCategoryChildrenController,
   updateCategoryController,
@@ -48,12 +50,28 @@ categoriesRouter.get('/', getCategoriesValidator, wrapRequestHandler(getCategori
 categoriesRouter.get('/tree', wrapRequestHandler(getCategoryTreeController))
 
 /**
+ * Description: Get admin category tree (includes inactive)
+ * Path: /categories/admin-tree
+ * Method: GET
+ * Header: { Authorization: Bearer <access_token> }
+ */
+categoriesRouter.get('/admin-tree', adminRequired, wrapRequestHandler(getAdminCategoryTreeController))
+
+/**
  * Description: Get category by ID
  * Path: /categories/:categoryId
  * Method: GET
  * Params: { categoryId: string }
  */
 categoriesRouter.get('/:categoryId', categoryIdValidator, wrapRequestHandler(getCategoryByIdController))
+
+/**
+ * Description: Get category by slug
+ * Path: /categories/slug/:slug
+ * Method: GET
+ * Params: { slug: string }
+ */
+categoriesRouter.get('/slug/:slug', wrapRequestHandler(getCategoryBySlugController))
 
 /**
  * Description: Get category breadcrumb

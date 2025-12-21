@@ -34,7 +34,10 @@ export const getProductsController = async (
 
 // Get product by ID with populated data
 export const getProductByIdController = async (req: Request<{ productId: string }>, res: Response) => {
-  const result = await productsService.getProductById(req.params.productId)
+  const param = req.params.productId
+  const result = ObjectId.isValid(param)
+    ? await productsService.getProductById(param)
+    : await productsService.getProductBySlug(param)
   return res.status(HTTP_STATUS.OK).json({
     message: PRODUCTS_MESSAGES.GET_PRODUCT_SUCCESS,
     result
