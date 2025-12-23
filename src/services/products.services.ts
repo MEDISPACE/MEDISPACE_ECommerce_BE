@@ -118,7 +118,7 @@ class ProductsService {
       shortDescription: payload.shortDescription,
       categoryId: new ObjectId(payload.categoryId),
       brandId: payload.brandId ? new ObjectId(payload.brandId) : undefined,
-      priceVariants: payload.priceVariants || [{ unit: 'Sản phẩm', price: 0, isDefault: true }],
+      priceVariants: payload.priceVariants || [{ unit: 'Sản phẩm', price: 0, isDefault: true, quantityPerUnit: 1 }],
       stockQuantity: payload.stockQuantity || 0,
       maxOrderQuantity: payload.maxOrderQuantity || 10,
       status: payload.status || 'active',
@@ -148,8 +148,11 @@ class ProductsService {
   // Get products with pagination and filters
   async getProducts(query: GetProductsQuery) {
     const page = parseInt(query.page || '1')
-    const limit = parseInt(query.limit || '1000') // Increased default limit to get all products for frontend filtering
+    const limit = parseInt(query.limit || '1000') // Default 1000 for good performance
     const skip = (page - 1) * limit
+
+    console.log(`[Products Service] getProducts - page: ${page}, limit: ${limit}`)
+    const startTime = Date.now()
 
     // Build filter
     const filter: Record<string, unknown> = {}
@@ -164,13 +167,11 @@ class ProductsService {
           targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
         }
 
-
         // Category path should be used directly - path already represents the full hierarchy
         // For parent category with path '/thuc-pham-chuc-nang', we want to find:
         // - Categories with path STARTING with '/thuc-pham-chuc-nang' (subcategories)
         // - Or the parent category itself (by _id)
         const categoryPath = targetCategory.path
-
 
         // Escape special regex characters in the path
         const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -185,8 +186,7 @@ class ProductsService {
           })
           .toArray()
 
-
-        const categoryIds = descendantCategories.map(cat => cat._id)
+        const categoryIds = descendantCategories.map((cat) => cat._id)
 
         // Filter products that belong to any of these categories
         filter.categoryId = { $in: categoryIds }
@@ -196,8 +196,6 @@ class ProductsService {
         filter.categoryId = null
       }
     }
-
-
 
     if (query.brandId) {
       filter.brandId = new ObjectId(query.brandId)
@@ -239,40 +237,51 @@ class ProductsService {
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
     const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder }
 
+    // For large queries (limit > 500), skip expensive lookups for better performance
+    const shouldPopulate = limit <= 500
+    console.log(`[Products Service] shouldPopulate: ${shouldPopulate} (limit: ${limit})`)
+
     // Get products with pagination
     const [products, totalCount] = await Promise.all([
-      databaseService.products
-        .aggregate([
-          { $match: filter },
-          {
-            $lookup: {
-              from: 'categories',
-              localField: 'categoryId',
-              foreignField: '_id',
-              as: 'category'
-            }
-          },
-          {
-            $lookup: {
-              from: 'brands',
-              localField: 'brandId',
-              foreignField: '_id',
-              as: 'brand'
-            }
-          },
-          {
-            $addFields: {
-              category: { $arrayElemAt: ['$category', 0] },
-              brand: { $arrayElemAt: ['$brand', 0] }
-            }
-          },
-          { $sort: sort },
-          { $skip: skip },
-          { $limit: limit }
-        ])
-        .toArray(),
+      shouldPopulate
+        ? databaseService.products
+            .aggregate([
+              { $match: filter },
+              {
+                $lookup: {
+                  from: 'categories',
+                  localField: 'categoryId',
+                  foreignField: '_id',
+                  as: 'category'
+                }
+              },
+              {
+                $lookup: {
+                  from: 'brands',
+                  localField: 'brandId',
+                  foreignField: '_id',
+                  as: 'brand'
+                }
+              },
+              {
+                $addFields: {
+                  category: { $arrayElemAt: ['$category', 0] },
+                  brand: { $arrayElemAt: ['$brand', 0] }
+                }
+              },
+              { $sort: sort },
+              { $skip: skip },
+              { $limit: limit }
+            ])
+            .toArray()
+        : databaseService.products.find(filter).sort(sort).skip(skip).limit(limit).toArray(),
       databaseService.products.countDocuments(filter)
     ])
+
+    const endTime = Date.now()
+    console.log(
+      `[Products Service] Returning ${products.length} products, total in DB: ${totalCount}, took ${endTime - startTime}ms`
+    )
 
     return {
       products,
@@ -343,7 +352,6 @@ class ProductsService {
     return products[0]
   }
 
-
   // Get product by slug with populated category and brand data
   async getProductBySlug(slug: string) {
     const products = await databaseService.products
@@ -401,7 +409,6 @@ class ProductsService {
 
     return products[0]
   }
-
 
   // Update product
   async updateProduct(productId: string, payload: UpdateProductReqBody, lastModifiedBy: ObjectId) {
