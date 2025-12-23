@@ -51,12 +51,17 @@ const slugSchema = {
 }
 
 const logoSchema = {
-  optional: { options: { nullable: true } },
+  optional: { options: { nullable: true, checkFalsy: true } },
   isString: {
     errorMessage: BRANDS_MESSAGES.LOGO_MUST_BE_STRING
   },
   trim: true,
   isURL: {
+    options: {
+      require_protocol: true,
+      protocols: ['http', 'https'],
+      require_valid_protocol: true
+    },
     errorMessage: BRANDS_MESSAGES.LOGO_URL_INVALID
   }
 }
@@ -74,7 +79,7 @@ const descriptionSchema = {
 }
 
 const websiteSchema = {
-  optional: { options: { nullable: true } },
+  optional: { options: { nullable: true, checkFalsy: true } },
   isString: {
     errorMessage: BRANDS_MESSAGES.WEBSITE_MUST_BE_STRING
   },
@@ -114,7 +119,7 @@ const pageSchema = {
 const limitSchema = {
   optional: true,
   isInt: {
-    options: { min: 1, max: 100 },
+    options: { min: 1, max: 500 },
     errorMessage: BRANDS_MESSAGES.LIMIT_INVALID
   }
 }

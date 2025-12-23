@@ -11,12 +11,15 @@ import { ADMIN_MESSAGES } from '~/constants/message'
  */
 export const getDashboardStatsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    console.log('[Admin Controller] GET /admin/dashboard/stats - Request received')
     const stats = await adminService.getDashboardStats()
+    console.log('[Admin Controller] Dashboard stats fetched successfully')
     return res.json({
       message: ADMIN_MESSAGES.GET_DASHBOARD_STATS_SUCCESS,
       result: stats
     })
   } catch (error) {
+    console.error('[Admin Controller] Error in getDashboardStatsController:', error)
     next(error)
   }
 }
@@ -31,12 +34,15 @@ export const getDashboardStatsController = async (req: Request, res: Response, n
 export const getRecentActivitiesController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 10
+    console.log(`[Admin Controller] GET /admin/dashboard/recent-activities - Request received (limit: ${limit})`)
     const activities = await adminService.getRecentActivities(limit)
+    console.log('[Admin Controller] Recent activities fetched successfully')
     return res.json({
       message: ADMIN_MESSAGES.GET_RECENT_ACTIVITIES_SUCCESS,
       result: activities
     })
   } catch (error) {
+    console.error('[Admin Controller] Error in getRecentActivitiesController:', error)
     next(error)
   }
 }
