@@ -161,6 +161,64 @@ class CleanupService {
   startAll() {
     this.startCartCleanup()
     this.startAbandonedOrderCleanup()
+    this.startExpiredPrescriptionCleanup()
+  }
+
+  // Cleanup expired prescriptions - runs daily at midnight
+  startExpiredPrescriptionCleanup() {
+    console.log('[CleanupService] Expired prescription cleanup scheduled. Prescriptions past validUntil will be marked as expired.')
+
+    // Run daily at 00:30
+    cron.schedule('30 0 * * *', async () => {
+      try {
+        const result = await this.cleanupExpiredPrescriptions()
+        if (result.expiredCount > 0) {
+          console.log(`[CleanupService] Marked ${result.expiredCount} prescriptions as expired`)
+        }
+      } catch (error) {
+        console.error('[CleanupService] Error cleaning up expired prescriptions:', error)
+      }
+    })
+  }
+
+  // Manual cleanup method for expired prescriptions
+  async cleanupExpiredPrescriptions(): Promise<{ expiredCount: number }> {
+    const now = new Date()
+
+    // Find prescriptions that are past their validity date and not already expired/rejected
+    const result = await databaseService.prescriptions.updateMany(
+      {
+        validUntil: { $lt: now },
+        status: { $in: ['pending', 'verified'] }
+      },
+      {
+        $set: {
+          status: 'expired',
+          updatedAt: now
+        }
+      }
+    )
+
+    return { expiredCount: result.modifiedCount || 0 }
+  }
+
+  // Get expired prescription statistics
+  async getExpiredPrescriptionStats() {
+    const now = new Date()
+
+    const expiredCount = await databaseService.prescriptions.countDocuments({
+      validUntil: { $lt: now },
+      status: { $in: ['pending', 'verified'] }
+    })
+
+    const totalPending = await databaseService.prescriptions.countDocuments({
+      status: 'pending'
+    })
+
+    return {
+      pendingExpiration: expiredCount,
+      totalPending
+    }
   }
 }
 
