@@ -188,7 +188,7 @@ const pageSchema = {
 const limitSchema = {
   optional: true,
   isInt: {
-    options: { min: 1, max: 5000 },
+    options: { min: 1, max: 20000 }, // Increased for admin to load all products
     errorMessage: PRODUCTS_MESSAGES.LIMIT_INVALID
   }
 }
@@ -226,30 +226,6 @@ const stockFilterSchema = {
   isInt: {
     options: { min: 0 },
     errorMessage: PRODUCTS_MESSAGES.STOCK_QUANTITY_INVALID
-  }
-}
-
-const priceSchema = {
-  optional: true,
-  isFloat: {
-    options: { min: 0 },
-    errorMessage: PRODUCTS_MESSAGES.PRICE_INVALID
-  }
-}
-
-const originalPriceSchema = {
-  optional: true,
-  isFloat: {
-    options: { min: 0 },
-    errorMessage: PRODUCTS_MESSAGES.ORIGINAL_PRICE_INVALID
-  }
-}
-
-const costPriceSchema = {
-  optional: true,
-  isFloat: {
-    options: { min: 0 },
-    errorMessage: PRODUCTS_MESSAGES.COST_PRICE_INVALID
   }
 }
 
