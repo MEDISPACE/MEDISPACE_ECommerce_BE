@@ -7,6 +7,7 @@ export interface PriceVariantReqBody {
   originalPrice?: number
   costPrice?: number
   isDefault: boolean
+  quantityPerUnit: number // Số lượng đơn vị nhỏ nhất trong 1 đơn vị (VD: 1 hộp = 30 viên)
 }
 
 export interface CreateProductReqBody {
@@ -17,7 +18,7 @@ export interface CreateProductReqBody {
   shortDescription: string
   categoryId: string
   brandId?: string
-  priceVariants: PriceVariantReqBody[]  // REQUIRED
+  priceVariants: PriceVariantReqBody[] // REQUIRED
   stockQuantity?: number
   maxOrderQuantity?: number
   status?: 'active' | 'discontinued' | 'out_of_stock'
