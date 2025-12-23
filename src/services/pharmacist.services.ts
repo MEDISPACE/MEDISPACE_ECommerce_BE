@@ -322,6 +322,7 @@ class PharmacistService {
       items: Array<{
         productId: string
         quantity: number
+        unit?: string
         notes?: string
       }>
       shippingAddress: {
@@ -362,15 +363,20 @@ class PharmacistService {
         })
       }
 
-      // Check stock
-      if (product.stockQuantity < item.quantity) {
+      // Check stock with unit conversion
+      const variant = product.priceVariants?.find((v: any) => v.unit === item.unit) || product.priceVariants?.find((v: any) => v.isDefault) || product.priceVariants?.[0]
+      const unitPrice = variant?.price || 0
+      const quantityPerUnit = variant?.quantityPerUnit || 1
+      const requiredStock = item.quantity * quantityPerUnit
+
+      if (product.stockQuantity < requiredStock) {
         throw new ErrorWithStatus({
           message: `Insufficient stock for product: ${product.name}`,
           status: HTTP_STATUS.BAD_REQUEST
         })
       }
 
-      const totalPrice = product.price * item.quantity
+      const totalPrice = unitPrice * item.quantity
       subtotal += totalPrice
 
       orderItems.push({
@@ -378,10 +384,11 @@ class PharmacistService {
         name: product.name,
         sku: product.sku || '',
         quantity: item.quantity,
-        unitPrice: product.price,
+        unitPrice: unitPrice,
         totalPrice,
         prescriptionRequired: product.requiresPrescription || false,
-        image: product.featuredImage || ''
+        image: product.featuredImage || '',
+        unit: item.unit || variant?.unit
       })
     }
 
@@ -564,6 +571,22 @@ class PharmacistService {
     // Add notes if provided
     if (notes) {
       updateData.notes = notes
+    }
+
+    // Restore stock when order is cancelled
+    if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
+      for (const item of order.items || []) {
+        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+        if (product) {
+          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+          const quantityPerUnit = variant?.quantityPerUnit || 1
+          const stockToRestore = item.quantity * quantityPerUnit
+          await databaseService.products.updateOne(
+            { _id: new ObjectId(item.productId) },
+            { $inc: { stockQuantity: stockToRestore } }
+          )
+        }
+      }
     }
 
     const result = await databaseService.orders.findOneAndUpdate(

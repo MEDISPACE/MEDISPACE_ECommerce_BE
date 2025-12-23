@@ -28,8 +28,12 @@ class OrderService {
           })
         }
 
-        // Validate stock
-        if (product.stockQuantity < item.quantity) {
+        // Validate stock with unit conversion
+        const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+        const quantityPerUnit = variant?.quantityPerUnit || 1
+        const requiredStock = item.quantity * quantityPerUnit
+
+        if (product.stockQuantity < requiredStock) {
           throw new ErrorWithStatus({
             message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
             status: HTTP_STATUS.BAD_REQUEST
@@ -168,6 +172,21 @@ class OrderService {
     })
 
     const result = await databaseService.orders.insertOne(order)
+
+    // Deduct stock for each order item
+    for (const item of orderItems) {
+      // Find the quantityPerUnit for this unit from the product
+      const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+      if (product) {
+        const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+        const quantityPerUnit = variant?.quantityPerUnit || 1
+        const stockToDeduct = item.quantity * quantityPerUnit
+        await databaseService.products.updateOne(
+          { _id: new ObjectId(item.productId) },
+          { $inc: { stockQuantity: -stockToDeduct } }
+        )
+      }
+    }
 
     // Clear cart or remove selected items ONLY if NOT direct buy
     // AND payment method is COD. For online payment, we clear items ONLY after successful payment (in return controller)
@@ -314,6 +333,22 @@ class OrderService {
       if (order.paymentMethod === PaymentMethod.COD && order.paymentStatus === 'pending') {
         updateData.paymentStatus = 'paid'
         updateData.paidAt = new Date()
+      }
+    }
+
+    // Restore stock when order is cancelled
+    if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
+      for (const item of order.items || []) {
+        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+        if (product) {
+          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+          const quantityPerUnit = variant?.quantityPerUnit || 1
+          const stockToRestore = item.quantity * quantityPerUnit
+          await databaseService.products.updateOne(
+            { _id: new ObjectId(item.productId) },
+            { $inc: { stockQuantity: stockToRestore } }
+          )
+        }
       }
     }
 

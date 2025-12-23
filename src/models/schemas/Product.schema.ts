@@ -7,6 +7,7 @@ export interface PriceVariant {
   originalPrice?: number // Giá niêm yết/gốc (trước giảm giá)
   costPrice?: number     // Giá vốn (nội bộ, chỉ admin/pharmacist thấy)
   isDefault: boolean     // Đơn vị mặc định hiển thị
+  quantityPerUnit: number // Số lượng đơn vị nhỏ nhất trong 1 đơn vị này (dùng để tính stock)
 }
 
 interface ProductType {

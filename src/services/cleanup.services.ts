@@ -2,7 +2,7 @@ import * as cron from 'node-cron'
 import databaseService from './database.services'
 
 // Time in hours after which unpaid online payment orders will be cancelled
-const ABANDONED_ORDER_TIMEOUT_HOURS = 2
+const ABANDONED_ORDER_TIMEOUT_HOURS = 24
 
 class CleanupService {
   // Cleanup expired carts - chạy mỗi ngày
@@ -58,10 +58,31 @@ class CleanupService {
     const cutoffTime = new Date()
     cutoffTime.setHours(cutoffTime.getHours() - ABANDONED_ORDER_TIMEOUT_HOURS)
 
-    // Find and update orders that:
-    // 1. Have paymentStatus = 'pending'
-    // 2. Have online payment method (not 'cod')
-    // 3. Were created more than ABANDONED_ORDER_TIMEOUT_HOURS ago
+    // Find orders that need to be cancelled
+    const ordersToCancel = await databaseService.orders.find({
+      paymentStatus: 'pending',
+      paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
+      orderStatus: { $nin: ['cancelled', 'delivered'] },
+      createdAt: { $lt: cutoffTime }
+    }).toArray()
+
+    // Restore stock for each order before cancelling
+    for (const order of ordersToCancel) {
+      for (const item of order.items || []) {
+        const product = await databaseService.products.findOne({ _id: item.productId })
+        if (product) {
+          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+          const quantityPerUnit = variant?.quantityPerUnit || 1
+          const stockToRestore = item.quantity * quantityPerUnit
+          await databaseService.products.updateOne(
+            { _id: item.productId },
+            { $inc: { stockQuantity: stockToRestore } }
+          )
+        }
+      }
+    }
+
+    // Now update all orders to cancelled status
     const result = await databaseService.orders.updateMany(
       {
         paymentStatus: 'pending',
@@ -140,6 +161,64 @@ class CleanupService {
   startAll() {
     this.startCartCleanup()
     this.startAbandonedOrderCleanup()
+    this.startExpiredPrescriptionCleanup()
+  }
+
+  // Cleanup expired prescriptions - runs daily at midnight
+  startExpiredPrescriptionCleanup() {
+    console.log('[CleanupService] Expired prescription cleanup scheduled. Prescriptions past validUntil will be marked as expired.')
+
+    // Run daily at 00:30
+    cron.schedule('30 0 * * *', async () => {
+      try {
+        const result = await this.cleanupExpiredPrescriptions()
+        if (result.expiredCount > 0) {
+          console.log(`[CleanupService] Marked ${result.expiredCount} prescriptions as expired`)
+        }
+      } catch (error) {
+        console.error('[CleanupService] Error cleaning up expired prescriptions:', error)
+      }
+    })
+  }
+
+  // Manual cleanup method for expired prescriptions
+  async cleanupExpiredPrescriptions(): Promise<{ expiredCount: number }> {
+    const now = new Date()
+
+    // Find prescriptions that are past their validity date and not already expired/rejected
+    const result = await databaseService.prescriptions.updateMany(
+      {
+        validUntil: { $lt: now },
+        status: { $in: ['pending', 'verified'] }
+      },
+      {
+        $set: {
+          status: 'expired',
+          updatedAt: now
+        }
+      }
+    )
+
+    return { expiredCount: result.modifiedCount || 0 }
+  }
+
+  // Get expired prescription statistics
+  async getExpiredPrescriptionStats() {
+    const now = new Date()
+
+    const expiredCount = await databaseService.prescriptions.countDocuments({
+      validUntil: { $lt: now },
+      status: { $in: ['pending', 'verified'] }
+    })
+
+    const totalPending = await databaseService.prescriptions.countDocuments({
+      status: 'pending'
+    })
+
+    return {
+      pendingExpiration: expiredCount,
+      totalPending
+    }
   }
 }
 
