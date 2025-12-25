@@ -239,7 +239,7 @@ export const PRODUCTS_MESSAGES = {
   LIMIT_INVALID: 'Limit must be a positive integer between 1 and 5000',
   SEARCH_MUST_BE_STRING: 'Search query must be a string',
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
-  SORT_BY_INVALID: 'Sort by must be name, createdAt, stockQuantity, or sku',
+  SORT_BY_INVALID: 'Sort by must be name, createdAt, stockQuantity, sku, or price',
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
   MIN_STOCK_INVALID: 'Min stock must be a non-negative number',
   MAX_STOCK_INVALID: 'Max stock must be a non-negative number',
