@@ -40,9 +40,19 @@ initFolder() // Tạo thư mục temp cho upload
 app.use(cookieParser())
 
 // CORS configuration - Allow frontend to connect
+const allowedOrigins = process.env.FRONTEND_URLS?.split(',').map(url => url.trim()) || []
 app.use(
   cors({
-    origin: process.env.FRONTEND_URLS, // Frontend URL from env
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true)
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true)
+      } else {
+        callback(new Error('Not allowed by CORS'))
+      }
+    },
     credentials: true, // Allow cookies/auth headers
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
