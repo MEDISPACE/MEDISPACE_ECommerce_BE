@@ -33,10 +33,40 @@ class DatabaseService {
     try {
       await this.client.connect()
       await this.db.command({ ping: 1 })
+      console.log('✅ Connected to MongoDB')
+
+      // Create indexes for better performance
+      await this.createIndexes()
+      console.log('✅ Database indexes created')
     } catch (error) {
-      // Reference error silently to satisfy linters, then exit
-      void error
+      console.error('❌ MongoDB connection failed:', error)
       process.exit(1)
+    }
+  }
+
+  async createIndexes() {
+    try {
+      // Products collection indexes
+      await this.products.createIndex({ categoryId: 1, isActive: 1, createdAt: -1 })
+      await this.products.createIndex({ categoryId: 1 })
+      await this.products.createIndex({ slug: 1 }, { unique: true })
+      await this.products.createIndex({ sku: 1 }, { unique: true })
+      await this.products.createIndex({ name: 'text', shortDescription: 'text' })
+
+      // Categories collection indexes
+      await this.categories.createIndex({ slug: 1 }, { unique: true })
+      await this.categories.createIndex({ path: 1 })
+      await this.categories.createIndex({ parentId: 1 })
+
+      // Brands collection indexes
+      await this.brands.createIndex({ slug: 1 }, { unique: true })
+
+      // Reviews collection indexes
+      await this.reviews.createIndex({ productId: 1, createdAt: -1 })
+
+      console.log('📊 Indexes created successfully')
+    } catch (error) {
+      console.warn('⚠️ Some indexes may already exist:', error)
     }
   }
   get users(): Collection<User> {

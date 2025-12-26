@@ -148,7 +148,7 @@ class ProductsService {
   // Get products with pagination and filters
   async getProducts(query: GetProductsQuery) {
     const page = parseInt(query.page || '1')
-    const limit = parseInt(query.limit || '1000') // Default 1000 for good performance
+    const limit = parseInt(query.limit || '20') // Default 20 for pagination
     const skip = (page - 1) * limit
 
     console.log(`[Products Service] getProducts - page: ${page}, limit: ${limit}`)
@@ -213,13 +213,8 @@ class ProductsService {
       filter.requiresPrescription = query.requiresPrescription === 'true'
     }
 
-    if (query.search) {
-      filter.$or = [
-        { name: { $regex: query.search, $options: 'i' } },
-        { shortDescription: { $regex: query.search, $options: 'i' } },
-        { sku: { $regex: query.search, $options: 'i' } }
-      ]
-    }
+    // Enhanced search - will be applied in aggregation pipeline for category/brand
+    const searchQuery = query.search
 
     if (query.minStock || query.maxStock) {
       const stockFilter: Record<string, number> = {}
@@ -237,13 +232,92 @@ class ProductsService {
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
     const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder }
 
-    // For large queries (limit > 500), skip expensive lookups for better performance
-    const shouldPopulate = limit <= 500
-    console.log(`[Products Service] shouldPopulate: ${shouldPopulate} (limit: ${limit})`)
+    // Optimize query - always use efficient aggregation with minimal fields
+    console.log(`[Products Service] Fetching with pagination - page: ${page}, limit: ${limit}`)
 
-    // Get products with pagination
+    // Get products with pagination - optimized with only needed fields
     const [products, totalCount] = await Promise.all([
-      shouldPopulate
+      databaseService.products
+        .aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'categoryId',
+              foreignField: '_id',
+              as: 'category',
+              pipeline: [
+                { $project: { _id: 1, name: 1, slug: 1 } } // Only needed fields
+              ]
+            }
+          },
+          {
+            $lookup: {
+              from: 'brands',
+              localField: 'brandId',
+              foreignField: '_id',
+              as: 'brand',
+              pipeline: [
+                { $project: { _id: 1, name: 1, slug: 1, logo: 1 } } // Only needed fields
+              ]
+            }
+          },
+          {
+            $addFields: {
+              category: { $arrayElemAt: ['$category', 0] },
+              brand: { $arrayElemAt: ['$brand', 0] }
+            }
+          },
+          // Enhanced search filter after lookup
+          ...(searchQuery
+            ? [
+                {
+                  $match: {
+                    $or: [
+                      { name: { $regex: searchQuery, $options: 'i' } },
+                      { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                      { longDescription: { $regex: searchQuery, $options: 'i' } },
+                      { sku: { $regex: searchQuery, $options: 'i' } },
+                      { ingredients: { $regex: searchQuery, $options: 'i' } },
+                      { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                      { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                    ]
+                  }
+                }
+              ]
+            : []),
+          {
+            $project: {
+              // Only select fields needed for product listing
+              _id: 1,
+              name: 1,
+              slug: 1,
+              sku: 1,
+              shortDescription: 1,
+              categoryId: 1,
+              brandId: 1,
+              priceVariants: 1,
+              stockQuantity: 1,
+              status: 1,
+              isActive: 1,
+              requiresPrescription: 1,
+              featuredImage: 1,
+              images: 1,
+              rating: 1,
+              reviewCount: 1,
+              createdAt: 1,
+              category: 1,
+              brand: 1,
+              packaging: 1
+            }
+          },
+          { $sort: sort },
+          { $skip: skip },
+          { $limit: limit }
+        ])
+        .toArray(),
+      // Count with search filter
+      searchQuery
         ? databaseService.products
             .aggregate([
               { $match: filter },
@@ -252,7 +326,8 @@ class ProductsService {
                   from: 'categories',
                   localField: 'categoryId',
                   foreignField: '_id',
-                  as: 'category'
+                  as: 'category',
+                  pipeline: [{ $project: { name: 1 } }]
                 }
               },
               {
@@ -260,7 +335,8 @@ class ProductsService {
                   from: 'brands',
                   localField: 'brandId',
                   foreignField: '_id',
-                  as: 'brand'
+                  as: 'brand',
+                  pipeline: [{ $project: { name: 1 } }]
                 }
               },
               {
@@ -269,13 +345,24 @@ class ProductsService {
                   brand: { $arrayElemAt: ['$brand', 0] }
                 }
               },
-              { $sort: sort },
-              { $skip: skip },
-              { $limit: limit }
+              {
+                $match: {
+                  $or: [
+                    { name: { $regex: searchQuery, $options: 'i' } },
+                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                    { longDescription: { $regex: searchQuery, $options: 'i' } },
+                    { sku: { $regex: searchQuery, $options: 'i' } },
+                    { ingredients: { $regex: searchQuery, $options: 'i' } },
+                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                  ]
+                }
+              },
+              { $count: 'total' }
             ])
             .toArray()
-        : databaseService.products.find(filter).sort(sort).skip(skip).limit(limit).toArray(),
-      databaseService.products.countDocuments(filter)
+            .then((result) => result[0]?.total || 0)
+        : databaseService.products.countDocuments(filter)
     ])
 
     const endTime = Date.now()
