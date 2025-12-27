@@ -208,7 +208,7 @@ const searchSchema = {
 const sortBySchema = {
   optional: true,
   isIn: {
-    options: [['name', 'createdAt', 'stockQuantity', 'sku']],
+    options: [['name', 'createdAt', 'stockQuantity', 'sku', 'price']],
     errorMessage: PRODUCTS_MESSAGES.SORT_BY_INVALID
   }
 }
