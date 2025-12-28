@@ -151,7 +151,6 @@ class ProductsService {
     const limit = parseInt(query.limit || '20') // Default 20 for pagination
     const skip = (page - 1) * limit
 
-    console.log(`[Products Service] getProducts - page: ${page}, limit: ${limit}`)
     const startTime = Date.now()
 
     // Build filter
@@ -233,7 +232,6 @@ class ProductsService {
     const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder }
 
     // Optimize query - always use efficient aggregation with minimal fields
-    console.log(`[Products Service] Fetching with pagination - page: ${page}, limit: ${limit}`)
 
     // Get products with pagination - optimized with only needed fields
     const [products, totalCount] = await Promise.all([
@@ -271,20 +269,20 @@ class ProductsService {
           // Enhanced search filter after lookup
           ...(searchQuery
             ? [
-                {
-                  $match: {
-                    $or: [
-                      { name: { $regex: searchQuery, $options: 'i' } },
-                      { shortDescription: { $regex: searchQuery, $options: 'i' } },
-                      { longDescription: { $regex: searchQuery, $options: 'i' } },
-                      { sku: { $regex: searchQuery, $options: 'i' } },
-                      { ingredients: { $regex: searchQuery, $options: 'i' } },
-                      { 'category.name': { $regex: searchQuery, $options: 'i' } },
-                      { 'brand.name': { $regex: searchQuery, $options: 'i' } }
-                    ]
-                  }
+              {
+                $match: {
+                  $or: [
+                    { name: { $regex: searchQuery, $options: 'i' } },
+                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                    { longDescription: { $regex: searchQuery, $options: 'i' } },
+                    { sku: { $regex: searchQuery, $options: 'i' } },
+                    { ingredients: { $regex: searchQuery, $options: 'i' } },
+                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                  ]
                 }
-              ]
+              }
+            ]
             : []),
           {
             $project: {
@@ -319,56 +317,53 @@ class ProductsService {
       // Count with search filter
       searchQuery
         ? databaseService.products
-            .aggregate([
-              { $match: filter },
-              {
-                $lookup: {
-                  from: 'categories',
-                  localField: 'categoryId',
-                  foreignField: '_id',
-                  as: 'category',
-                  pipeline: [{ $project: { name: 1 } }]
-                }
-              },
-              {
-                $lookup: {
-                  from: 'brands',
-                  localField: 'brandId',
-                  foreignField: '_id',
-                  as: 'brand',
-                  pipeline: [{ $project: { name: 1 } }]
-                }
-              },
-              {
-                $addFields: {
-                  category: { $arrayElemAt: ['$category', 0] },
-                  brand: { $arrayElemAt: ['$brand', 0] }
-                }
-              },
-              {
-                $match: {
-                  $or: [
-                    { name: { $regex: searchQuery, $options: 'i' } },
-                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
-                    { longDescription: { $regex: searchQuery, $options: 'i' } },
-                    { sku: { $regex: searchQuery, $options: 'i' } },
-                    { ingredients: { $regex: searchQuery, $options: 'i' } },
-                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
-                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
-                  ]
-                }
-              },
-              { $count: 'total' }
-            ])
-            .toArray()
-            .then((result) => result[0]?.total || 0)
+          .aggregate([
+            { $match: filter },
+            {
+              $lookup: {
+                from: 'categories',
+                localField: 'categoryId',
+                foreignField: '_id',
+                as: 'category',
+                pipeline: [{ $project: { name: 1 } }]
+              }
+            },
+            {
+              $lookup: {
+                from: 'brands',
+                localField: 'brandId',
+                foreignField: '_id',
+                as: 'brand',
+                pipeline: [{ $project: { name: 1 } }]
+              }
+            },
+            {
+              $addFields: {
+                category: { $arrayElemAt: ['$category', 0] },
+                brand: { $arrayElemAt: ['$brand', 0] }
+              }
+            },
+            {
+              $match: {
+                $or: [
+                  { name: { $regex: searchQuery, $options: 'i' } },
+                  { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                  { longDescription: { $regex: searchQuery, $options: 'i' } },
+                  { sku: { $regex: searchQuery, $options: 'i' } },
+                  { ingredients: { $regex: searchQuery, $options: 'i' } },
+                  { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                  { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                ]
+              }
+            },
+            { $count: 'total' }
+          ])
+          .toArray()
+          .then((result) => result[0]?.total || 0)
         : databaseService.products.countDocuments(filter)
     ])
 
     const endTime = Date.now()
-    console.log(
-      `[Products Service] Returning ${products.length} products, total in DB: ${totalCount}, took ${endTime - startTime}ms`
-    )
 
     return {
       products,

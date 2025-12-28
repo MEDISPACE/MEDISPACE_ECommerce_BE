@@ -89,7 +89,6 @@ class AdminService {
    * Get dashboard statistics
    */
   async getDashboardStats(): Promise<DashboardStats> {
-    console.log('[Admin Service] Starting getDashboardStats...')
     const startTime = Date.now()
 
     const today = new Date()
@@ -179,7 +178,6 @@ class AdminService {
       const revenueGrowth =
         lastMonthRevenueValue > 0 ? ((monthRevenueValue - lastMonthRevenueValue) / lastMonthRevenueValue) * 100 : 0
 
-      console.log('[Admin Service] Revenue calculations completed')
 
       // Order statistics
       const [totalOrders, pendingOrders, processingOrders, completedOrders, cancelledOrders] = await Promise.all([
@@ -190,7 +188,6 @@ class AdminService {
         databaseService.orders.countDocuments({ orderStatus: 'cancelled' })
       ])
 
-      console.log('[Admin Service] Order statistics completed')
 
       // User statistics
       const [totalUsers, newTodayUsers, customers, pharmacists, admins, verifiedUsers] = await Promise.all([
@@ -202,7 +199,6 @@ class AdminService {
         databaseService.users.countDocuments({ status: 1 }) // Verified
       ])
 
-      console.log('[Admin Service] User statistics completed')
 
       // Product statistics - optimized with aggregation
       const [productStats, totalProducts, activeProducts, outOfStockProducts, lowStockProducts] = await Promise.all([
@@ -236,7 +232,6 @@ class AdminService {
 
       const totalProductValue = productStats[0]?.totalValue || 0
 
-      console.log('[Admin Service] Product statistics completed')
 
       // Prescription statistics
       const [totalPrescriptions, pendingPrescriptions, approvedPrescriptions, rejectedPrescriptions] =
@@ -247,7 +242,6 @@ class AdminService {
           databaseService.prescriptions.countDocuments({ status: 'rejected' })
         ])
 
-      console.log('[Admin Service] Prescription statistics completed')
 
       const result = {
         revenue: {
@@ -288,7 +282,6 @@ class AdminService {
       }
 
       const endTime = Date.now()
-      console.log(`[Admin Service] getDashboardStats completed in ${endTime - startTime}ms`)
 
       return result
     } catch (error) {
