@@ -52,3 +52,17 @@ export enum ReviewStatus {
   Approved = 'approved',
   Rejected = 'rejected'
 }
+
+// Order Status
+export enum OrderStatus {
+  Pending = 'pending',
+  Confirmed = 'confirmed',
+  Processing = 'processing',
+  Shipped = 'shipped',
+  Delivered = 'delivered',
+  Cancelled = 'cancelled',
+  Returned = 'returned'
+}
+
+// Re-export Return Request enums from schema for centralized access
+export { ReturnReason, ReturnStatus, ReturnType, RefundMethod } from '~/models/schemas/ReturnRequest.schema'
