@@ -56,7 +56,7 @@ class OrderService {
           unitPrice: price,
           totalPrice: price * item.quantity,
           prescriptionRequired: product.prescriptionRequired,
-          image: product.image || (product.images && product.images.length > 0 ? product.images[0] : undefined)
+          image: product.featuredImage || product.image || (product.images && product.images.length > 0 ? product.images[0] : undefined)
         })
       }
     } else {
