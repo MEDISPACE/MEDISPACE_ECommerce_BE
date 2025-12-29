@@ -11,7 +11,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
  * POST /returns
  */
 export const createReturnRequestController = async (req: Request, res: Response) => {
-    const userId = new ObjectId(req.decoded_authorization?.user_id)
+    const userId = new ObjectId(req.decoded_authorization?.userId)
     const result = await returnRequestService.createReturnRequest(userId, req.body)
 
     return res.status(HTTP_STATUS.CREATED).json({
@@ -25,7 +25,7 @@ export const createReturnRequestController = async (req: Request, res: Response)
  * GET /returns
  */
 export const getMyReturnRequestsController = async (req: Request, res: Response) => {
-    const userId = new ObjectId(req.decoded_authorization?.user_id)
+    const userId = new ObjectId(req.decoded_authorization?.userId)
     const { page, limit, status } = req.query
 
     const result = await returnRequestService.getReturnRequests({
@@ -46,7 +46,7 @@ export const getMyReturnRequestsController = async (req: Request, res: Response)
  * GET /returns/:requestId
  */
 export const getReturnRequestByIdController = async (req: Request, res: Response) => {
-    const userId = new ObjectId(req.decoded_authorization?.user_id)
+    const userId = new ObjectId(req.decoded_authorization?.userId)
     const requestId = new ObjectId(req.params.requestId)
 
     const result = await returnRequestService.getReturnRequestById(requestId, userId)
@@ -62,7 +62,7 @@ export const getReturnRequestByIdController = async (req: Request, res: Response
  * PATCH /returns/:requestId/cancel
  */
 export const cancelReturnRequestController = async (req: Request, res: Response) => {
-    const userId = new ObjectId(req.decoded_authorization?.user_id)
+    const userId = new ObjectId(req.decoded_authorization?.userId)
     const requestId = new ObjectId(req.params.requestId)
 
     const result = await returnRequestService.cancelReturnRequest(requestId, userId)
@@ -75,7 +75,7 @@ export const cancelReturnRequestController = async (req: Request, res: Response)
  * PATCH /returns/:requestId/shipping
  */
 export const updateReturnShippingController = async (req: Request, res: Response) => {
-    const userId = new ObjectId(req.decoded_authorization?.user_id)
+    const userId = new ObjectId(req.decoded_authorization?.userId)
     const requestId = new ObjectId(req.params.requestId)
     const { trackingNumber, carrier } = req.body
 

@@ -75,11 +75,32 @@ class ReturnRequestService {
     async createReturnRequest(userId: ObjectId, payload: CreateReturnRequestPayload) {
         const { orderId, items, reason, reasonDetail, evidence, type, refundMethod, bankInfo } = payload
 
+        // DEBUG: Log the incoming data
+        console.log('=== DEBUG createReturnRequest ===')
+        console.log('orderId:', orderId)
+        console.log('userId:', userId, userId.toString())
+
+        // First, check if order exists at all (without userId filter)
+        const orderWithoutUserFilter = await databaseService.orders.findOne({
+            _id: new ObjectId(orderId)
+        })
+        console.log('Order without userId filter:', orderWithoutUserFilter ? {
+            _id: orderWithoutUserFilter._id,
+            userId: orderWithoutUserFilter.userId,
+            orderStatus: orderWithoutUserFilter.orderStatus
+        } : 'NOT FOUND')
+
         // Validate order exists and belongs to user
+        // Use $or to match userId as both ObjectId and string (for backwards compatibility)
         const order = await databaseService.orders.findOne({
             _id: new ObjectId(orderId),
-            userId
+            $or: [
+                { userId: userId },
+                { userId: userId.toString() as unknown as ObjectId }
+            ]
         })
+        console.log('Order with userId filter:', order ? 'FOUND' : 'NOT FOUND')
+        console.log('=================================')
 
         if (!order) {
             throw new ErrorWithStatus({
@@ -178,6 +199,7 @@ class ReturnRequestService {
             returnItems.push({
                 productId: new ObjectId(item.productId),
                 productName: orderItem.name,
+                productImage: orderItem.image,  // Lấy ảnh sản phẩm từ order
                 sku: orderItem.sku,
                 unit: orderItem.unit,
                 quantity: item.quantity,
@@ -228,10 +250,38 @@ class ReturnRequestService {
 
         const [requests, total] = await Promise.all([
             databaseService.returnRequests
-                .find(query)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
+                .aggregate([
+                    { $match: query },
+                    { $sort: { createdAt: -1 } },
+                    { $skip: skip },
+                    { $limit: limit },
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'userId',
+                            foreignField: '_id',
+                            as: 'userInfo'
+                        }
+                    },
+                    {
+                        $addFields: {
+                            customerName: {
+                                $concat: [
+                                    { $ifNull: [{ $arrayElemAt: ['$userInfo.lastName', 0] }, ''] },
+                                    ' ',
+                                    { $ifNull: [{ $arrayElemAt: ['$userInfo.firstName', 0] }, ''] }
+                                ]
+                            },
+                            customerEmail: { $arrayElemAt: ['$userInfo.email', 0] },
+                            customerPhone: { $arrayElemAt: ['$userInfo.phoneNumber', 0] }
+                        }
+                    },
+                    {
+                        $project: {
+                            userInfo: 0 // Remove the full userInfo array
+                        }
+                    }
+                ])
                 .toArray(),
             databaseService.returnRequests.countDocuments(query)
         ])
