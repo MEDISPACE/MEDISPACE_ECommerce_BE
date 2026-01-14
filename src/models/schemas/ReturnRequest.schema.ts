@@ -43,6 +43,7 @@ export enum RefundMethod {
 export interface ReturnItem {
     productId: ObjectId
     productName: string
+    productImage?: string  // Ảnh sản phẩm từ order
     sku: string
     unit: string
     quantity: number
