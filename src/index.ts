@@ -43,17 +43,8 @@ app.use(cookieParser())
 const allowedOrigins = process.env.FRONTEND_URLS?.split(',').map(url => url.trim()) || []
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, Postman, etc.)
-      if (!origin) return callback(null, true)
-
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true)
-      } else {
-        callback(new Error('Not allowed by CORS'))
-      }
-    },
-    credentials: true, // Allow cookies/auth headers
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
   })

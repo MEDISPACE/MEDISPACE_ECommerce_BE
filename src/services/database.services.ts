@@ -17,6 +17,7 @@ import Conversation from '~/models/schemas/Conversation.schema'
 import Message from '~/models/schemas/Message.schema'
 import Article from '~/models/schemas/Article.schema'
 import HealthCategory from '~/models/schemas/HealthCategory.schema'
+import ReturnRequest from '~/models/schemas/ReturnRequest.schema'
 
 config()
 
@@ -33,11 +34,8 @@ class DatabaseService {
     try {
       await this.client.connect()
       await this.db.command({ ping: 1 })
-      console.log('✅ Connected to MongoDB')
-
       // Create indexes for better performance
       await this.createIndexes()
-      console.log('✅ Database indexes created')
     } catch (error) {
       console.error('❌ MongoDB connection failed:', error)
       process.exit(1)
@@ -45,28 +43,49 @@ class DatabaseService {
   }
 
   async createIndexes() {
+    // Helper function to safely create index
+    const safeCreateIndex = async (
+      collection: any,
+      indexSpec: any,
+      options?: any
+    ) => {
+      try {
+        await collection.createIndex(indexSpec, { background: true, ...options })
+      } catch (error: any) {
+        // Ignore duplicate key errors (index already exists or duplicate data)
+        if (error.code !== 11000 && error.code !== 85) {
+          // Silent - index already exists or duplicate data
+        }
+      }
+    }
+
     try {
       // Products collection indexes
-      await this.products.createIndex({ categoryId: 1, isActive: 1, createdAt: -1 })
-      await this.products.createIndex({ categoryId: 1 })
-      await this.products.createIndex({ slug: 1 }, { unique: true })
-      await this.products.createIndex({ sku: 1 }, { unique: true })
-      await this.products.createIndex({ name: 'text', shortDescription: 'text' })
+      await safeCreateIndex(this.products, { categoryId: 1, isActive: 1, createdAt: -1 })
+      await safeCreateIndex(this.products, { categoryId: 1 })
+      await safeCreateIndex(this.products, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.products, { sku: 1 }, { unique: true })
+      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text' })
 
       // Categories collection indexes
-      await this.categories.createIndex({ slug: 1 }, { unique: true })
-      await this.categories.createIndex({ path: 1 })
-      await this.categories.createIndex({ parentId: 1 })
+      await safeCreateIndex(this.categories, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.categories, { path: 1 })
+      await safeCreateIndex(this.categories, { parentId: 1 })
 
       // Brands collection indexes
-      await this.brands.createIndex({ slug: 1 }, { unique: true })
+      await safeCreateIndex(this.brands, { slug: 1 }, { unique: true })
 
       // Reviews collection indexes
-      await this.reviews.createIndex({ productId: 1, createdAt: -1 })
+      await safeCreateIndex(this.reviews, { productId: 1, createdAt: -1 })
 
-      console.log('📊 Indexes created successfully')
+      // Return Requests collection indexes
+      await safeCreateIndex(this.returnRequests, { userId: 1, createdAt: -1 })
+      await safeCreateIndex(this.returnRequests, { orderId: 1 })
+      await safeCreateIndex(this.returnRequests, { status: 1 })
+      await safeCreateIndex(this.returnRequests, { requestNumber: 1 }, { unique: true })
+
     } catch (error) {
-      console.warn('⚠️ Some indexes may already exist:', error)
+      // Silent - indexes may already exist
     }
   }
   get users(): Collection<User> {
@@ -119,6 +138,9 @@ class DatabaseService {
   }
   get healthCategories(): Collection<HealthCategory> {
     return this.db.collection(process.env.DB_HEALTH_CATEGORIES_COLLECTION as string)
+  }
+  get returnRequests(): Collection<ReturnRequest> {
+    return this.db.collection('return_requests')
   }
 }
 
