@@ -631,3 +631,62 @@ export const HEALTH_CATEGORIES_MESSAGES = {
   GET_CATEGORY_SUCCESS: 'Get health category successfully'
 } as const
 
+export const RETURN_REQUESTS_MESSAGES = {
+  // Validation Messages
+  REQUEST_ID_INVALID: 'Return request ID must be a valid ObjectId',
+  REQUEST_ID_REQUIRED: 'Return request ID is required',
+  ORDER_ID_INVALID: 'Order ID must be a valid ObjectId',
+  ORDER_ID_REQUIRED: 'Order ID is required',
+  ITEMS_REQUIRED: 'At least one item is required for return',
+  ITEMS_MUST_BE_ARRAY: 'Items must be an array',
+  REASON_REQUIRED: 'Return reason is required',
+  REASON_INVALID: 'Invalid return reason',
+  REASON_DETAIL_REQUIRED: 'Reason detail is required',
+  REASON_DETAIL_MUST_BE_STRING: 'Reason detail must be a string',
+  REASON_DETAIL_LENGTH_INVALID: 'Reason detail must be between 10 and 1000 characters',
+  EVIDENCE_MUST_BE_ARRAY: 'Evidence must be an array of URLs',
+  EVIDENCE_REQUIRED: 'At least one evidence image/video is required',
+  TYPE_INVALID: 'Type must be refund or exchange',
+  REFUND_METHOD_INVALID: 'Refund method must be original, bank_transfer, or wallet',
+  STATUS_INVALID: 'Invalid return status',
+  BANK_NAME_REQUIRED: 'Bank name is required for bank transfer refund',
+  ACCOUNT_NUMBER_REQUIRED: 'Account number is required for bank transfer refund',
+  ACCOUNT_HOLDER_REQUIRED: 'Account holder name is required for bank transfer refund',
+  AMOUNT_INVALID: 'Amount must be a positive number',
+  NOTES_MUST_BE_STRING: 'Notes must be a string',
+  NOTES_LENGTH_INVALID: 'Notes must be less than 1000 characters',
+  TRACKING_NUMBER_MUST_BE_STRING: 'Tracking number must be a string',
+  CONDITION_INVALID: 'Condition must be good, damaged, opened, or unusable',
+  PAGE_INVALID: 'Page must be a positive integer',
+  LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
+
+  // Business Logic Errors
+  REQUEST_NOT_FOUND: 'Return request not found',
+  ORDER_NOT_FOUND: 'Order not found',
+  ORDER_NOT_DELIVERED: 'Order must be delivered before requesting return',
+  RETURN_PERIOD_EXPIRED: 'Return period has expired (7 days for OTC, 3 days for Rx)',
+  PRESCRIPTION_PRODUCT_NOT_RETURNABLE: 'Prescription medicines cannot be returned unless defective or wrong item',
+  REQUEST_ALREADY_EXISTS: 'A return request already exists for this order',
+  REQUEST_ALREADY_PROCESSED: 'This return request has already been processed',
+  REQUEST_CANNOT_BE_CANCELLED: 'This return request cannot be cancelled',
+  REQUEST_NOT_EDITABLE: 'This return request can no longer be edited',
+  PRODUCT_NOT_IN_ORDER: 'Product not found in the original order',
+  QUANTITY_EXCEEDS_ORDERED: 'Return quantity exceeds ordered quantity',
+  INSUFFICIENT_EVIDENCE: 'Insufficient evidence provided for this return reason',
+  REFUND_ALREADY_PROCESSED: 'Refund has already been processed for this request',
+  AWAITING_RETURN_SHIPMENT: 'Waiting for customer to ship return items',
+  RETURN_DEADLINE_PASSED: 'Return shipment deadline has passed',
+
+  // Success Messages
+  CREATE_REQUEST_SUCCESS: 'Return request created successfully',
+  GET_REQUESTS_SUCCESS: 'Get return requests successfully',
+  GET_REQUEST_SUCCESS: 'Get return request successfully',
+  UPDATE_REQUEST_SUCCESS: 'Return request updated successfully',
+  CANCEL_REQUEST_SUCCESS: 'Return request cancelled successfully',
+  APPROVE_REQUEST_SUCCESS: 'Return request approved successfully',
+  REJECT_REQUEST_SUCCESS: 'Return request rejected successfully',
+  RECEIVE_ITEMS_SUCCESS: 'Return items received and verified',
+  PROCESS_REFUND_SUCCESS: 'Refund processed successfully',
+  COMPLETE_REQUEST_SUCCESS: 'Return request completed successfully',
+  GET_REQUEST_STATS_SUCCESS: 'Get return request statistics successfully'
+} as const
