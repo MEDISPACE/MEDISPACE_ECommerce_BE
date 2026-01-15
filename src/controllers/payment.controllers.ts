@@ -84,6 +84,31 @@ export const payOSReturnController = async (req: Request, res: Response) => {
     try {
 
         const result = await paymentService.verifyReturn(PaymentMethod.PayOS, req.query)
+        if (result.isSuccess) {
+            await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
+
+            // Clear purchased items from cart after successful payment
+            try {
+                const order = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
+                if (order && order.items && order.items.length > 0) {
+                    for (const item of order.items) {
+                        await cartService.removeItemFromCart(
+                            new ObjectId(item.productId),
+                            order.userId,
+                            undefined,
+                            (item as any).unit
+                        )
+                    }
+                }
+
+                // Send order confirmation email after successful payment
+                if (order && order.shippingAddress?.email) {
+                    await emailService.sendOrderConfirmationEmail(order.shippingAddress.email, order)
+                }
+            } catch (error) {
+                console.error('Failed to clear cart or send email after payment success:', error)
+            }
+        }
         const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${result.orderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
         return res.redirect(redirectUrl)
     } catch (error) {
