@@ -69,8 +69,20 @@ const iconSchema: ParamSchema = {
     errorMessage: CATEGORIES_MESSAGES.ICON_MUST_BE_STRING
   },
   trim: true,
-  isURL: {
-    errorMessage: CATEGORIES_MESSAGES.ICON_URL_INVALID
+  custom: {
+    options: (value) => {
+      // Allow empty string or valid URL
+      if (value === '' || value === undefined || value === null) {
+        return true
+      }
+      // Basic URL validation
+      try {
+        new URL(value)
+        return true
+      } catch {
+        throw new Error(CATEGORIES_MESSAGES.ICON_URL_INVALID)
+      }
+    }
   }
 }
 
@@ -81,8 +93,20 @@ const thumbnailImageSchema: ParamSchema = {
     errorMessage: CATEGORIES_MESSAGES.THUMBNAIL_IMAGE_MUST_BE_STRING
   },
   trim: true,
-  isURL: {
-    errorMessage: CATEGORIES_MESSAGES.THUMBNAIL_URL_INVALID
+  custom: {
+    options: (value) => {
+      // Allow empty string or valid URL
+      if (value === '' || value === undefined || value === null) {
+        return true
+      }
+      // Basic URL validation
+      try {
+        new URL(value)
+        return true
+      } catch {
+        throw new Error(CATEGORIES_MESSAGES.THUMBNAIL_URL_INVALID)
+      }
+    }
   }
 }
 

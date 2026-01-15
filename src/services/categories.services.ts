@@ -289,8 +289,11 @@ class CategoriesService {
       newLevel = pathData.level
     }
 
+    // Remove fields that should not be updated
+    const { _id, children, productCount, createdAt, level, path, ...allowedPayload } = payload as Record<string, unknown>
+
     const updateData: Record<string, unknown> = {
-      ...payload,
+      ...allowedPayload,
       updatedAt: new Date()
     }
 
