@@ -94,9 +94,18 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         socket.on('message:send', async (data: {
             conversationId?: string
             pharmacistId?: string
-            content: string
-            type?: 'text' | 'image'
+            content?: string
+            type?: 'text' | 'image' | 'product'
             imageUrl?: string
+            productRef?: {
+                productId: string
+                name: string
+                slug: string
+                price: number
+                unit: string
+                imageUrl?: string
+                requiresPrescription?: boolean
+            }
         }) => {
             try {
                 if (!socket.userId || !socket.userRole) {
