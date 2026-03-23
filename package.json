@@ -11,7 +11,11 @@
     "prettier": "prettier --check .",
     "prettier:fix": "prettier --write .",
     "dev:seed": "ts-node src/seed.ts",
-    "fetch:images": "ts-node src/scripts/fetch-product-images.ts"
+    "fetch:images": "ts-node src/scripts/fetch-product-images.ts",
+    "seed:search": "tsx src/scripts/seed-typesense.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
@@ -25,7 +29,9 @@
     "@types/formidable": "^3.4.6",
     "@types/lodash": "^4.17.20",
     "@types/node": "^24.3.3",
+    "@types/supertest": "^7.2.0",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^9.35.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
@@ -35,11 +41,13 @@
     "nodemon": "^3.1.10",
     "prettier": "^3.6.2",
     "rimraf": "^6.0.1",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "tsc-alias": "^1.8.16",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.43.0"
+    "typescript-eslint": "^8.43.0",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.946.0",
@@ -61,6 +69,7 @@
     "nodemailer": "^7.0.11",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.1",
+    "typesense": "^3.0.3",
     "uuid": "^13.0.0"
   }
 }

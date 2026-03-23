@@ -6,6 +6,7 @@ import { ARTICLES_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 import healthCategoriesService from './healthCategories.services'
+import typesenseService from './typesense.services'
 
 class ArticlesService {
     // Generate slug from title
@@ -84,6 +85,11 @@ class ArticlesService {
         })
 
         await databaseService.articles.insertOne(article)
+
+        // Sync to Typesense với dữ liệu đã join category (fire-and-forget)
+        this.getArticle(articleId.toString())
+          .then((indexed) => typesenseService.indexArticle(indexed))
+          .catch(() => {})
 
         // Update category article count if published
         if (article.status === 'published') {
@@ -263,7 +269,12 @@ class ArticlesService {
 
         await databaseService.articles.updateOne({ _id: new ObjectId(articleId) }, { $set: updateData })
 
-        return await this.getArticle(articleId)
+        const result = await this.getArticle(articleId)
+
+        // Sync to Typesense (fire-and-forget)
+        typesenseService.indexArticle(result).catch(() => {})
+
+        return result
     }
 
     // Delete article
@@ -271,6 +282,9 @@ class ArticlesService {
         const article = await this.getArticle(articleId)
 
         await databaseService.articles.deleteOne({ _id: new ObjectId(articleId) })
+
+        // Remove from Typesense (fire-and-forget)
+        typesenseService.removeArticle(articleId).catch(() => {})
 
         // Update category count if was published
         if (article.isPublished) {
@@ -300,7 +314,12 @@ class ArticlesService {
             await healthCategoriesService.updateArticleCount(article.categoryId, 1)
         }
 
-        return await this.getArticle(articleId)
+        const result = await this.getArticle(articleId)
+
+        // Sync to Typesense (fire-and-forget)
+        typesenseService.indexArticle(result).catch(() => {})
+
+        return result
     }
 
     // Archive article
@@ -317,7 +336,12 @@ class ArticlesService {
             await healthCategoriesService.updateArticleCount(article.categoryId, -1)
         }
 
-        return await this.getArticle(articleId)
+        const result = await this.getArticle(articleId)
+
+        // Sync to Typesense (fire-and-forget)
+        typesenseService.indexArticle(result).catch(() => {})
+
+        return result
     }
 
     // Get related articles
