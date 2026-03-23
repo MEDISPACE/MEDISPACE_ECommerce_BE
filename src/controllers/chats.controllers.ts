@@ -133,6 +133,40 @@ export const getAvailablePharmacistController = async (req: Request, res: Respon
     })
 }
 
+// Assign pharmacist to conversation (manual or auto)
+export const assignConversationController = async (req: Request, res: Response) => {
+    const { conversationId } = req.params
+    const { userId, role } = req.decoded_authorization as TokenPayload
+
+    // Only pharmacist can manually assign
+    if (role !== 1) {
+        return res.status(HTTP_STATUS.FORBIDDEN).json({
+            message: 'Chỉ dược sĩ mới có thể nhận cuộc trò chuyện'
+        })
+    }
+
+    const conversation = await chatsService.getConversationById(conversationId)
+    if (!conversation) {
+        return res.status(HTTP_STATUS.NOT_FOUND).json({
+            message: CHATS_MESSAGES.CONVERSATION_NOT_FOUND
+        })
+    }
+
+    // Manually assign this pharmacist
+    const { ObjectId } = await import('mongodb')
+    await import('~/services/database.services').then(m =>
+        m.default.conversations.updateOne(
+            { _id: new ObjectId(conversationId) },
+            { $set: { pharmacistId: new ObjectId(userId), updatedAt: new Date() } }
+        )
+    )
+
+    return res.json({
+        message: 'Đã nhận cuộc trò chuyện thành công',
+        result: { conversationId, pharmacistId: userId }
+    })
+}
+
 // Delete conversation
 export const deleteConversationController = async (req: Request, res: Response) => {
     const { conversationId } = req.params
