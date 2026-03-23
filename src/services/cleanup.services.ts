@@ -252,7 +252,7 @@ class CleanupService {
     // Lấy tất cả conversation đã assign, còn active, lastMessage từ khách hàng > timeout
     const staleConversations = await databaseService.conversations
       .find({
-        pharmacistId: { $exists: true, $ne: null },
+        pharmacistId: { $exists: true },
         status: 'active',
         lastMessageAt: { $lt: cutoffTime }
       })
