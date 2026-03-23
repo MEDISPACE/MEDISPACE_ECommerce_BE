@@ -1,3 +1,10 @@
 node_modules/
 dist/
 .env
+
+# Test
+src/tests/
+vitest.config.ts
+coverage/
+*.test.ts
+*.spec.ts
