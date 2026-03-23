@@ -24,6 +24,8 @@ import articlesRouter from './routes/articles.routes'
 import healthCategoriesRouter from './routes/healthCategories.routes'
 import ghnRouter from './routes/ghn.routes'
 import returnRequestsRouter from './routes/returnRequests.routes'
+import searchRouter from './routes/search.routes'
+import typesenseService from './services/typesense.services'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 import { initFolder } from './utils/file'
@@ -36,6 +38,7 @@ databaseService.connect()
 cleanupService.startCartCleanup()
 cleanupService.startAbandonedOrderCleanup() // Cleanup abandoned orders every hour
 initFolder() // Tạo thư mục temp cho upload
+typesenseService.initCollections() // Initialize Typesense search index
 
 // Parse cookies
 app.use(cookieParser())
@@ -71,6 +74,7 @@ app.use('/articles', articlesRouter)
 app.use('/health-categories', healthCategoriesRouter)
 app.use('/ghn', ghnRouter)
 app.use('/returns', returnRequestsRouter)
+app.use('/search', searchRouter)
 
 
 // Register central error handler so validation and other errors return JSON
