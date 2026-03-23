@@ -29,10 +29,25 @@ export const sendMessageValidator = (req: Request, res: Response, next: NextFunc
     }
 
     // Validate type
-    if (type && !['text', 'image'].includes(type)) {
+    if (type && !['text', 'image', 'product'].includes(type)) {
         return res.status(HTTP_STATUS.BAD_REQUEST).json({
             message: 'Loại tin nhắn không hợp lệ'
         })
+    }
+
+    // Validate productRef khi type là product
+    if (type === 'product') {
+        if (!req.body.productRef) {
+            return res.status(HTTP_STATUS.BAD_REQUEST).json({
+                message: 'Thông tin sản phẩm không được để trống'
+            })
+        }
+        const { productId, name, price } = req.body.productRef
+        if (!productId || !name || price === undefined) {
+            return res.status(HTTP_STATUS.BAD_REQUEST).json({
+                message: 'Thông tin sản phẩm thiếu các trường bắt buộc (productId, name, price)'
+            })
+        }
     }
 
     // Validate imageUrl format

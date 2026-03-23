@@ -103,7 +103,7 @@ export const markAsReadController = async (
 export const getConversationController = async (req: Request, res: Response) => {
     const { conversationId } = req.params
 
-    const conversation = await chatsService.getConversationById(conversationId)
+    const conversation = await chatsService.getConversationById(conversationId as string)
 
     if (!conversation) {
         return res.status(HTTP_STATUS.NOT_FOUND).json({
@@ -145,21 +145,15 @@ export const assignConversationController = async (req: Request, res: Response) 
         })
     }
 
-    const conversation = await chatsService.getConversationById(conversationId)
+    const conversation = await chatsService.getConversationById(conversationId as string)
     if (!conversation) {
         return res.status(HTTP_STATUS.NOT_FOUND).json({
             message: CHATS_MESSAGES.CONVERSATION_NOT_FOUND
         })
     }
 
-    // Manually assign this pharmacist
-    const { ObjectId } = await import('mongodb')
-    await import('~/services/database.services').then(m =>
-        m.default.conversations.updateOne(
-            { _id: new ObjectId(conversationId) },
-            { $set: { pharmacistId: new ObjectId(userId), updatedAt: new Date() } }
-        )
-    )
+    // Manually assign this pharmacist to the conversation
+    await chatsService.assignConversationToPharmacist(conversationId as string, userId as string)
 
     return res.json({
         message: 'Đã nhận cuộc trò chuyện thành công',
@@ -172,7 +166,7 @@ export const deleteConversationController = async (req: Request, res: Response) 
     const { conversationId } = req.params
     const { userId } = req.decoded_authorization as TokenPayload
 
-    await chatsService.deleteConversation(conversationId, userId)
+    await chatsService.deleteConversation(conversationId as string, userId)
 
     return res.json({
         message: CHATS_MESSAGES.DELETE_CONVERSATION_SUCCESS

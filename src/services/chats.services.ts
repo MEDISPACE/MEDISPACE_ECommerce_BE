@@ -138,9 +138,10 @@ class ChatsService {
             conversationId,
             senderId: senderObjectId,
             senderRole,
-            content: payload.content,
+            content: payload.content || '',
             type: (payload.type as MessageType) || MessageType.Text,
             imageUrl: payload.imageUrl,
+            productRef: payload.productRef,   // Forward product card data
             isRead: false
         })
 
@@ -332,6 +333,14 @@ class ChatsService {
         )
 
         return { pharmacistId: chosen._id as ObjectId }
+    }
+
+    // Manual assign: assign specific pharmacist to conversation
+    async assignConversationToPharmacist(conversationId: string, pharmacistId: string) {
+        await databaseService.conversations.updateOne(
+            { _id: new ObjectId(conversationId) },
+            { $set: { pharmacistId: new ObjectId(pharmacistId), updatedAt: new Date() } }
+        )
     }
 
     // Delete conversation and all its messages
