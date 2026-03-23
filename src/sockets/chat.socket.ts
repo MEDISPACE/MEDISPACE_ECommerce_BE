@@ -121,12 +121,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                 io.to(`conversation:${convIdStr}`).emit('message:new', message)
 
                 if (socket.userRole === 'customer') {
-                    // Customer gửi → notify tất cả pharmacists (shared inbox)
+                    // Customer gửi → broadcast cho pharmacists để cập nhật list
+                    // Dedup được xử lý ở FE qua _id check
                     io.to('pharmacists').emit('message:new', message)
-                    io.to('pharmacists').emit('notification:new-message', {
-                        conversationId: convIdStr,
-                        message
-                    })
 
                     // --- 3.5: Auto-assign nếu conversation chưa có dược sĩ ---
                     const conversation = await databaseService.conversations.findOne({
@@ -147,10 +144,6 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     if (conversation) {
                         const customerIdStr = conversation.customerId.toString()
                         io.to(`user:${customerIdStr}`).emit('message:new', message)
-                        io.to(`user:${customerIdStr}`).emit('notification:new-message', {
-                            conversationId: convIdStr,
-                            message
-                        })
                     }
                 }
             } catch (error) {
