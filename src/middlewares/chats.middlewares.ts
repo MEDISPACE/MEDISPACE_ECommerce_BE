@@ -9,8 +9,8 @@ const RATE_LIMIT_WINDOW_MS = 10_000 // 10 giây
 export const sendMessageValidator = (req: Request, res: Response, next: NextFunction) => {
     const { content, type, imageUrl, conversationId } = req.body
 
-    // Validate content
-    if (!content && !imageUrl) {
+    // Validate content – product message không cần content/imageUrl
+    if (!content && !imageUrl && type !== 'product') {
         return res.status(HTTP_STATUS.BAD_REQUEST).json({
             message: 'Nội dung tin nhắn không được để trống'
         })
