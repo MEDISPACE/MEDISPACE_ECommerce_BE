@@ -250,7 +250,7 @@ class ChatsService {
                     }
                 },
                 { $unwind: '$customer' },
-                { $unwind: '$pharmacist' },
+                { $unwind: { path: '$pharmacist', preserveNullAndEmptyArrays: true } },
                 {
                     $project: {
                         _id: 1,
@@ -295,6 +295,43 @@ class ChatsService {
             firstName: pharmacist.firstName,
             lastName: pharmacist.lastName
         }
+    }
+
+    // Smart assign: find online pharmacist with least open conversations (3.5)
+    async assignPharmacist(conversationId: string): Promise<{ pharmacistId: ObjectId | null }> {
+        const conversationObjectId = new ObjectId(conversationId)
+
+        // Find all online pharmacists (role = 1, isOnline = true)
+        const onlinePharmacists = await databaseService.users
+            .find({ role: 1, isOnline: true })
+            .toArray()
+
+        if (onlinePharmacists.length === 0) {
+            return { pharmacistId: null }
+        }
+
+        // Count open conversations per pharmacist
+        const counts = await Promise.all(
+            onlinePharmacists.map(async (p) => ({
+                pharmacist: p,
+                count: await databaseService.conversations.countDocuments({
+                    pharmacistId: p._id,
+                    status: 'active'
+                })
+            }))
+        )
+
+        // Pick pharmacist with fewest active conversations
+        counts.sort((a, b) => a.count - b.count)
+        const chosen = counts[0].pharmacist
+
+        // Assign to conversation
+        await databaseService.conversations.updateOne(
+            { _id: conversationObjectId },
+            { $set: { pharmacistId: chosen._id, updatedAt: new Date() } }
+        )
+
+        return { pharmacistId: chosen._id as ObjectId }
     }
 
     // Delete conversation and all its messages
