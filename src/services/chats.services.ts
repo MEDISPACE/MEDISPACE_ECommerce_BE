@@ -378,6 +378,196 @@ class ChatsService {
             _id: conversationObjectId
         })
     }
+
+    // ==================== ADMIN METHODS ====================
+
+    // Tổng quan số liệu chat cho admin dashboard
+    async getChatStats() {
+        const now = new Date()
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+        const [facetResult, todayMessages] = await Promise.all([
+            databaseService.conversations.aggregate([
+                {
+                    $facet: {
+                        total: [{ $count: 'count' }],
+                        active: [{ $match: { status: 'active' } }, { $count: 'count' }],
+                        closed: [{ $match: { status: 'closed' } }, { $count: 'count' }],
+                        unassigned: [
+                            { $match: { pharmacistId: { $exists: false }, status: 'active' } },
+                            { $count: 'count' }
+                        ],
+                        todayNew: [
+                            { $match: { createdAt: { $gte: todayStart } } },
+                            { $count: 'count' }
+                        ],
+                        todayClosed: [
+                            { $match: { status: 'closed', updatedAt: { $gte: todayStart } } },
+                            { $count: 'count' }
+                        ],
+                        // Top 5 dược sĩ theo số conversation đang xử lý
+                        topPharmacists: [
+                            { $match: { pharmacistId: { $exists: true }, status: 'active' } },
+                            { $group: { _id: '$pharmacistId', conversationCount: { $sum: 1 } } },
+                            { $sort: { conversationCount: -1 } },
+                            { $limit: 5 },
+                            {
+                                $lookup: {
+                                    from: process.env.USERS_COLLECTION as string,
+                                    localField: '_id',
+                                    foreignField: '_id',
+                                    as: 'pharmacist'
+                                }
+                            },
+                            { $unwind: '$pharmacist' },
+                            {
+                                $project: {
+                                    pharmacistId: '$_id',
+                                    conversationCount: 1,
+                                    'pharmacist.firstName': 1,
+                                    'pharmacist.lastName': 1,
+                                    'pharmacist.avatar': 1,
+                                    'pharmacist.isOnline': 1
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]).toArray(),
+            databaseService.messages.countDocuments({
+                createdAt: { $gte: todayStart }
+            })
+        ])
+
+        const f = facetResult[0]
+        return {
+            totalConversations: f.total[0]?.count || 0,
+            activeConversations: f.active[0]?.count || 0,
+            closedConversations: f.closed[0]?.count || 0,
+            unassignedConversations: f.unassigned[0]?.count || 0,
+            todayStats: {
+                newConversations: f.todayNew[0]?.count || 0,
+                closedConversations: f.todayClosed[0]?.count || 0,
+                messages: todayMessages
+            },
+            topPharmacists: f.topPharmacists || []
+        }
+    }
+
+    // Danh sách conversations cho admin (có filter đầy đủ)
+    async getAdminConversations(params: {
+        page?: number
+        limit?: number
+        status?: string
+        pharmacistId?: string
+        search?: string
+        dateFrom?: string
+        dateTo?: string
+    }) {
+        const { page = 1, limit = 20, status, pharmacistId, search, dateFrom, dateTo } = params
+        const skip = (page - 1) * limit
+
+        const matchStage: Record<string, unknown> = {}
+        if (status) matchStage.status = status
+        if (pharmacistId) matchStage.pharmacistId = new ObjectId(pharmacistId)
+        if (dateFrom || dateTo) {
+            matchStage.createdAt = {}
+            if (dateFrom) (matchStage.createdAt as Record<string, Date>).$gte = new Date(dateFrom)
+            if (dateTo) (matchStage.createdAt as Record<string, Date>).$lte = new Date(dateTo + 'T23:59:59')
+        }
+
+        const pipeline = [
+            { $match: matchStage },
+            {
+                $lookup: {
+                    from: process.env.USERS_COLLECTION as string,
+                    localField: 'customerId',
+                    foreignField: '_id',
+                    as: 'customer'
+                }
+            },
+            {
+                $lookup: {
+                    from: process.env.USERS_COLLECTION as string,
+                    localField: 'pharmacistId',
+                    foreignField: '_id',
+                    as: 'pharmacist'
+                }
+            },
+            { $unwind: '$customer' },
+            { $unwind: { path: '$pharmacist', preserveNullAndEmptyArrays: true } },
+            // Filter by search (tên khách hàng)
+            ...(search ? [{
+                $match: {
+                    $or: [
+                        { 'customer.firstName': { $regex: search, $options: 'i' } },
+                        { 'customer.lastName': { $regex: search, $options: 'i' } }
+                    ]
+                }
+            }] : []),
+            {
+                $lookup: {
+                    from: process.env.DB_MESSAGES_COLLECTION as string || 'messages',
+                    localField: '_id',
+                    foreignField: 'conversationId',
+                    as: 'messageCount'
+                }
+            },
+            {
+                $project: {
+                    _id: 1, customerId: 1, pharmacistId: 1, status: 1,
+                    lastMessage: 1, lastMessageAt: 1, unreadCount: 1,
+                    createdAt: 1, updatedAt: 1,
+                    messageCount: { $size: '$messageCount' },
+                    'customer._id': 1, 'customer.firstName': 1, 'customer.lastName': 1,
+                    'customer.avatar': 1, 'customer.email': 1, 'customer.isOnline': 1,
+                    'pharmacist._id': 1, 'pharmacist.firstName': 1, 'pharmacist.lastName': 1,
+                    'pharmacist.avatar': 1, 'pharmacist.isOnline': 1
+                }
+            },
+            { $sort: { lastMessageAt: -1, createdAt: -1 } as Record<string, 1 | -1> }
+        ]
+
+        const [conversations, totalResult] = await Promise.all([
+            databaseService.conversations.aggregate([...pipeline, { $skip: skip }, { $limit: limit }]).toArray(),
+            databaseService.conversations.aggregate([...pipeline, { $count: 'total' }]).toArray()
+        ])
+
+        const total = totalResult[0]?.total || 0
+        return {
+            conversations,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+        }
+    }
+
+    // Admin đóng conversation
+    async adminCloseConversation(conversationId: string) {
+        const result = await databaseService.conversations.findOneAndUpdate(
+            { _id: new ObjectId(conversationId) },
+            { $set: { status: 'closed', updatedAt: new Date() } },
+            { returnDocument: 'after' }
+        )
+        if (!result) throw new Error('Conversation not found')
+        return result
+    }
+
+    // Admin chuyển conversation sang dược sĩ khác
+    async adminTransferConversation(conversationId: string, targetPharmacistId: string) {
+        // Verify pharmacist tồn tại và là dược sĩ
+        const pharmacist = await databaseService.users.findOne({
+            _id: new ObjectId(targetPharmacistId),
+            role: 1
+        })
+        if (!pharmacist) throw new Error('Pharmacist not found')
+
+        const result = await databaseService.conversations.findOneAndUpdate(
+            { _id: new ObjectId(conversationId) },
+            { $set: { pharmacistId: new ObjectId(targetPharmacistId), updatedAt: new Date() } },
+            { returnDocument: 'after' }
+        )
+        if (!result) throw new Error('Conversation not found')
+        return result
+    }
 }
 
 const chatsService = new ChatsService()

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { NextFunction } from 'express-serve-static-core'
 import adminService from '~/services/admin.services'
+import chatsService from '~/services/chats.services'
 import { ADMIN_MESSAGES } from '~/constants/message'
 
 /**
@@ -443,6 +444,79 @@ export const getCustomerAnalyticsController = async (req: Request, res: Response
       message: ADMIN_MESSAGES.GET_CUSTOMER_ANALYTICS_SUCCESS,
       result
     })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// ==================== CHAT MANAGEMENT ====================
+
+// GET /admin/chats/stats
+export const getChatStatsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await chatsService.getChatStats()
+    return res.json({ message: 'Lấy thống kê chat thành công', result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// GET /admin/chats/conversations
+export const adminGetConversationsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, limit, status, pharmacistId, search, dateFrom, dateTo } = req.query
+    const result = await chatsService.getAdminConversations({
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 20,
+      status: status as string,
+      pharmacistId: pharmacistId as string,
+      search: search as string,
+      dateFrom: dateFrom as string,
+      dateTo: dateTo as string
+    })
+    return res.json({ message: 'Lấy danh sách cuộc trò chuyện thành công', result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// GET /admin/chats/conversations/:conversationId/messages
+export const adminGetConversationMessagesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { conversationId } = req.params
+    const { page, limit } = req.query
+    const result = await chatsService.getMessages({
+      conversationId: conversationId as string,
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 50
+    })
+    return res.json({ message: 'Lấy tin nhắn thành công', result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// PATCH /admin/chats/conversations/:conversationId/close
+export const adminCloseConversationController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { conversationId } = req.params
+    const result = await chatsService.adminCloseConversation(conversationId as string)
+    return res.json({ message: 'Đã đóng cuộc trò chuyện', result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// PATCH /admin/chats/conversations/:conversationId/transfer
+export const adminTransferConversationController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { conversationId } = req.params
+    const { pharmacistId } = req.body
+    if (!pharmacistId) {
+      return res.status(400).json({ message: 'pharmacistId là bắt buộc' })
+    }
+    const result = await chatsService.adminTransferConversation(conversationId as string, pharmacistId as string)
+    return res.json({ message: 'Đã chuyển cuộc trò chuyện thành công', result })
   } catch (error) {
     next(error)
   }
