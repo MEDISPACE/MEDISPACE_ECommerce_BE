@@ -1,4 +1,4 @@
-﻿
+
 import { Router } from 'express'
 import {
     getDashboardStatsController,
@@ -22,7 +22,12 @@ import {
     getReportsAnalyticsController,
     getRevenueAnalyticsController,
     getProductAnalyticsController,
-    getCustomerAnalyticsController
+    getCustomerAnalyticsController,
+    getChatStatsController,
+    adminGetConversationsController,
+    adminGetConversationMessagesController,
+    adminCloseConversationController,
+    adminTransferConversationController
 } from '~/controllers/admin.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -235,6 +240,43 @@ adminRouter.patch(
 )
 
 export default adminRouter
+
+// ==================== CHAT MANAGEMENT ====================
+
+// GET /admin/chats/stats
+adminRouter.get(
+    '/chats/stats',
+    accessTokenValidator, verifiedUserValidator, adminRequired,
+    wrapRequestHandler(getChatStatsController)
+)
+
+// GET /admin/chats/conversations
+adminRouter.get(
+    '/chats/conversations',
+    accessTokenValidator, verifiedUserValidator, adminRequired,
+    wrapRequestHandler(adminGetConversationsController)
+)
+
+// GET /admin/chats/conversations/:conversationId/messages
+adminRouter.get(
+    '/chats/conversations/:conversationId/messages',
+    accessTokenValidator, verifiedUserValidator, adminRequired,
+    wrapRequestHandler(adminGetConversationMessagesController)
+)
+
+// PATCH /admin/chats/conversations/:conversationId/close
+adminRouter.patch(
+    '/chats/conversations/:conversationId/close',
+    accessTokenValidator, verifiedUserValidator, adminRequired,
+    wrapRequestHandler(adminCloseConversationController)
+)
+
+// PATCH /admin/chats/conversations/:conversationId/transfer
+adminRouter.patch(
+    '/chats/conversations/:conversationId/transfer',
+    accessTokenValidator, verifiedUserValidator, adminRequired,
+    wrapRequestHandler(adminTransferConversationController)
+)
 
 // ==================== PRESCRIPTION MANAGEMENT ====================
 
