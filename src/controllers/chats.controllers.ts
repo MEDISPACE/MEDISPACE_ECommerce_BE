@@ -19,8 +19,9 @@ export const getConversationsController = async (
     const { userId, role } = req.decoded_authorization as TokenPayload
     const page = parseInt(req.query.page || '1')
     const limit = parseInt(req.query.limit || '20')
+    const status = req.query.status as 'active' | 'closed' | undefined
 
-    const result = await chatsService.getConversations(userId, role === 1 ? 'pharmacist' : 'customer', page, limit)
+    const result = await chatsService.getConversations(userId, role === 1 ? 'pharmacist' : 'customer', page, limit, status)
 
     return res.json({
         message: CHATS_MESSAGES.GET_CONVERSATIONS_SUCCESS,

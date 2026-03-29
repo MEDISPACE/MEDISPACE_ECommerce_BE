@@ -3,6 +3,7 @@ import { NextFunction } from 'express-serve-static-core'
 import adminService from '~/services/admin.services'
 import chatsService from '~/services/chats.services'
 import { ADMIN_MESSAGES } from '~/constants/message'
+import { getIO } from '~/sockets/chat.socket'
 
 /**
  * Get dashboard statistics
@@ -159,7 +160,7 @@ export const createUserController = async (req: Request, res: Response, next: Ne
 export const updateUserController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const user = await adminService.updateUser(userId, req.body)
+    const user = await adminService.updateUser(userId as string, req.body)
     return res.json({
       message: ADMIN_MESSAGES.UPDATE_USER_SUCCESS,
       result: user
@@ -178,7 +179,7 @@ export const updateUserController = async (req: Request, res: Response, next: Ne
 export const deleteUserController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const result = await adminService.deleteUser(userId)
+    const result = await adminService.deleteUser(userId as string)
     return res.json(result)
   } catch (error) {
     next(error)
@@ -194,7 +195,7 @@ export const deleteUserController = async (req: Request, res: Response, next: Ne
 export const resetUserPasswordController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const result = await adminService.resetUserPassword(userId)
+    const result = await adminService.resetUserPassword(userId as string)
     return res.json(result)
   } catch (error) {
     next(error)
@@ -210,7 +211,7 @@ export const resetUserPasswordController = async (req: Request, res: Response, n
 export const verifyUserEmailController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const result = await adminService.verifyUserEmail(userId)
+    const result = await adminService.verifyUserEmail(userId as string)
     return res.json(result)
   } catch (error) {
     next(error)
@@ -264,7 +265,7 @@ export const getOrderStatsController = async (req: Request, res: Response, next:
 export const getOrderDetailsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { orderId } = req.params
-    const result = await adminService.getOrderDetails(orderId)
+    const result = await adminService.getOrderDetails(orderId as string)
     return res.json({ result })
   } catch (error) {
     next(error)
@@ -281,7 +282,7 @@ export const updateOrderStatusController = async (req: Request, res: Response, n
     const { orderId } = req.params
     const { status, notes, trackingNumber } = req.body
 
-    const result = await adminService.updateOrderStatus(orderId, {
+    const result = await adminService.updateOrderStatus(orderId as string, {
       status,
       notes,
       trackingNumber
@@ -339,7 +340,7 @@ export const updatePrescriptionStatusController = async (req: Request, res: Resp
     const { prescriptionId } = req.params
     const { status, notes } = req.body
 
-    const result = await adminService.updatePrescriptionStatus(prescriptionId, {
+    const result = await adminService.updatePrescriptionStatus(prescriptionId as string, {
       status,
       notes
     })
@@ -485,11 +486,11 @@ export const adminGetConversationMessagesController = async (req: Request, res: 
   try {
     const { conversationId } = req.params
     const { page, limit } = req.query
-    const result = await chatsService.getMessages({
-      conversationId: conversationId as string,
-      page: page ? parseInt(page as string) : 1,
-      limit: limit ? parseInt(limit as string) : 50
-    })
+    const result = await chatsService.getMessages(
+      conversationId as string,
+      page ? parseInt(page as string) : 1,
+      limit ? parseInt(limit as string) : 50
+    )
     return res.json({ message: 'Lấy tin nhắn thành công', result })
   } catch (error) {
     next(error)
@@ -501,6 +502,25 @@ export const adminCloseConversationController = async (req: Request, res: Respon
   try {
     const { conversationId } = req.params
     const result = await chatsService.adminCloseConversation(conversationId as string)
+
+    // Emit realtime: notify customer & pharmacist that conversation was closed by admin
+    try {
+      const io = getIO()
+      const payload = {
+        conversationId,
+        closedBy: 'admin',
+        closedAt: new Date().toISOString()
+      }
+      // Notify everyone in the conversation room (customer + pharmacist đang xem)
+      io.to(`conversation:${conversationId}`).emit('conversation:closed', payload)
+      // Also notify customer via personal room (nếu không join room hội thoại)
+      if (result.customerId) {
+        io.to(`user:${result.customerId.toString()}`).emit('conversation:closed', payload)
+      }
+      // Notify pharmacists room to update inbox
+      io.to('pharmacists').emit('conversation:closed', payload)
+    } catch { /* socket not critical */ }
+
     return res.json({ message: 'Đã đóng cuộc trò chuyện', result })
   } catch (error) {
     next(error)
@@ -515,7 +535,34 @@ export const adminTransferConversationController = async (req: Request, res: Res
     if (!pharmacistId) {
       return res.status(400).json({ message: 'pharmacistId là bắt buộc' })
     }
+
+    // Lấy pharmacistId cũ trước khi transfer
+    const before = await chatsService.getConversationById(conversationId as string)
+    const oldPharmacistId = before?.pharmacistId?.toString()
+
     const result = await chatsService.adminTransferConversation(conversationId as string, pharmacistId as string)
+
+    // Emit realtime: notify old pharmacist, new pharmacist, and pharmacists room
+    try {
+      const io = getIO()
+      const payload = {
+        conversationId,
+        newPharmacistId: pharmacistId,
+        oldPharmacistId,
+        transferredAt: new Date().toISOString()
+      }
+      // Notify everyone in the conversation room
+      io.to(`conversation:${conversationId}`).emit('conversation:transferred', payload)
+      // Notify old pharmacist personally to remove from their inbox
+      if (oldPharmacistId) {
+        io.to(`user:${oldPharmacistId}`).emit('conversation:transferred', payload)
+      }
+      // Notify new pharmacist personally so they pick it up
+      io.to(`user:${pharmacistId}`).emit('conversation:transferred', payload)
+      // Notify all pharmacists to refresh lists
+      io.to('pharmacists').emit('conversation:transferred', payload)
+    } catch { /* socket not critical */ }
+
     return res.json({ message: 'Đã chuyển cuộc trò chuyện thành công', result })
   } catch (error) {
     next(error)
