@@ -12,17 +12,25 @@ config()
 
 interface AuthenticatedSocket extends Socket {
     userId?: string
-    userRole?: 'customer' | 'pharmacist'
+    userRole?: 'customer' | 'pharmacist' | 'admin'
+}
+
+let _io: SocketIOServer | null = null
+
+export const getIO = (): SocketIOServer => {
+    if (!_io) throw new Error('Socket.IO not initialized')
+    return _io
 }
 
 export const initChatSocket = (httpServer: HTTPServer) => {
-    const io = new SocketIOServer(httpServer, {
+    _io = new SocketIOServer(httpServer, {
         cors: {
             origin: process.env.FRONTEND_URLS,
             credentials: true,
             methods: ['GET', 'POST']
         }
     })
+    const io = _io
 
     // Authentication middleware
     io.use(async (socket: AuthenticatedSocket, next) => {
@@ -38,7 +46,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
             }) as TokenPayload
 
             socket.userId = decoded.userId
-            socket.userRole = decoded.role === 1 ? 'pharmacist' : 'customer'
+            if (decoded.role === 1) socket.userRole = 'pharmacist'
+            else if (decoded.role === 2) socket.userRole = 'admin'
+            else socket.userRole = 'customer'
 
             next()
         } catch (error) {
@@ -67,6 +77,10 @@ export const initChatSocket = (httpServer: HTTPServer) => {
             // Pharmacists also join shared pharmacist room
             if (socket.userRole === 'pharmacist') {
                 socket.join('pharmacists')
+            }
+            // Admins join shared admin room
+            if (socket.userRole === 'admin') {
+                socket.join('admins')
             }
         }
 
@@ -112,6 +126,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     socket.emit('error', { message: USERS_MESSAGES.UNAUTHENTICATED })
                     return
                 }
+                
+                // Admin không gửi tin nhắn qua socket này
+                if (socket.userRole === 'admin') return
 
                 const message = await chatsService.sendMessage(socket.userId, socket.userRole, data)
 
@@ -129,6 +146,16 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     const conversation = await databaseService.conversations.findOne({
                         _id: new ObjectId(convIdStr)
                     })
+
+                    // Detect tin nhắn đầu tiên → notify admin realtime
+                    const msgCount = await databaseService.messages.countDocuments({
+                        conversationId: new ObjectId(convIdStr)
+                    })
+                    if (msgCount === 1) {
+                        // Conversation vừa có tin nhắn đầu tiên → admin thấy mới
+                        io.to('admins').emit('conversation:new', { conversationId: convIdStr })
+                    }
+
                     if (conversation && !conversation.pharmacistId) {
                         const { pharmacistId } = await chatsService.assignPharmacist(convIdStr)
                         if (pharmacistId) {
@@ -170,6 +197,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         socket.on('messages:read', async (data: { conversationId: string }) => {
             try {
                 if (!socket.userId || !socket.userRole) return
+                if (socket.userRole === 'admin') return
 
                 await chatsService.markAsRead(data.conversationId, socket.userId, socket.userRole)
 

@@ -9,16 +9,16 @@ class ChatsService {
     async getOrCreateConversation(customerId: string) {
         const customerObjectId = new ObjectId(customerId)
 
-        // Try to find existing conversation for this customer
+        // Chỉ tìm conversation đang active — không dùng lại conversation đã đóng
         let conversation = await databaseService.conversations.findOne({
-            customerId: customerObjectId
+            customerId: customerObjectId,
+            status: 'active'
         })
 
-        // If no conversation exists, create one
+        // Không có active conversation → tạo mới
         if (!conversation) {
             const newConversation = new Conversation({
                 customerId: customerObjectId,
-                // No pharmacistId - shared inbox model
                 status: 'active'
             })
 
@@ -30,12 +30,13 @@ class ChatsService {
     }
 
     // Get all conversations for a user (customer or pharmacist)
-    async getConversations(userId: string, role: 'customer' | 'pharmacist', page = 1, limit = 20) {
+    async getConversations(userId: string, role: 'customer' | 'pharmacist', page = 1, limit = 20, status?: 'active' | 'closed') {
         const userObjectId = new ObjectId(userId)
         const skip = (page - 1) * limit
 
         // Shared inbox: pharmacists see ALL conversations, customers see only their own
-        const query = role === 'customer' ? { customerId: userObjectId } : {}
+        const query: Record<string, unknown> = role === 'customer' ? { customerId: userObjectId } : {}
+        if (status) query.status = status
 
         const [conversations, total] = await Promise.all([
             databaseService.conversations
@@ -122,6 +123,12 @@ class ChatsService {
         // If conversationId is provided, use it
         if (payload.conversationId) {
             conversationId = new ObjectId(payload.conversationId)
+
+            // Block sending to closed conversations
+            const conv = await databaseService.conversations.findOne({ _id: conversationId })
+            if (conv && conv.status === 'closed') {
+                throw new Error('Conversation đã được đóng. Vui lòng bắt đầu cuộc tư vấn mới.')
+            }
         } else {
             // Create or get conversation for customer (shared inbox)
             if (senderRole === 'customer') {
@@ -337,6 +344,10 @@ class ChatsService {
 
     // Manual assign: assign specific pharmacist to conversation
     async assignConversationToPharmacist(conversationId: string, pharmacistId: string) {
+        const conv = await databaseService.conversations.findOne({ _id: new ObjectId(conversationId) })
+        if (!conv) throw new Error('Conversation not found')
+        if (conv.status === 'closed') throw new Error('Không thể nhận cuộc hội thoại đã đóng')
+
         await databaseService.conversations.updateOne(
             { _id: new ObjectId(conversationId) },
             { $set: { pharmacistId: new ObjectId(pharmacistId), updatedAt: new Date() } }
@@ -525,7 +536,9 @@ class ChatsService {
                     'pharmacist.avatar': 1, 'pharmacist.isOnline': 1
                 }
             },
-            { $sort: { lastMessageAt: -1, createdAt: -1 } as Record<string, 1 | -1> }
+            { $sort: { lastMessageAt: -1, createdAt: -1 } as Record<string, 1 | -1> },
+            // Admin chỉ thấy conversation đã có ít nhất 1 tin nhắn
+            { $match: { messageCount: { $gt: 0 } } }
         ]
 
         const [conversations, totalResult] = await Promise.all([
