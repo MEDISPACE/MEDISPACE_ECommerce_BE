@@ -37,6 +37,7 @@ const app = express()
 databaseService.connect()
 cleanupService.startCartCleanup()
 cleanupService.startAbandonedOrderCleanup() // Cleanup abandoned orders every hour
+cleanupService.startStaleConversationReassign() // Re-queue stale chat conversations every 5 minutes
 initFolder() // Tạo thư mục temp cho upload
 typesenseService.initCollections() // Initialize Typesense search index
 

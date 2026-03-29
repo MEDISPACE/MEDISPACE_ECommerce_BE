@@ -1,9 +1,20 @@
+export interface ProductRef {
+    productId: string
+    name: string
+    slug: string
+    price: number
+    unit: string
+    imageUrl?: string
+    requiresPrescription?: boolean
+}
+
 export interface SendMessageReqBody {
     conversationId?: string
     pharmacistId?: string
-    content: string
-    type?: 'text' | 'image'
+    content?: string
+    type?: 'text' | 'image' | 'product'
     imageUrl?: string
+    productRef?: ProductRef
 }
 
 export interface GetMessagesReqQuery {
