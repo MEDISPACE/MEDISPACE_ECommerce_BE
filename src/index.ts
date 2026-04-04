@@ -25,6 +25,7 @@ import healthCategoriesRouter from './routes/healthCategories.routes'
 import ghnRouter from './routes/ghn.routes'
 import returnRequestsRouter from './routes/returnRequests.routes'
 import searchRouter from './routes/search.routes'
+import couponsRouter from './routes/coupons.routes'
 import typesenseService from './services/typesense.services'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
@@ -76,6 +77,7 @@ app.use('/health-categories', healthCategoriesRouter)
 app.use('/ghn', ghnRouter)
 app.use('/returns', returnRequestsRouter)
 app.use('/search', searchRouter)
+app.use('/coupons', couponsRouter)
 
 
 // Register central error handler so validation and other errors return JSON

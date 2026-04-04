@@ -10,6 +10,7 @@ import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
 import { PaymentMethod, ShippingMethod } from '~/constants/enum'
+import couponService from './coupons.services'
 
 class OrderService {
   // Create order from cart
@@ -145,7 +146,46 @@ class OrderService {
 
     // Tax logic: Prices already include VAT, so no extra tax added
     const taxAmount = 0
-    const discountAmount = 0
+
+    // Get coupon info from cart (normal checkout flow)
+    let couponDiscountAmount = 0
+    let appliedCoupons: any[] = []
+    let freeShippingApplied = false
+
+    if (!isDirectBuy) {
+      const cartResult = await cartService.getCart(userId, sessionId)
+      const cart = cartResult.cart
+      appliedCoupons = cart.appliedCoupons || []
+    } else if (payload.couponCodes && payload.couponCodes.length > 0) {
+      // Direct buy: evaluate passed coupon codes on the fly
+      const hasPrescriptionItems = !!orderItems.find(i => i.prescriptionRequired)
+      for (const code of payload.couponCodes) {
+        const validation = await couponService.validateCoupon(code, userId, subtotal, hasPrescriptionItems)
+        if (validation.isValid && validation.coupon) {
+          appliedCoupons.push({
+             code: validation.coupon.code,
+             discountAmount: validation.discountAmount,
+             type: validation.coupon.type,
+             name: validation.coupon.name
+          })
+        }
+      }
+    }
+
+    // Tính coupon discount (không tính freeship vào discountAmount)
+    couponDiscountAmount = appliedCoupons
+      .filter((c: any) => c.type !== 'free_shipping')
+      .reduce((sum: number, c: any) => sum + (c.discountAmount || 0), 0)
+
+    // Kiểm tra có freeship coupon không
+    freeShippingApplied = appliedCoupons.some((c: any) => c.type === 'free_shipping')
+
+    // Apply freeship coupon
+    if (freeShippingApplied) {
+      shippingFee = 0
+    }
+
+    const discountAmount = couponDiscountAmount
     const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
 
     // Check prescription requirement logic if needed
@@ -224,6 +264,18 @@ class OrderService {
         paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
       } catch (error) {
         // error suppressed
+      }
+    }
+
+    // Ghi nhận coupon redemption (fire-and-forget, không block response)
+    if (appliedCoupons && appliedCoupons.length > 0) {
+      for (const coupon of appliedCoupons) {
+        couponService.recordCouponRedemption(
+          coupon.code,
+          userId,
+          result.insertedId,
+          coupon.discountAmount || 0
+        ).catch(() => { /* silent */ })
       }
     }
 
