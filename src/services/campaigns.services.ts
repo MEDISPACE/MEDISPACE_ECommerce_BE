@@ -34,7 +34,7 @@ class CampaignService {
 
     // Build query: tìm campaign đang active, trong thời gian hiệu lực
     const baseCriteria = {
-      status: 'active',
+      status: 'active' as const,
       startDate: { $lte: now },
       endDate: { $gte: now }
     }
@@ -46,7 +46,7 @@ class CampaignService {
         { scope: 'all' },
         { scope: 'products', productIds: productId },
         { scope: 'categories', categoryIds: categoryId },
-        ...(brandId ? [{ scope: 'brands', brandIds: brandId }] : [])
+        ...(brandId ? [{ scope: 'brands' as const, brandIds: brandId }] : [])
       ]
     }).sort({ priority: -1 }).toArray()
 
@@ -352,6 +352,22 @@ class CampaignService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy chiến dịch.', status: HTTP_STATUS.NOT_FOUND })
     }
     return campaign
+  }
+
+  async toggleCampaign(campaignId: ObjectId) {
+    const campaign = await databaseService.campaigns.findOne({ _id: campaignId })
+    if (!campaign) {
+      throw new ErrorWithStatus({ message: 'Không tìm thấy chiến dịch.', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    const newStatus = (campaign.status === 'active' || campaign.status === 'scheduled') ? 'ended' : 'active'
+    
+    await databaseService.campaigns.updateOne(
+      { _id: campaignId },
+      { $set: { status: newStatus as any, updatedAt: new Date() } }
+    )
+
+    return databaseService.campaigns.findOne({ _id: campaignId })
   }
 }
 

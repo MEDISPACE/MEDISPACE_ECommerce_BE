@@ -6,7 +6,8 @@ import {
   getAdminCampaignByIdController,
   createCampaignController,
   updateCampaignController,
-  deleteCampaignController
+  deleteCampaignController,
+  toggleCampaignController
 } from '~/controllers/campaigns.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -88,6 +89,18 @@ campaignsRouter.delete(
   verifiedUserValidator,
   adminRequired,
   wrapRequestHandler(deleteCampaignController)
+)
+
+/**
+ * PATCH /campaigns/:campaignId/toggle
+ * Admin: Bật/tắt campaign
+ */
+campaignsRouter.patch(
+  '/:campaignId/toggle',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(toggleCampaignController)
 )
 
 export default campaignsRouter
