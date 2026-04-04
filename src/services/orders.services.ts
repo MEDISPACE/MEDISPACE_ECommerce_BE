@@ -188,6 +188,9 @@ class OrderService {
 
     const discountAmount = couponDiscountAmount
 
+    const orderId = new ObjectId()
+    const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+
     // Loyalty points redemption
     let pointsRedeemed = 0
     let pointsRedeemAmount = 0
@@ -195,10 +198,10 @@ class OrderService {
     if (payload.pointsToRedeem && payload.pointsToRedeem > 0 && userId) {
       pointsRedeemAmount = await loyaltyService.redeemPoints(
         userId,
-        new ObjectId(), // placeholder — will update after order insert
+        orderId,
         payload.pointsToRedeem,
         subtotal,
-        '' // placeholder
+        orderNumber
       )
       pointsRedeemed = payload.pointsToRedeem
     }
@@ -207,10 +210,8 @@ class OrderService {
 
     // Check prescription requirement logic if needed
 
-    const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
-
     const order = new Order({
-      _id: new ObjectId(),
+      _id: orderId,
       userId,
       orderNumber,
       items: orderItems,
