@@ -8,7 +8,8 @@ import {
   getAdminCouponByIdController,
   createCouponController,
   updateCouponController,
-  deleteCouponController
+  deleteCouponController,
+  toggleCouponController
 } from '~/controllers/coupons.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -123,6 +124,18 @@ couponsRouter.delete(
   verifiedUserValidator,
   adminRequired,
   wrapRequestHandler(deleteCouponController)
+)
+
+/**
+ * PATCH /coupons/:couponId/toggle
+ * Admin: Kích hoạt / Hủy kích hoạt coupon
+ */
+couponsRouter.patch(
+  '/:couponId/toggle',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(toggleCouponController)
 )
 
 export default couponsRouter

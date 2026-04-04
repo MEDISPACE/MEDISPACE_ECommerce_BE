@@ -126,3 +126,10 @@ export const deleteCouponController = async (req: Request, res: Response) => {
   const result = await couponService.deleteCoupon(new ObjectId(couponId))
   return res.status(HTTP_STATUS.OK).json(result)
 }
+
+// PATCH /coupons/:couponId/toggle — Admin: Kích hoạt / Hủy kích hoạt coupon
+export const toggleCouponController = async (req: Request, res: Response) => {
+  const couponId = req.params.couponId as string
+  const result = await couponService.toggleCoupon(new ObjectId(couponId))
+  return res.status(HTTP_STATUS.OK).json({ message: 'Cập nhật trạng thái thành công.', result })
+}

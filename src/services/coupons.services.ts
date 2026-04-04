@@ -374,6 +374,18 @@ class CouponService {
       endDate: { $gte: now }
     }).sort({ createdAt: -1 }).toArray()
   }
+
+  async toggleCoupon(couponId: ObjectId) {
+    const coupon = await databaseService.coupons.findOne({ _id: couponId })
+    if (!coupon) {
+      throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
+    }
+    await databaseService.coupons.updateOne(
+      { _id: couponId },
+      { $set: { isActive: !coupon.isActive, updatedAt: new Date() } }
+    )
+    return { isActive: !coupon.isActive }
+  }
 }
 
 const couponService = new CouponService()
