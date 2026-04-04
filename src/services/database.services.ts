@@ -20,6 +20,9 @@ import HealthCategory from '~/models/schemas/HealthCategory.schema'
 import ReturnRequest from '~/models/schemas/ReturnRequest.schema'
 import Coupon from '~/models/schemas/Coupon.schema'
 import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
+import Campaign from '~/models/schemas/Campaign.schema'
+import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
+import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
 
 config()
 
@@ -86,6 +89,31 @@ class DatabaseService {
       await safeCreateIndex(this.returnRequests, { status: 1 })
       await safeCreateIndex(this.returnRequests, { requestNumber: 1 }, { unique: true })
 
+      // Coupons collection indexes
+      await safeCreateIndex(this.coupons, { code: 1 }, { unique: true })
+      await safeCreateIndex(this.coupons, { isActive: 1, startDate: 1, endDate: 1 })
+      await safeCreateIndex(this.coupons, { isPublic: 1, isActive: 1 })
+
+      // CouponRedemptions collection indexes
+      await safeCreateIndex(this.couponRedemptions, { couponId: 1, userId: 1 })
+      await safeCreateIndex(this.couponRedemptions, { orderId: 1 })
+      await safeCreateIndex(this.couponRedemptions, { userId: 1, createdAt: -1 })
+
+      // Campaigns collection indexes
+      await safeCreateIndex(this.campaigns, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.campaigns, { status: 1, startDate: 1, endDate: 1 })
+      await safeCreateIndex(this.campaigns, { status: 1, isPublic: 1, priority: -1 })
+
+      // LoyaltyAccounts collection indexes
+      await safeCreateIndex(this.loyaltyAccounts, { userId: 1 }, { unique: true })
+      await safeCreateIndex(this.loyaltyAccounts, { tier: 1 })
+
+      // LoyaltyTransactions collection indexes
+      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, createdAt: -1 })
+      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, type: 1 })
+      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, orderId: 1, type: 1 })
+      await safeCreateIndex(this.loyaltyTransactions, { type: 1, isExpired: 1, expiresAt: 1 })
+
     } catch (error) {
       // Silent - indexes may already exist
     }
@@ -149,6 +177,15 @@ class DatabaseService {
   }
   get couponRedemptions(): Collection<CouponRedemption> {
     return this.db.collection(process.env.DB_COUPON_REDEMPTIONS_COLLECTION as string)
+  }
+  get campaigns(): Collection<Campaign> {
+    return this.db.collection(process.env.DB_CAMPAIGNS_COLLECTION as string)
+  }
+  get loyaltyAccounts(): Collection<LoyaltyAccount> {
+    return this.db.collection(process.env.DB_LOYALTY_ACCOUNTS_COLLECTION as string)
+  }
+  get loyaltyTransactions(): Collection<LoyaltyTransaction> {
+    return this.db.collection(process.env.DB_LOYALTY_TRANSACTIONS_COLLECTION as string)
   }
 }
 
