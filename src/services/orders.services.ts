@@ -11,6 +11,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
 import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 import couponService from './coupons.services'
+import loyaltyService from './loyalty.services'
 
 class OrderService {
   // Create order from cart
@@ -153,9 +154,9 @@ class OrderService {
     let freeShippingApplied = false
 
     if (!isDirectBuy) {
-      const cartResult = await cartService.getCart(userId, sessionId)
-      const cart = cartResult.cart
-      appliedCoupons = cart.appliedCoupons || []
+      // Reuse cart data — read appliedCoupons directly from DB to avoid duplicate getCart call
+      const cartDoc = await databaseService.carts.findOne(userId ? { userId } : { sessionId })
+      appliedCoupons = cartDoc?.appliedCoupons || []
     } else if (payload.couponCodes && payload.couponCodes.length > 0) {
       // Direct buy: evaluate passed coupon codes on the fly
       const hasPrescriptionItems = !!orderItems.find(i => i.prescriptionRequired)
@@ -186,7 +187,23 @@ class OrderService {
     }
 
     const discountAmount = couponDiscountAmount
-    const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
+
+    // Loyalty points redemption
+    let pointsRedeemed = 0
+    let pointsRedeemAmount = 0
+
+    if (payload.pointsToRedeem && payload.pointsToRedeem > 0 && userId) {
+      pointsRedeemAmount = await loyaltyService.redeemPoints(
+        userId,
+        new ObjectId(), // placeholder — will update after order insert
+        payload.pointsToRedeem,
+        subtotal,
+        '' // placeholder
+      )
+      pointsRedeemed = payload.pointsToRedeem
+    }
+
+    const totalAmount = Math.max(0, subtotal + taxAmount + shippingFee - discountAmount - pointsRedeemAmount)
 
     // Check prescription requirement logic if needed
 
@@ -208,7 +225,9 @@ class OrderService {
       discountAmount,
       totalAmount,
       notes,
-      estimatedDeliveryDate
+      estimatedDeliveryDate,
+      pointsRedeemed,
+      pointsRedeemAmount
     })
 
     const result = await databaseService.orders.insertOne(order)
@@ -385,6 +404,18 @@ class OrderService {
       if (order.paymentMethod === PaymentMethod.COD && order.paymentStatus === 'pending') {
         updateData.paymentStatus = 'paid'
         updateData.paidAt = new Date()
+      }
+
+      // Loyalty: tích điểm khi giao thành công
+      try {
+        await loyaltyService.earnPointsFromOrder(
+          order.userId,
+          orderId,
+          order.totalAmount,
+          order.orderNumber
+        )
+      } catch (err) {
+        console.error('Loyalty earn points error:', err)
       }
     }
 
