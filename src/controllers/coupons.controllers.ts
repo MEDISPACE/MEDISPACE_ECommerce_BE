@@ -101,7 +101,7 @@ export const getAdminCouponsController = async (req: Request, res: Response) => 
 
 // GET /coupons/:couponId — Admin: Lấy chi tiết coupon
 export const getAdminCouponByIdController = async (req: Request, res: Response) => {
-  const { couponId } = req.params
+  const couponId = req.params.couponId as string
   const coupon = await couponService.getCouponById(new ObjectId(couponId))
   return res.status(HTTP_STATUS.OK).json({ message: 'Lấy thông tin coupon thành công.', result: coupon })
 }
@@ -115,14 +115,14 @@ export const createCouponController = async (req: Request, res: Response) => {
 
 // PUT /coupons/:couponId — Admin: Cập nhật coupon
 export const updateCouponController = async (req: Request, res: Response) => {
-  const { couponId } = req.params
+  const couponId = req.params.couponId as string
   const result = await couponService.updateCoupon(new ObjectId(couponId), req.body)
   return res.status(HTTP_STATUS.OK).json({ message: 'Cập nhật mã giảm giá thành công.', result })
 }
 
 // DELETE /coupons/:couponId — Admin: Xoá coupon
 export const deleteCouponController = async (req: Request, res: Response) => {
-  const { couponId } = req.params
+  const couponId = req.params.couponId as string
   const result = await couponService.deleteCoupon(new ObjectId(couponId))
   return res.status(HTTP_STATUS.OK).json(result)
 }
