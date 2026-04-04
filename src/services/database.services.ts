@@ -18,6 +18,8 @@ import Message from '~/models/schemas/Message.schema'
 import Article from '~/models/schemas/Article.schema'
 import HealthCategory from '~/models/schemas/HealthCategory.schema'
 import ReturnRequest from '~/models/schemas/ReturnRequest.schema'
+import Coupon from '~/models/schemas/Coupon.schema'
+import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
 
 config()
 
@@ -141,6 +143,12 @@ class DatabaseService {
   }
   get returnRequests(): Collection<ReturnRequest> {
     return this.db.collection('return_requests')
+  }
+  get coupons(): Collection<Coupon> {
+    return this.db.collection(process.env.DB_COUPONS_COLLECTION as string)
+  }
+  get couponRedemptions(): Collection<CouponRedemption> {
+    return this.db.collection(process.env.DB_COUPON_REDEMPTIONS_COLLECTION as string)
   }
 }
 
