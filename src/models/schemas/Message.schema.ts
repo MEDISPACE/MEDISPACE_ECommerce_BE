@@ -2,7 +2,18 @@ import { ObjectId } from 'mongodb'
 
 export enum MessageType {
     Text = 'text',
-    Image = 'image'
+    Image = 'image',
+    Product = 'product'   // Dược sĩ gửi product card
+}
+
+export interface ProductRef {
+    productId: string
+    name: string
+    slug: string
+    price: number
+    unit: string
+    imageUrl?: string
+    requiresPrescription?: boolean
 }
 
 interface MessageSchemaType {
@@ -13,6 +24,7 @@ interface MessageSchemaType {
     content: string
     type: MessageType
     imageUrl?: string
+    productRef?: ProductRef   // chỉ có khi type === 'product'
     isRead: boolean
     createdAt?: Date
     updatedAt?: Date
@@ -26,6 +38,7 @@ export default class Message {
     content: string
     type: MessageType
     imageUrl?: string
+    productRef?: ProductRef
     isRead: boolean
     createdAt?: Date
     updatedAt?: Date
@@ -39,6 +52,7 @@ export default class Message {
         this.content = message.content
         this.type = message.type || MessageType.Text
         this.imageUrl = message.imageUrl
+        this.productRef = message.productRef
         this.isRead = message.isRead || false
         this.createdAt = message.createdAt || date
         this.updatedAt = message.updatedAt || date
