@@ -7,6 +7,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 import brandsService from './brands.services'
 import categoriesService from './categories.services'
+import typesenseService from './typesense.services'
 
 class ProductsService {
   // Generate slug from name
@@ -130,6 +131,9 @@ class ProductsService {
     })
 
     await databaseService.products.insertOne(product)
+
+    // Sync to Typesense (fire-and-forget)
+    typesenseService.indexProduct({ ...product, category: { name: (await categoriesService.getCategoryById(payload.categoryId.toString())).name } }).catch(() => {})
 
     // Update category product count
     await databaseService.categories.updateOne(
@@ -557,7 +561,12 @@ class ProductsService {
       await brandsService.updateProductCount(new ObjectId(payload.brandId), 1)
     }
 
-    return await this.getProductById(productId)
+    const updated = await this.getProductById(productId)
+
+    // Sync to Typesense (fire-and-forget)
+    typesenseService.indexProduct(updated).catch(() => {})
+
+    return updated
   }
 
   // Toggle product status
@@ -575,7 +584,12 @@ class ProductsService {
       }
     )
 
-    return await this.getProductById(productId)
+    const updated = await this.getProductById(productId)
+
+    // Sync to Typesense (fire-and-forget)
+    typesenseService.indexProduct(updated).catch(() => {})
+
+    return updated
   }
 
   // Update stock quantity
@@ -601,7 +615,12 @@ class ProductsService {
       }
     )
 
-    return await this.getProductById(productId)
+    const updated = await this.getProductById(productId)
+
+    // Sync to Typesense (fire-and-forget) — cập nhật inStock & stockQuantity
+    typesenseService.indexProduct(updated).catch(() => {})
+
+    return updated
   }
 
   // Delete product
@@ -609,6 +628,9 @@ class ProductsService {
     const product = await this.getProductById(productId)
 
     await databaseService.products.deleteOne({ _id: new ObjectId(productId) })
+
+    // Remove from Typesense (fire-and-forget) — tránh ghost product
+    typesenseService.removeProduct(productId).catch(() => {})
 
     // Update category product count
     await databaseService.categories.updateOne(

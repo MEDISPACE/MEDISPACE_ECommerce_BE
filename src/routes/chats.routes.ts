@@ -7,9 +7,11 @@ import {
     markAsReadController,
     getConversationController,
     getAvailablePharmacistController,
-    deleteConversationController
+    deleteConversationController,
+    assignConversationController
 } from '~/controllers/chats.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
+import { sendMessageValidator, rateLimitMessageValidator } from '~/middlewares/chats.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const chatsRouter = Router()
@@ -18,7 +20,6 @@ const chatsRouter = Router()
  * Get available pharmacist
  * Path: /available-pharmacist
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
  */
 chatsRouter.get(
     '/available-pharmacist',
@@ -31,8 +32,7 @@ chatsRouter.get(
  * Get all conversations for current user
  * Path: /conversations
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
- * Query: { page?: number, limit?: number, status?: 'active' | 'closed' }
+ * Query: { page?, limit?, status? }
  */
 chatsRouter.get(
     '/conversations',
@@ -42,11 +42,9 @@ chatsRouter.get(
 )
 
 /**
- * Get or create conversation with a pharmacist (Customer only)
+ * Get or create conversation (Customer only – shared inbox)
  * Path: /conversations
  * Method: POST
- * Header: { Authorization: Bearer <access_token> }
- * Body: { pharmacistId: string }
  */
 chatsRouter.post(
     '/conversations',
@@ -59,7 +57,6 @@ chatsRouter.post(
  * Get conversation by ID
  * Path: /conversations/:conversationId
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
  */
 chatsRouter.get(
     '/conversations/:conversationId',
@@ -69,37 +66,21 @@ chatsRouter.get(
 )
 
 /**
- * Send a message
- * Path: /messages
+ * (3.5) Pharmacist manually claims a conversation
+ * Path: /conversations/:conversationId/assign
  * Method: POST
- * Header: { Authorization: Bearer <access_token> }
- * Body: { conversationId?: string, pharmacistId?: string, content: string, type?: 'text' | 'image', imageUrl?: string }
  */
-chatsRouter.post('/messages', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(sendMessageController))
-
-/**
- * Get messages for a conversation
- * Path: /messages
- * Method: GET
- * Header: { Authorization: Bearer <access_token> }
- * Query: { conversationId: string, page?: number, limit?: number }
- */
-chatsRouter.get('/messages', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(getMessagesController))
-
-/**
- * Mark messages as read
- * Path: /messages/read
- * Method: POST
- * Header: { Authorization: Bearer <access_token> }
- * Body: { conversationId: string }
- */
-chatsRouter.post('/messages/read', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(markAsReadController))
+chatsRouter.post(
+    '/conversations/:conversationId/assign',
+    accessTokenValidator,
+    verifiedUserValidator,
+    wrapRequestHandler(assignConversationController)
+)
 
 /**
  * Delete conversation
  * Path: /conversations/:conversationId
  * Method: DELETE
- * Header: { Authorization: Bearer <access_token> }
  */
 chatsRouter.delete(
     '/conversations/:conversationId',
@@ -107,5 +88,34 @@ chatsRouter.delete(
     verifiedUserValidator,
     wrapRequestHandler(deleteConversationController)
 )
+
+/**
+ * Send a message – with validation (3.7) and rate limit (3.7)
+ * Path: /messages
+ * Method: POST
+ */
+chatsRouter.post(
+    '/messages',
+    accessTokenValidator,
+    verifiedUserValidator,
+    rateLimitMessageValidator,
+    sendMessageValidator,
+    wrapRequestHandler(sendMessageController)
+)
+
+/**
+ * Get messages for a conversation
+ * Path: /messages
+ * Method: GET
+ * Query: { conversationId, page?, limit? }
+ */
+chatsRouter.get('/messages', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(getMessagesController))
+
+/**
+ * Mark messages as read
+ * Path: /messages/read
+ * Method: POST
+ */
+chatsRouter.post('/messages/read', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(markAsReadController))
 
 export default chatsRouter

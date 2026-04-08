@@ -19,8 +19,9 @@ export const getConversationsController = async (
     const { userId, role } = req.decoded_authorization as TokenPayload
     const page = parseInt(req.query.page || '1')
     const limit = parseInt(req.query.limit || '20')
+    const status = req.query.status as 'active' | 'closed' | undefined
 
-    const result = await chatsService.getConversations(userId, role === 1 ? 'pharmacist' : 'customer', page, limit)
+    const result = await chatsService.getConversations(userId, role === 1 ? 'pharmacist' : 'customer', page, limit, status)
 
     return res.json({
         message: CHATS_MESSAGES.GET_CONVERSATIONS_SUCCESS,
@@ -103,7 +104,7 @@ export const markAsReadController = async (
 export const getConversationController = async (req: Request, res: Response) => {
     const { conversationId } = req.params
 
-    const conversation = await chatsService.getConversationById(conversationId)
+    const conversation = await chatsService.getConversationById(conversationId as string)
 
     if (!conversation) {
         return res.status(HTTP_STATUS.NOT_FOUND).json({
@@ -133,12 +134,40 @@ export const getAvailablePharmacistController = async (req: Request, res: Respon
     })
 }
 
+// Assign pharmacist to conversation (manual or auto)
+export const assignConversationController = async (req: Request, res: Response) => {
+    const { conversationId } = req.params
+    const { userId, role } = req.decoded_authorization as TokenPayload
+
+    // Only pharmacist can manually assign
+    if (role !== 1) {
+        return res.status(HTTP_STATUS.FORBIDDEN).json({
+            message: 'Chỉ dược sĩ mới có thể nhận cuộc trò chuyện'
+        })
+    }
+
+    const conversation = await chatsService.getConversationById(conversationId as string)
+    if (!conversation) {
+        return res.status(HTTP_STATUS.NOT_FOUND).json({
+            message: CHATS_MESSAGES.CONVERSATION_NOT_FOUND
+        })
+    }
+
+    // Manually assign this pharmacist to the conversation
+    await chatsService.assignConversationToPharmacist(conversationId as string, userId as string)
+
+    return res.json({
+        message: 'Đã nhận cuộc trò chuyện thành công',
+        result: { conversationId, pharmacistId: userId }
+    })
+}
+
 // Delete conversation
 export const deleteConversationController = async (req: Request, res: Response) => {
     const { conversationId } = req.params
     const { userId } = req.decoded_authorization as TokenPayload
 
-    await chatsService.deleteConversation(conversationId, userId)
+    await chatsService.deleteConversation(conversationId as string, userId)
 
     return res.json({
         message: CHATS_MESSAGES.DELETE_CONVERSATION_SUCCESS

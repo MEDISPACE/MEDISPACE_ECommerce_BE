@@ -12,17 +12,25 @@ config()
 
 interface AuthenticatedSocket extends Socket {
     userId?: string
-    userRole?: 'customer' | 'pharmacist'
+    userRole?: 'customer' | 'pharmacist' | 'admin'
+}
+
+let _io: SocketIOServer | null = null
+
+export const getIO = (): SocketIOServer => {
+    if (!_io) throw new Error('Socket.IO not initialized')
+    return _io
 }
 
 export const initChatSocket = (httpServer: HTTPServer) => {
-    const io = new SocketIOServer(httpServer, {
+    _io = new SocketIOServer(httpServer, {
         cors: {
             origin: process.env.FRONTEND_URLS,
             credentials: true,
             methods: ['GET', 'POST']
         }
     })
+    const io = _io
 
     // Authentication middleware
     io.use(async (socket: AuthenticatedSocket, next) => {
@@ -32,14 +40,15 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                 return next(new Error('Authentication error'))
             }
 
-            // verifyToken returns TokenPayload directly with userId, role, etc.
             const decoded = await verifyToken({
                 token,
                 secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
             }) as TokenPayload
 
             socket.userId = decoded.userId
-            socket.userRole = decoded.role === 1 ? 'pharmacist' : 'customer'
+            if (decoded.role === 1) socket.userRole = 'pharmacist'
+            else if (decoded.role === 2) socket.userRole = 'admin'
+            else socket.userRole = 'customer'
 
             next()
         } catch (error) {
@@ -49,33 +58,44 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
     // Connection handler
     io.on('connection', async (socket: AuthenticatedSocket) => {
-        // Update user online status
+        // --- FIX 3.4: dùng atomic increment thay bool để handle đa tab ---
         if (socket.userId) {
             await databaseService.users.updateOne(
                 { _id: new ObjectId(socket.userId) },
-                { $set: { isOnline: true, updatedAt: new Date() } }
+                {
+                    $inc: { onlineCount: 1 },
+                    $set: { isOnline: true, updatedAt: new Date() }
+                }
             )
 
-            // Broadcast online status to all clients
+            // Broadcast online status
             io.emit('user:online', { userId: socket.userId })
-        }
 
-        // Join user's personal room
-        if (socket.userId) {
-            const userIdStr = socket.userId.toString()
-            socket.join(`user:${userIdStr}`)
+            // Join personal room
+            socket.join(`user:${socket.userId}`)
+
+            // Pharmacists also join shared pharmacist room
+            if (socket.userRole === 'pharmacist') {
+                socket.join('pharmacists')
+            }
+            // Admins join shared admin room
+            if (socket.userRole === 'admin') {
+                socket.join('admins')
+            }
         }
 
         // Manual join personal room (Backup)
         socket.on('user:join', () => {
             if (socket.userId) {
-                const userIdStr = socket.userId.toString()
-                socket.join(`user:${userIdStr}`)
+                socket.join(`user:${socket.userId}`)
+                if (socket.userRole === 'pharmacist') {
+                    socket.join('pharmacists')
+                }
             }
         })
 
         // Join conversation room
-        socket.on('conversation:join', async (conversationId: string) => {
+        socket.on('conversation:join', (conversationId: string) => {
             socket.join(`conversation:${conversationId}`)
         })
 
@@ -84,51 +104,73 @@ export const initChatSocket = (httpServer: HTTPServer) => {
             socket.leave(`conversation:${conversationId}`)
         })
 
-        // Send message
-        socket.on('message:send', async (data: { conversationId?: string; pharmacistId?: string; content: string; type?: 'text' | 'image'; imageUrl?: string }) => {
+        // --- FIX 3.2: emit gọn lại – chỉ dùng room-based, bỏ fetchSockets loop ---
+        socket.on('message:send', async (data: {
+            conversationId?: string
+            pharmacistId?: string
+            content?: string
+            type?: 'text' | 'image' | 'product'
+            imageUrl?: string
+            productRef?: {
+                productId: string
+                name: string
+                slug: string
+                price: number
+                unit: string
+                imageUrl?: string
+                requiresPrescription?: boolean
+            }
+        }) => {
             try {
                 if (!socket.userId || !socket.userRole) {
                     socket.emit('error', { message: USERS_MESSAGES.UNAUTHENTICATED })
                     return
                 }
+                
+                // Admin không gửi tin nhắn qua socket này
+                if (socket.userRole === 'admin') return
 
                 const message = await chatsService.sendMessage(socket.userId, socket.userRole, data)
 
-                // 0. Emit back to sender directly (Fail-safe for sender visibility)
-                socket.emit('message:new', message)
+                const convIdStr = message.conversationId.toString()
 
-                // 1. Emit to conversation room (Standard way)
-                io.to(`conversation:${message.conversationId}`).emit('message:new', message)
+                // 1. Gửi đến conversation room (tất cả đang xem conversation này)
+                io.to(`conversation:${convIdStr}`).emit('message:new', message)
 
-                // 2. Extra Redundancy: Emit strictly to receiver's personal room
                 if (socket.userRole === 'customer') {
-                    // Sender is Customer => Receiver is Pharmacists
-                    // Broadcast to all connected pharmacists
-                    const sockets = await io.fetchSockets()
-                    sockets.forEach(s => {
-                        const authSocket = s as unknown as AuthenticatedSocket
-                        if (authSocket.userRole === 'pharmacist') {
-                            s.emit('message:new', message)
-                            s.emit('notification:new-message', {
-                                conversationId: message.conversationId,
-                                message
+                    // Customer gửi → broadcast cho pharmacists để cập nhật list
+                    // Dedup được xử lý ở FE qua _id check
+                    io.to('pharmacists').emit('message:new', message)
+
+                    // --- 3.5: Auto-assign nếu conversation chưa có dược sĩ ---
+                    const conversation = await databaseService.conversations.findOne({
+                        _id: new ObjectId(convIdStr)
+                    })
+
+                    // Detect tin nhắn đầu tiên → notify admin realtime
+                    const msgCount = await databaseService.messages.countDocuments({
+                        conversationId: new ObjectId(convIdStr)
+                    })
+                    if (msgCount === 1) {
+                        // Conversation vừa có tin nhắn đầu tiên → admin thấy mới
+                        io.to('admins').emit('conversation:new', { conversationId: convIdStr })
+                    }
+
+                    if (conversation && !conversation.pharmacistId) {
+                        const { pharmacistId } = await chatsService.assignPharmacist(convIdStr)
+                        if (pharmacistId) {
+                            io.to('pharmacists').emit('conversation:assigned', {
+                                conversationId: convIdStr,
+                                pharmacistId: pharmacistId.toString()
                             })
                         }
-                    })
+                    }
                 } else {
-                    // Sender is Pharmacist => Receiver is Customer
-                    const conversation = await chatsService.getConversationById(message.conversationId.toString())
+                    // Pharmacist gửi → notify customer cụ thể
+                    const conversation = await chatsService.getConversationById(convIdStr)
                     if (conversation) {
                         const customerIdStr = conversation.customerId.toString()
-
-                        // Emit to specific user room
                         io.to(`user:${customerIdStr}`).emit('message:new', message)
-
-                        // For redundant safety, emit to notification event too
-                        io.to(`user:${customerIdStr}`).emit('notification:new-message', {
-                            conversationId: message.conversationId,
-                            message
-                        })
                     }
                 }
             } catch (error) {
@@ -154,32 +196,41 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         // Mark messages as read
         socket.on('messages:read', async (data: { conversationId: string }) => {
             try {
-                if (!socket.userId || !socket.userRole) {
-                    return
-                }
+                if (!socket.userId || !socket.userRole) return
+                if (socket.userRole === 'admin') return
 
                 await chatsService.markAsRead(data.conversationId, socket.userId, socket.userRole)
 
-                // Notify other party that messages were read
                 socket.to(`conversation:${data.conversationId}`).emit('messages:read', {
                     conversationId: data.conversationId,
                     userId: socket.userId
                 })
             } catch (error) {
+                // Silent fail
             }
         })
 
         // Disconnect handler
         socket.on('disconnect', async () => {
-            // Update user offline status
             if (socket.userId) {
-                await databaseService.users.updateOne(
+                // --- FIX 3.4: decrement counter, chỉ set offline khi count về 0 ---
+                const user = await databaseService.users.findOneAndUpdate(
                     { _id: new ObjectId(socket.userId) },
-                    { $set: { isOnline: false, updatedAt: new Date() } }
+                    {
+                        $inc: { onlineCount: -1 },
+                        $set: { updatedAt: new Date() }
+                    },
+                    { returnDocument: 'after' }
                 )
 
-                // Broadcast offline status
-                io.emit('user:offline', { userId: socket.userId })
+                const newCount = user?.onlineCount ?? 0
+                if (newCount <= 0) {
+                    await databaseService.users.updateOne(
+                        { _id: new ObjectId(socket.userId) },
+                        { $set: { isOnline: false, onlineCount: 0 } }
+                    )
+                    io.emit('user:offline', { userId: socket.userId })
+                }
             }
         })
     })
