@@ -6,8 +6,10 @@ export interface OrderItem {
   sku: string
   unit: string           // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
-  unitPrice: number      // Giá mỗi đơn vị
+  unitPrice: number      // Giá sau campaign hoặc giá gốc
+  originalUnitPrice?: number // Giá gốc
   totalPrice: number     // quantity * unitPrice
+  campaignId?: ObjectId  // Campaign ID
   prescriptionRequired: boolean
   image?: string
 }

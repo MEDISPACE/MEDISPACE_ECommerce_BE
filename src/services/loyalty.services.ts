@@ -44,6 +44,9 @@ class LoyaltyService {
    * Lấy thông tin loyalty (public API)
    */
   async getAccountInfo(userId: ObjectId) {
+    // Tự động xử lý điểm hết hạn khi user xem tài khoản — đảm bảo balance chính xác
+    await this.processExpiredPoints(userId)
+
     const account = await this.getOrCreateAccount(userId)
 
     // Tính tier tiếp theo
@@ -87,6 +90,15 @@ class LoyaltyService {
    * Gọi từ order status update hook
    */
   async earnPointsFromOrder(userId: ObjectId, orderId: ObjectId, orderTotal: number, orderNumber: string) {
+    // IDEMPOTENCY: Kiểm tra đã tích điểm cho order này chưa
+    const existingEarn = await databaseService.loyaltyTransactions.findOne({
+      orderId, userId, type: 'earn'
+    })
+    if (existingEarn) {
+      console.log(`[Loyalty] Points already earned for order ${orderId}, skipping.`)
+      return
+    }
+
     const account = await this.getOrCreateAccount(userId)
 
     // Tính điểm: orderTotal / POINTS_PER_VND * tierMultiplier
@@ -156,7 +168,7 @@ class LoyaltyService {
       pointsNeeded,
       pointsBalance,
       minRedeem: POINTS_MIN_REDEEM,
-      maxRedeemRatio: POINTS_MAX_REDEEM_RATIO | 0
+      maxRedeemRatio: POINTS_MAX_REDEEM_RATIO  // Trả về số thực (0.3) — không dùng bitwise OR
     }
   }
 
@@ -173,16 +185,7 @@ class LoyaltyService {
   ): Promise<number> {
     if (pointsToRedeem <= 0) return 0
 
-    const account = await this.getOrCreateAccount(userId)
-
-    // Validate
-    if (account.pointsBalance < pointsToRedeem) {
-      throw new ErrorWithStatus({
-        message: `Không đủ điểm. Số dư hiện tại: ${account.pointsBalance} điểm.`,
-        status: HTTP_STATUS.BAD_REQUEST
-      })
-    }
-
+    // Validate min redeem
     if (pointsToRedeem < POINTS_MIN_REDEEM) {
       throw new ErrorWithStatus({
         message: `Cần tối thiểu ${POINTS_MIN_REDEEM.toLocaleString('vi-VN')} điểm để đổi.`,
@@ -200,30 +203,33 @@ class LoyaltyService {
       })
     }
 
-    const newBalance = account.pointsBalance - pointsToRedeem
+    // ATOMIC: trừ điểm chỉ khi còn đủ balance — tránh race condition 2 request đồng thời
+    const updatedAccount = await databaseService.loyaltyAccounts.findOneAndUpdate(
+      { userId, pointsBalance: { $gte: pointsToRedeem } },
+      {
+        $inc: { pointsBalance: -pointsToRedeem, totalPointsRedeemed: pointsToRedeem },
+        $set: { updatedAt: new Date() }
+      },
+      { returnDocument: 'after' }
+    )
 
-    // Ghi transaction
+    if (!updatedAccount) {
+      throw new ErrorWithStatus({
+        message: 'Không đủ điểm hoặc đang xử lý giao dịch khác. Vui lòng thử lại.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    // Ghi transaction (balance đã update atomically)
     const transaction = new LoyaltyTransaction({
       userId,
       type: 'redeem',
       points: -pointsToRedeem,
-      balanceAfter: newBalance,
+      balanceAfter: updatedAccount.pointsBalance,
       orderId,
       description: `Đổi ${pointsToRedeem.toLocaleString('vi-VN')} điểm giảm ${redeemAmount.toLocaleString('vi-VN')}đ cho đơn ${orderNumber}`
     })
     await databaseService.loyaltyTransactions.insertOne(transaction as any)
-
-    // Cập nhật account
-    await databaseService.loyaltyAccounts.updateOne(
-      { userId },
-      {
-        $set: {
-          pointsBalance: newBalance,
-          updatedAt: new Date()
-        },
-        $inc: { totalPointsRedeemed: pointsToRedeem }
-      }
-    )
 
     return redeemAmount
   }

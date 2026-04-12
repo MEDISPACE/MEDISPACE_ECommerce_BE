@@ -12,6 +12,7 @@ import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/
 import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 import couponService from './coupons.services'
 import loyaltyService from './loyalty.services'
+import campaignsService from './campaigns.services'
 
 class OrderService {
   // Create order from cart
@@ -42,12 +43,22 @@ class OrderService {
           })
         }
 
-        // Calc price based on unit
-        let price = product.price || 0
+        // Calc original price based on unit
+        let originalPrice = product.price || 0
         if (item.unit && product.priceVariants) {
           const v = product.priceVariants.find((v: any) => v.unit === item.unit)
-          if (v) price = v.price
+          if (v) originalPrice = v.price
         }
+
+        // Fetch campaign and compute sale price using shared helper
+        const campaign = await campaignsService.getActiveCampaignForProduct(
+          product._id,
+          product.categoryId,
+          product.brandId,
+          product.requiresPrescription
+        )
+
+        const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
 
         orderItems.push({
           productId: product._id,
@@ -55,8 +66,10 @@ class OrderService {
           sku: product.sku,
           unit: item.unit || product.unit,
           quantity: item.quantity,
-          unitPrice: price,
-          totalPrice: price * item.quantity,
+          unitPrice,
+          originalUnitPrice: originalPrice,
+          totalPrice: unitPrice * item.quantity,
+          campaignId: campaign?._id,
           prescriptionRequired: product.prescriptionRequired,
           image: product.featuredImage || product.image || (product.images && product.images.length > 0 ? product.images[0] : undefined)
         })
@@ -74,31 +87,55 @@ class OrderService {
       }
 
       // Filter cart items based on selected items
-      orderItems = cart.items
+      let filteredCartItems = cart.items
       if (selectedItems && selectedItems.length > 0) {
-        orderItems = cart.items.filter(cartItem => {
+        filteredCartItems = cart.items.filter((cartItem: any) => {
           const cartItemId = cartItem.productId.toString()
-          // Treat null/undefined/empty string as equivalent for unit comparison
           const cartItemUnit = cartItem.unit || undefined
 
           return selectedItems.some((selectedItem: any) => {
             const selectedId = selectedItem.productId
             const selectedUnit = selectedItem.unit || undefined
-
-            // Compare ID
             if (selectedId !== cartItemId) return false
-
-            // Compare Unit
             return selectedUnit === cartItemUnit
           })
         })
 
-        if (orderItems.length === 0) {
+        if (filteredCartItems.length === 0) {
           throw new ErrorWithStatus({
-            message: ORDERS_MESSAGES.CART_EMPTY, // Use 'No valid items found' message ideally but stick to constants
+            message: ORDERS_MESSAGES.CART_EMPTY,
             status: HTTP_STATUS.BAD_REQUEST
           })
         }
+      }
+
+      // Re-verify campaign price at checkout time (campaign may have changed since added to cart)
+      for (const cartItem of filteredCartItems) {
+        const product = await productsService.getProductById(cartItem.productId.toString())
+        if (!product) {
+          orderItems.push(cartItem)
+          continue
+        }
+
+        const selectedVariant = product.priceVariants?.find((v: any) => v.unit === cartItem.unit)
+        const originalPrice = selectedVariant?.price || product.price || 0
+
+        const campaign = await campaignsService.getActiveCampaignForProduct(
+          product._id,
+          product.categoryId,
+          product.brandId,
+          product.requiresPrescription
+        )
+
+        const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+
+        orderItems.push({
+          ...cartItem,
+          unitPrice,
+          originalUnitPrice: originalPrice,
+          totalPrice: unitPrice * cartItem.quantity,
+          campaignId: campaign?._id
+        })
       }
     }
 
@@ -148,26 +185,48 @@ class OrderService {
     // Tax logic: Prices already include VAT, so no extra tax added
     const taxAmount = 0
 
-    // Get coupon info from cart (normal checkout flow)
+    // ─── Coupon: Re-validate tại thời điểm tạo order (tránh dùng mã đã hết hạn) ───
     let couponDiscountAmount = 0
     let appliedCoupons: any[] = []
     let freeShippingApplied = false
+    const hasPrescriptionItems = !!orderItems.find(i => i.prescriptionRequired)
 
     if (!isDirectBuy) {
-      // Reuse cart data — read appliedCoupons directly from DB to avoid duplicate getCart call
+      // Lấy danh sách coupon từ cart
       const cartDoc = await databaseService.carts.findOne(userId ? { userId } : { sessionId })
-      appliedCoupons = cartDoc?.appliedCoupons || []
+      const cartCoupons = cartDoc?.appliedCoupons || []
+
+      // Re-validate từng coupon — loại bỏ mã hết hạn / không còn hợp lệ
+      for (const cartCoupon of cartCoupons) {
+        const validation = await couponService.validateCoupon(
+          cartCoupon.code,
+          userId,
+          subtotal,
+          hasPrescriptionItems
+        )
+        if (validation.isValid) {
+          // Tính lại discountAmount theo subtotal hiện tại (trường hợp items thay đổi)
+          appliedCoupons.push({
+            code: cartCoupon.code,
+            discountAmount: validation.discountAmount,
+            type: cartCoupon.type,
+            name: (cartCoupon as any).name || validation.coupon?.name || cartCoupon.code
+          })
+        } else {
+          console.log(`[Order] Coupon ${cartCoupon.code} no longer valid at checkout: ${validation.message}`)
+          // Không throw — chỉ bỏ qua coupon hết hạn, order vẫn được tạo
+        }
+      }
     } else if (payload.couponCodes && payload.couponCodes.length > 0) {
-      // Direct buy: evaluate passed coupon codes on the fly
-      const hasPrescriptionItems = !!orderItems.find(i => i.prescriptionRequired)
+      // Direct buy: validate coupon codes được gửi lên
       for (const code of payload.couponCodes) {
         const validation = await couponService.validateCoupon(code, userId, subtotal, hasPrescriptionItems)
         if (validation.isValid && validation.coupon) {
           appliedCoupons.push({
-             code: validation.coupon.code,
-             discountAmount: validation.discountAmount,
-             type: validation.coupon.type,
-             name: validation.coupon.name
+            code: validation.coupon.code,
+            discountAmount: validation.discountAmount,
+            type: validation.coupon.type,
+            name: validation.coupon.name
           })
         }
       }
@@ -196,14 +255,19 @@ class OrderService {
     let pointsRedeemAmount = 0
 
     if (payload.pointsToRedeem && payload.pointsToRedeem > 0 && userId) {
-      pointsRedeemAmount = await loyaltyService.redeemPoints(
-        userId,
-        orderId,
-        payload.pointsToRedeem,
-        subtotal,
-        orderNumber
-      )
-      pointsRedeemed = payload.pointsToRedeem
+      // Cap điểm: loyalty + coupon không được vượt subtotal
+      const remainingAfterCoupon = Math.max(0, subtotal - discountAmount)
+      const maxPointsVnd = Math.min(payload.pointsToRedeem, remainingAfterCoupon)
+      if (maxPointsVnd > 0) {
+        pointsRedeemAmount = await loyaltyService.redeemPoints(
+          userId,
+          orderId,
+          maxPointsVnd, // điểm = VNĐ (1:1)
+          subtotal,
+          orderNumber
+        )
+        pointsRedeemed = maxPointsVnd
+      }
     }
 
     const totalAmount = Math.max(0, subtotal + taxAmount + shippingFee - discountAmount - pointsRedeemAmount)
@@ -261,6 +325,11 @@ class OrderService {
             (item as any).unit
           )
         }
+        // Xóa applied coupons sau khi đặt hàng (chỉ coupons đã dùng)
+        await databaseService.carts.updateOne(
+          userId ? { userId } : { sessionId },
+          { $set: { appliedCoupons: [], discountAmount: 0, updatedAt: new Date() } }
+        )
       } else {
         // Clear entire cart
         await cartService.clearCart(userId)

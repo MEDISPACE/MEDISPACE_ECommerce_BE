@@ -40,7 +40,7 @@ export default class LoyaltyTransaction {
     this.balanceAfter = tx.balanceAfter
     this.orderId = tx.orderId
     this.description = tx.description
-    this.expiresAt = tx.expiresAt
+    this.expiresAt = tx.expiresAt ? new Date(tx.expiresAt) : undefined
     this.isExpired = tx.isExpired || false
     this.createdAt = tx.createdAt || new Date()
   }

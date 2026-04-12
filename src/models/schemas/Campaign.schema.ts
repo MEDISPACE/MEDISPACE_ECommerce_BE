@@ -89,8 +89,8 @@ export default class Campaign {
     this.excludeProductIds = campaign.excludeProductIds
     this.excludePrescription = campaign.excludePrescription || false
 
-    this.startDate = campaign.startDate
-    this.endDate = campaign.endDate
+    this.startDate = campaign.startDate ? new Date(campaign.startDate) : new Date()
+    this.endDate = campaign.endDate ? new Date(campaign.endDate) : new Date()
     this.status = campaign.status || 'draft'
 
     this.priority = campaign.priority || 0
