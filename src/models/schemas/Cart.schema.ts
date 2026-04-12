@@ -6,8 +6,10 @@ export interface CartItem {
   sku: string
   unit: string           // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
-  unitPrice: number      // Giá mỗi đơn vị
+  unitPrice: number      // Giá sau campaign (salePrice) hoặc giá gốc
+  originalUnitPrice: number  // Giá gốc (trước campaign)
   totalPrice: number     // quantity * unitPrice
+  campaignId?: ObjectId  // Campaign đã áp dụng (nếu có)
   prescriptionRequired: boolean
   image?: string
   priceVariants?: Array<{
@@ -131,9 +133,11 @@ export default class Cart {
     unit: string,
     quantity: number,
     unitPrice: number,
+    originalUnitPrice: number,
     prescriptionRequired: boolean,
     image?: string,
-    priceVariants?: Array<{ unit: string; price: number; originalPrice?: number; isDefault?: boolean }>
+    priceVariants?: Array<{ unit: string; price: number; originalPrice?: number; isDefault?: boolean }>,
+    campaignId?: ObjectId
   ) {
     // Check if same product with same unit already exists
     const existingItem = this.items.find(
@@ -142,7 +146,10 @@ export default class Cart {
 
     if (existingItem) {
       existingItem.quantity += quantity
+      existingItem.unitPrice = unitPrice
+      existingItem.originalUnitPrice = originalUnitPrice
       existingItem.totalPrice = existingItem.quantity * existingItem.unitPrice
+      existingItem.campaignId = campaignId
       // Update priceVariants if provided
       if (priceVariants) {
         existingItem.priceVariants = priceVariants
@@ -155,10 +162,12 @@ export default class Cart {
         unit,
         quantity,
         unitPrice,
+        originalUnitPrice,
         totalPrice: quantity * unitPrice,
         prescriptionRequired,
         image,
-        priceVariants
+        priceVariants,
+        campaignId
       })
     }
 
@@ -183,7 +192,7 @@ export default class Cart {
 
   // Update item unit and price
   // When updating unit, we might merge with existing item if target unit already exists
-  updateItemUnit(productId: ObjectId, unit: string, unitPrice: number, currentUnit?: string) {
+  updateItemUnit(productId: ObjectId, unit: string, unitPrice: number, originalUnitPrice: number, currentUnit?: string, campaignId?: ObjectId) {
     // If currentUnit provided, find exact item to update
     const itemIndex = this.items.findIndex((item) => {
       if (currentUnit) {
@@ -204,6 +213,7 @@ export default class Cart {
         // Merge with existing item
         const targetItem = this.items[existingTargetItemIndex]
         targetItem.quantity += item.quantity
+        // Keep the target item's prices
         targetItem.totalPrice = targetItem.quantity * targetItem.unitPrice
         // Remove the old item
         this.items.splice(itemIndex, 1)
@@ -211,7 +221,9 @@ export default class Cart {
         // Just update the unit and price
         item.unit = unit
         item.unitPrice = unitPrice
+        item.originalUnitPrice = originalUnitPrice
         item.totalPrice = item.quantity * unitPrice
+        item.campaignId = campaignId
       }
 
       this.calculateTotals()

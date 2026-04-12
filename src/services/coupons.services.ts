@@ -30,7 +30,8 @@ class CouponService {
   ): Promise<ValidateCouponResult> {
     const now = new Date()
 
-    // 1. Tìm coupon
+    // 1. Tìm coupon — chỉ filter isActive ở DB, date validation xử lý ở code
+    // (tránh BSON type mismatch khi endDate lưu dạng string thay vì Date)
     const coupon = await databaseService.coupons.findOne({
       code: code.toUpperCase().trim(),
       isActive: true
@@ -40,8 +41,10 @@ class CouponService {
       return { isValid: false, discountAmount: 0, message: 'Mã giảm giá không tồn tại hoặc đã bị vô hiệu hóa.', discountType: null }
     }
 
-    // 2. Kiểm tra thời gian hiệu lực
-    if (now < coupon.startDate || now > coupon.endDate) {
+    // 2. Kiểm tra thời gian hiệu lực — cast sang Date để xử lý cả string lẫn Date từ DB
+    const startDate = new Date(coupon.startDate)
+    const endDate = new Date(coupon.endDate)
+    if (now < startDate || now > endDate) {
       return { isValid: false, discountAmount: 0, message: 'Mã giảm giá đã hết hạn hoặc chưa đến thời gian áp dụng.', discountType: null }
     }
 
@@ -94,7 +97,9 @@ class CouponService {
       if (coupon.maxDiscountAmount) {
         discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount)
       }
-    } else if (coupon.type === 'fixed_amount') {
+      // Không được giảm quá subtotal
+      discountAmount = Math.min(discountAmount, cartSubtotal)
+    } else if (coupon.type === 'fixed_amount' || coupon.type === 'fixed') {
       discountAmount = Math.min(coupon.value, cartSubtotal) // Không giảm quá subtotal
     } else if (coupon.type === 'free_shipping') {
       // discountAmount = 0 — shipping discount xử lý riêng bên order
@@ -117,7 +122,8 @@ class CouponService {
   async applyCouponToCart(
     code: string,
     userId: ObjectId,
-    sessionId?: string
+    sessionId?: string,
+    selectedSubtotal?: number  // Subtotal của các sản phẩm được chọn từ FE
   ) {
     // Lấy cart
     const cartQuery = userId
@@ -135,11 +141,17 @@ class CouponService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy giỏ hàng.', status: HTTP_STATUS.NOT_FOUND })
     }
 
+    // Ưu tiên dùng selectedSubtotal (sản phẩm được tick chọn trên FE)
+    // nếu không có thì fallback về cart.subtotal
+    const subtotalForValidation = (selectedSubtotal !== undefined && selectedSubtotal >= 0)
+      ? selectedSubtotal
+      : cart.subtotal
+
     // Validate coupon
     const validation = await this.validateCoupon(
       code,
       userId,
-      cart.subtotal,
+      subtotalForValidation,
       cart.requiresPrescription
     )
 
@@ -257,8 +269,8 @@ class CouponService {
   }
 
   /**
-   * Ghi nhận việc dùng coupon sau khi order được tạo thành công
-   * Tăng currentUsageCount và lưu CouponRedemption
+   * Ghi nhận việc dùng coupon sau khi order được tạo thành công.
+   * ATOMIC: dùng findOneAndUpdate để tránh race condition 2 request đồng thời.
    */
   async recordCouponRedemption(
     couponCode: string,
@@ -266,8 +278,46 @@ class CouponService {
     orderId: ObjectId,
     discountAmount: number
   ) {
-    const coupon = await databaseService.coupons.findOne({ code: couponCode.toUpperCase() })
-    if (!coupon) return
+    const upperCode = couponCode.toUpperCase()
+
+    // Atomic: chỉ increment nếu còn lượt dùng (tránh race condition)
+    const coupon = await databaseService.coupons.findOneAndUpdate(
+      {
+        code: upperCode,
+        isActive: true,
+        $or: [
+          { totalUsageLimit: { $exists: false } },
+          { totalUsageLimit: { $eq: undefined as any } },
+          { $expr: { $lt: ['$currentUsageCount', '$totalUsageLimit'] } }
+        ]
+      } as any, // cast needed: MongoDB $expr not fully typed in driver
+      {
+        $inc: { currentUsageCount: 1 },
+        $set: { updatedAt: new Date() }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!coupon) {
+      // Coupon hết lượt hoặc đã bị tắt — log nhưng không throw (order đã tạo rồi)
+      console.warn(`[Coupon] Cannot record redemption for ${upperCode}: limit reached or inactive.`)
+      return
+    }
+
+    // Kiểm tra per-user limit atomically (dùng unique index nếu có)
+    const userUsageCount = await databaseService.couponRedemptions.countDocuments({
+      couponId: coupon._id,
+      userId
+    })
+    if (userUsageCount >= coupon.perUserLimit) {
+      // Rollback increment
+      await databaseService.coupons.updateOne(
+        { _id: coupon._id },
+        { $inc: { currentUsageCount: -1 } }
+      )
+      console.warn(`[Coupon] User ${userId} exceeded perUserLimit for ${upperCode}.`)
+      return
+    }
 
     // Insert redemption record
     const redemption = new CouponRedemption({
@@ -278,12 +328,6 @@ class CouponService {
       discountAmount
     })
     await databaseService.couponRedemptions.insertOne(redemption)
-
-    // Tăng usage count
-    await databaseService.coupons.updateOne(
-      { _id: coupon._id },
-      { $inc: { currentUsageCount: 1 }, $set: { updatedAt: new Date() } }
-    )
   }
 
   // ============================
@@ -367,12 +411,17 @@ class CouponService {
   // Lấy danh sách public coupon cho user xem
   async getPublicCoupons() {
     const now = new Date()
-    return databaseService.coupons.find({
+    // Chỉ filter isPublic + isActive ở DB — date check ở code để tránh BSON mismatch
+    const all = await databaseService.coupons.find({
       isPublic: true,
-      isActive: true,
-      startDate: { $lte: now },
-      endDate: { $gte: now }
+      isActive: true
     }).sort({ createdAt: -1 }).toArray()
+
+    return all.filter(c => {
+      const start = new Date(c.startDate)
+      const end = new Date(c.endDate)
+      return now >= start && now <= end
+    })
   }
 
   async toggleCoupon(couponId: ObjectId) {

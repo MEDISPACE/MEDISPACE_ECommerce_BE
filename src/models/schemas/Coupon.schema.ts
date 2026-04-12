@@ -1,6 +1,6 @@
 import { ObjectId } from 'mongodb'
 
-export type CouponType = 'percentage' | 'fixed_amount' | 'free_shipping'
+export type CouponType = 'percentage' | 'fixed_amount' | 'fixed' | 'free_shipping'
 
 export interface CouponType_Schema {
   _id?: ObjectId
@@ -90,8 +90,8 @@ export default class Coupon {
     this.isPublic = coupon.isPublic !== undefined ? coupon.isPublic : true
     this.targetUserIds = coupon.targetUserIds
 
-    this.startDate = coupon.startDate
-    this.endDate = coupon.endDate
+    this.startDate = coupon.startDate ? new Date(coupon.startDate) : new Date()
+    this.endDate = coupon.endDate ? new Date(coupon.endDate) : new Date()
     this.isActive = coupon.isActive !== undefined ? coupon.isActive : true
 
     this.createdBy = coupon.createdBy

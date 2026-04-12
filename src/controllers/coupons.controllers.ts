@@ -37,7 +37,7 @@ export const validateCouponController = async (req: Request, res: Response) => {
 // POST /coupons/apply — Áp dụng coupon vào cart
 export const applyCouponController = async (req: Request, res: Response) => {
   const { userId, sessionId } = getUserAndSession(req)
-  const { code } = req.body
+  const { code, selectedSubtotal } = req.body
 
   if (!userId) {
     return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -49,7 +49,12 @@ export const applyCouponController = async (req: Request, res: Response) => {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Vui lòng nhập mã giảm giá.' })
   }
 
-  const result = await couponService.applyCouponToCart(code, userId, sessionId)
+  const result = await couponService.applyCouponToCart(
+    code,
+    userId,
+    sessionId,
+    typeof selectedSubtotal === 'number' ? selectedSubtotal : undefined
+  )
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Áp dụng mã giảm giá thành công!',

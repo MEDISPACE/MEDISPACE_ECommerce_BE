@@ -32,23 +32,33 @@ class CampaignService {
   ): Promise<Campaign | null> {
     const now = new Date()
 
-    // Build query: tìm campaign đang active, trong thời gian hiệu lực
+    // Build query: chỉ lọc status ở DB, date validation xử lý ở code
+    // (tránh BSON type mismatch nếu startDate/endDate lưu dạng string)
     const baseCriteria = {
-      status: 'active' as const,
-      startDate: { $lte: now },
-      endDate: { $gte: now }
+      status: 'active' as const
     }
 
-    // Tìm tất cả campaign phù hợp
-    const campaigns = await databaseService.campaigns.find({
-      ...baseCriteria,
-      $or: [
-        { scope: 'all' },
-        { scope: 'products', productIds: productId },
-        { scope: 'categories', categoryIds: categoryId },
-        ...(brandId ? [{ scope: 'brands' as const, brandIds: brandId }] : [])
-      ]
+    // Tìm tất cả campaign phù hợp — dùng string so sánh để tránh ObjectId type mismatch
+    const productIdStr = productId.toString()
+    const categoryIdStr = categoryId.toString()
+    const brandIdStr = brandId?.toString()
+
+    const allActive = await databaseService.campaigns.find({
+      ...baseCriteria
     }).sort({ priority: -1 }).toArray()
+
+    const campaigns = allActive.filter(c => {
+      // Kiểm tra thời gian hiệu lực (cast sang Date để xử lý cả string)
+      const start = new Date(c.startDate)
+      const end = new Date(c.endDate)
+      if (now < start || now > end) return false
+
+      if (c.scope === 'all') return true
+      if (c.scope === 'products') return c.productIds?.some((id: any) => id.toString() === productIdStr)
+      if (c.scope === 'categories') return c.categoryIds?.some((id: any) => id.toString() === categoryIdStr)
+      if (c.scope === 'brands' && brandIdStr) return c.brandIds?.some((id: any) => id.toString() === brandIdStr)
+      return false
+    })
 
     // Lọc: loại trừ sản phẩm nằm trong excludeProductIds hoặc thuốc kê đơn
     for (const campaign of campaigns) {
@@ -62,6 +72,24 @@ class CampaignService {
     }
 
     return null
+  }
+
+  /**
+   * Helper tính giá sau discount dựa trên campaign.
+   * Dùng chung cho cart, order (Direct Buy, Cart Checkout).
+   */
+  applyDiscountToPrice(originalPrice: number, campaign: any): number {
+    if (!campaign) return originalPrice
+    if (campaign.discountType === 'percentage') {
+      let discount = Math.round(originalPrice * (campaign.discountValue / 100))
+      if (campaign.maxDiscountAmount) {
+        discount = Math.min(discount, campaign.maxDiscountAmount)
+      }
+      return Math.max(0, originalPrice - discount)
+    } else {
+      // fixed_amount
+      return Math.max(0, originalPrice - campaign.discountValue)
+    }
   }
 
   /**
@@ -92,11 +120,11 @@ class CampaignService {
     let salePrice: number
 
     if (campaign.discountType === 'percentage') {
-      let discount = Math.floor(originalPrice * (campaign.discountValue / 100))
+      let discount = Math.round(originalPrice * (campaign.discountValue / 100))
       if (campaign.maxDiscountAmount) {
         discount = Math.min(discount, campaign.maxDiscountAmount)
       }
-      salePrice = originalPrice - discount
+      salePrice = Math.max(0, originalPrice - discount) // ✅ không cho giá âm
     } else {
       // fixed_amount
       salePrice = Math.max(0, originalPrice - campaign.discountValue)
@@ -138,11 +166,11 @@ class CampaignService {
       let salePrice: number
 
       if (campaign.discountType === 'percentage') {
-        let discount = Math.floor(variant.price * (campaign.discountValue / 100))
+        let discount = Math.round(variant.price * (campaign.discountValue / 100))
         if (campaign.maxDiscountAmount) {
           discount = Math.min(discount, campaign.maxDiscountAmount)
         }
-        salePrice = variant.price - discount
+        salePrice = Math.max(0, variant.price - discount)
       } else {
         salePrice = Math.max(0, variant.price - campaign.discountValue)
       }
@@ -157,13 +185,23 @@ class CampaignService {
       }
     })
 
+    // Tính discountPercent thực tế từ variant default cho badgeText
+    const defaultVariant = enrichedVariants.find((v: any) => v.isDefault) || enrichedVariants[0]
+    const actualDiscountPercent = defaultVariant
+      ? Math.round(((defaultVariant.originalPrice - defaultVariant.salePrice) / defaultVariant.originalPrice) * 100)
+      : 0
+
+    // Badge text: ưu tiên dùng % thực tế (sau khi tính maxDiscountAmount) thay vì raw discountValue
+    const badgeText = campaign.badgeText
+      || (actualDiscountPercent > 0 ? `-${actualDiscountPercent}%` : `Giảm ${campaign.discountValue}${campaign.discountType === 'percentage' ? '%' : 'đ'}`)
+
     return {
       ...product,
       priceVariants: enrichedVariants,
       campaign: {
         _id: campaign._id,
         name: campaign.name,
-        badgeText: campaign.badgeText || `Giảm ${campaign.discountValue}${campaign.discountType === 'percentage' ? '%' : 'đ'}`,
+        badgeText,
         badgeColor: campaign.badgeColor || '#FF5722',
         endDate: campaign.endDate
       }
@@ -179,12 +217,17 @@ class CampaignService {
 
     const now = new Date()
 
-    // Load tất cả active campaigns 1 lần
-    const activeCampaigns = await databaseService.campaigns.find({
-      status: 'active',
-      startDate: { $lte: now },
-      endDate: { $gte: now }
+    // Load tất cả active campaigns 1 lần — chỉ filter status, date check ở code
+    const allActive = await databaseService.campaigns.find({
+      status: 'active'
     }).sort({ priority: -1 }).toArray()
+
+    // Lọc date ở code để tránh BSON type mismatch
+    const activeCampaigns = allActive.filter(c => {
+      const start = new Date(c.startDate)
+      const end = new Date(c.endDate)
+      return now >= start && now <= end
+    })
 
     if (!activeCampaigns.length) return products
 
@@ -210,9 +253,9 @@ class CampaignService {
       const enrichedVariants = (product.priceVariants || []).map((variant: any) => {
         let salePrice: number
         if (campaign.discountType === 'percentage') {
-          let discount = Math.floor(variant.price * (campaign.discountValue / 100))
+          let discount = Math.round(variant.price * (campaign.discountValue / 100))
           if (campaign.maxDiscountAmount) discount = Math.min(discount, campaign.maxDiscountAmount)
-          salePrice = variant.price - discount
+          salePrice = Math.max(0, variant.price - discount)
         } else {
           salePrice = Math.max(0, variant.price - campaign.discountValue)
         }
@@ -227,13 +270,21 @@ class CampaignService {
         }
       })
 
+      // Tính discountPercent thực tế từ variant default
+      const defaultV = enrichedVariants.find((v: any) => v.isDefault) || enrichedVariants[0]
+      const actualPct = defaultV
+        ? Math.round(((defaultV.originalPrice - defaultV.salePrice) / defaultV.originalPrice) * 100)
+        : 0
+      const badgeText = campaign.badgeText
+        || (actualPct > 0 ? `-${actualPct}%` : `Giảm ${campaign.discountValue}${campaign.discountType === 'percentage' ? '%' : 'đ'}`)
+
       return {
         ...product,
         priceVariants: enrichedVariants,
         campaign: {
           _id: campaign._id,
           name: campaign.name,
-          badgeText: campaign.badgeText || `Giảm ${campaign.discountValue}${campaign.discountType === 'percentage' ? '%' : 'đ'}`,
+          badgeText,
           badgeColor: campaign.badgeColor || '#FF5722',
           endDate: campaign.endDate
         }
@@ -247,12 +298,17 @@ class CampaignService {
 
   async getActiveCampaigns() {
     const now = new Date()
-    return databaseService.campaigns.find({
+    // Chỉ filter status ở DB, date check ở code (tránh BSON type mismatch)
+    const allActive = await databaseService.campaigns.find({
       status: 'active',
-      isPublic: true,
-      startDate: { $lte: now },
-      endDate: { $gte: now }
+      isPublic: true
     }).sort({ priority: -1 }).toArray()
+
+    return allActive.filter(c => {
+      const start = new Date(c.startDate)
+      const end = new Date(c.endDate)
+      return now >= start && now <= end
+    })
   }
 
   async getCampaignBySlug(slug: string) {
@@ -268,10 +324,31 @@ class CampaignService {
   // ============================
 
   async createCampaign(data: any, adminId: ObjectId) {
-    const existing = await databaseService.campaigns.findOne({ slug: data.slug })
-    if (existing) {
-      throw new ErrorWithStatus({ message: 'Slug chiến dịch đã tồn tại.', status: HTTP_STATUS.BAD_REQUEST })
+    // ─── Validate input ───
+    if (!data.discountValue || data.discountValue <= 0) {
+      throw new ErrorWithStatus({ message: 'Giá trị giảm phải lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
     }
+    if (data.discountType === 'percentage' && data.discountValue > 100) {
+      throw new ErrorWithStatus({ message: 'Phần trăm giảm phải từ 1–100%.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (data.startDate && data.endDate && new Date(data.endDate) <= new Date(data.startDate)) {
+      throw new ErrorWithStatus({ message: 'Ngày kết thúc phải sau ngày bắt đầu.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (data.maxDiscountAmount !== undefined && data.maxDiscountAmount !== null && data.maxDiscountAmount < 0) {
+      throw new ErrorWithStatus({ message: 'Giới hạn giảm tối đa không thể âm.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    // Auto-generate unique slug: base slug + timestamp to prevent collision
+    const baseSlug = data.slug || data.name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .trim()
+    
+    // Check if base slug exists, if so add timestamp suffix
+    const existing = await databaseService.campaigns.findOne({ slug: baseSlug })
+    const slug = existing ? `${baseSlug}-${Date.now()}` : baseSlug
 
     // Auto-set status dựa vào thời gian
     let status = data.status || 'draft'
@@ -284,6 +361,7 @@ class CampaignService {
 
     const campaign = new Campaign({
       ...data,
+      slug,
       status,
       productIds: data.productIds?.map((id: string) => new ObjectId(id)),
       categoryIds: data.categoryIds?.map((id: string) => new ObjectId(id)),
@@ -302,6 +380,22 @@ class CampaignService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy chiến dịch.', status: HTTP_STATUS.NOT_FOUND })
     }
 
+    // ─── Validate input ───
+    if (data.discountValue !== undefined) {
+      if (data.discountValue <= 0) {
+        throw new ErrorWithStatus({ message: 'Giá trị giảm phải lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+      const type = data.discountType || campaign.discountType
+      if (type === 'percentage' && data.discountValue > 100) {
+        throw new ErrorWithStatus({ message: 'Phần trăm giảm phải từ 1–100%.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+    }
+    const startDate = data.startDate ? new Date(data.startDate) : new Date(campaign.startDate)
+    const endDate = data.endDate ? new Date(data.endDate) : new Date(campaign.endDate)
+    if (endDate <= startDate) {
+      throw new ErrorWithStatus({ message: 'Ngày kết thúc phải sau ngày bắt đầu.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
     const { createdBy: _by, createdAt: _at, _id: _id, ...updateData } = data
 
     // Convert string IDs to ObjectIds
@@ -310,10 +404,21 @@ class CampaignService {
     if (updateData.brandIds) updateData.brandIds = updateData.brandIds.map((id: string) => new ObjectId(id))
     if (updateData.excludeProductIds) updateData.excludeProductIds = updateData.excludeProductIds.map((id: string) => new ObjectId(id))
 
-    await databaseService.campaigns.updateOne(
-      { _id: campaignId },
-      { $set: { ...updateData, updatedAt: new Date() } }
-    )
+    // Tách các field cần xóa (gửi lên null/undefined/empty string) khỏi $set
+    const unsetFields: Record<string, ''> = {}
+    if (updateData.badgeText === '' || updateData.badgeText === null || updateData.badgeText === undefined) {
+      unsetFields['badgeText'] = ''
+      unsetFields['badgeColor'] = ''
+      delete updateData.badgeText
+      delete updateData.badgeColor
+    }
+
+    const updateOp: any = { $set: { ...updateData, updatedAt: new Date() } }
+    if (Object.keys(unsetFields).length > 0) {
+      updateOp.$unset = unsetFields
+    }
+
+    await databaseService.campaigns.updateOne({ _id: campaignId }, updateOp)
 
     return databaseService.campaigns.findOne({ _id: campaignId })
   }
@@ -360,8 +465,9 @@ class CampaignService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy chiến dịch.', status: HTTP_STATUS.NOT_FOUND })
     }
 
-    const newStatus = (campaign.status === 'active' || campaign.status === 'scheduled') ? 'ended' : 'active'
-    
+    // Toggle: active → inactive, mọi trạng thái khác → active
+    const newStatus = campaign.status === 'active' ? 'inactive' : 'active'
+
     await databaseService.campaigns.updateOne(
       { _id: campaignId },
       { $set: { status: newStatus as any, updatedAt: new Date() } }
