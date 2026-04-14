@@ -25,28 +25,28 @@ const ARTICLES_COLLECTION = 'articles'
 const productSchema = {
   name: PRODUCTS_COLLECTION,
   fields: [
-    { name: 'mongoId',              type: 'string' as const },
-    { name: 'name',                 type: 'string' as const, infix: true },
-    { name: 'slug',                 type: 'string' as const, index: false },
-    { name: 'sku',                  type: 'string' as const, infix: true },
-    { name: 'shortDescription',     type: 'string' as const, optional: true },
-    { name: 'categoryId',           type: 'string' as const, facet: true },
-    { name: 'categoryName',         type: 'string' as const, facet: true },
-    { name: 'brandId',              type: 'string' as const, facet: true, optional: true },
-    { name: 'brandName',            type: 'string' as const, facet: true, optional: true },
-    { name: 'requiresPrescription', type: 'bool'   as const, facet: true },
-    { name: 'isActive',             type: 'bool'   as const, facet: true },
-    { name: 'inStock',              type: 'bool'   as const, facet: true },
-    { name: 'stockQuantity',        type: 'int32'  as const },
-    { name: 'price',                type: 'float'  as const },
-    { name: 'rating',               type: 'float'  as const },
-    { name: 'reviewCount',          type: 'int32'  as const },
-    { name: 'featuredImage',        type: 'string' as const, index: false, optional: true },
+    { name: 'mongoId', type: 'string' as const },
+    { name: 'name', type: 'string' as const, infix: true },
+    { name: 'slug', type: 'string' as const, index: false },
+    { name: 'sku', type: 'string' as const, infix: true },
+    { name: 'shortDescription', type: 'string' as const, optional: true },
+    { name: 'categoryId', type: 'string' as const, facet: true },
+    { name: 'categoryName', type: 'string' as const, facet: true },
+    { name: 'brandId', type: 'string' as const, facet: true, optional: true },
+    { name: 'brandName', type: 'string' as const, facet: true, optional: true },
+    { name: 'requiresPrescription', type: 'bool' as const, facet: true },
+    { name: 'isActive', type: 'bool' as const, facet: true },
+    { name: 'inStock', type: 'bool' as const, facet: true },
+    { name: 'stockQuantity', type: 'int32' as const },
+    { name: 'price', type: 'float' as const },
+    { name: 'rating', type: 'float' as const },
+    { name: 'reviewCount', type: 'int32' as const },
+    { name: 'featuredImage', type: 'string' as const, index: false, optional: true },
     // From ProductDetail
-    { name: 'activeIngredients',    type: 'string' as const, optional: true },
-    { name: 'indications',          type: 'string' as const, optional: true },
-    { name: 'manufacturer',         type: 'string' as const, optional: true, facet: true },
-    { name: 'createdAt',            type: 'int64'  as const }
+    { name: 'activeIngredients', type: 'string' as const, optional: true },
+    { name: 'indications', type: 'string' as const, optional: true },
+    { name: 'manufacturer', type: 'string' as const, optional: true, facet: true },
+    { name: 'createdAt', type: 'int64' as const }
   ],
   default_sorting_field: 'rating',
   token_separators: ['-', '/', '(', ')', '.', ',']
@@ -55,20 +55,20 @@ const productSchema = {
 const articleSchema = {
   name: ARTICLES_COLLECTION,
   fields: [
-    { name: 'mongoId',       type: 'string'   as const },
-    { name: 'title',         type: 'string'   as const },
-    { name: 'slug',          type: 'string'   as const, index: false },
-    { name: 'excerpt',       type: 'string'   as const, optional: true },
-    { name: 'content',       type: 'string'   as const, optional: true },
-    { name: 'categoryId',    type: 'string'   as const, facet: true, optional: true },
-    { name: 'categoryName',  type: 'string'   as const, facet: true, optional: true },
-    { name: 'tags',          type: 'string[]' as const, facet: true, optional: true },
-    { name: 'authorName',    type: 'string'   as const, optional: true },
-    { name: 'isPublished',   type: 'bool'     as const, facet: true },
-    { name: 'isFeatured',    type: 'bool'     as const, facet: true },
-    { name: 'viewCount',     type: 'int32'    as const },
-    { name: 'publishedAt',   type: 'int64'    as const, optional: true },
-    { name: 'featuredImage', type: 'string'   as const, index: false, optional: true }
+    { name: 'mongoId', type: 'string' as const },
+    { name: 'title', type: 'string' as const },
+    { name: 'slug', type: 'string' as const, index: false },
+    { name: 'excerpt', type: 'string' as const, optional: true },
+    { name: 'content', type: 'string' as const, optional: true },
+    { name: 'categoryId', type: 'string' as const, facet: true, optional: true },
+    { name: 'categoryName', type: 'string' as const, facet: true, optional: true },
+    { name: 'tags', type: 'string[]' as const, facet: true, optional: true },
+    { name: 'authorName', type: 'string' as const, optional: true },
+    { name: 'isPublished', type: 'bool' as const, facet: true },
+    { name: 'isFeatured', type: 'bool' as const, facet: true },
+    { name: 'viewCount', type: 'int32' as const },
+    { name: 'publishedAt', type: 'int64' as const, optional: true },
+    { name: 'featuredImage', type: 'string' as const, index: false, optional: true }
   ],
   default_sorting_field: 'viewCount'
 }
@@ -82,51 +82,56 @@ function toProductDocument(product: any): Record<string, unknown> {
   const mongoId = product._id?.toString() || ''
 
   return {
-    id:                   mongoId,   // ← Typesense primary key (required for upsert dedup)
+    id: mongoId, // ← Typesense primary key (required for upsert dedup)
     mongoId,
-    name:                 product.name || '',
-    slug:                 product.slug || '',
-    sku:                  product.sku || '',
-    shortDescription:     product.shortDescription || '',
-    categoryId:           product.categoryId?.toString() || '',
-    categoryName:         product.category?.name || product.categoryName || '',
-    brandId:              product.brandId?.toString() || '',
-    brandName:            product.brand?.name || product.brandName || '',
+    name: product.name || '',
+    slug: product.slug || '',
+    sku: product.sku || '',
+    shortDescription: product.shortDescription || '',
+    categoryId: product.categoryId?.toString() || '',
+    categoryName: product.category?.name || product.categoryName || '',
+    brandId: product.brandId?.toString() || '',
+    brandName: product.brand?.name || product.brandName || '',
     requiresPrescription: Boolean(product.requiresPrescription),
-    isActive:             product.isActive !== false,
-    inStock:              (product.stockQuantity || 0) > 0,
-    stockQuantity:        product.stockQuantity || 0,
+    isActive: product.isActive !== false,
+    inStock: (product.stockQuantity || 0) > 0,
+    stockQuantity: product.stockQuantity || 0,
     price,
-    rating:               product.rating || 0,
-    reviewCount:          product.reviewCount || 0,
-    featuredImage:        product.featuredImage || '',
+    rating: product.rating || 0,
+    reviewCount: product.reviewCount || 0,
+    featuredImage: product.featuredImage || '',
     // ProductDetail fields (joined in seed, optionally present)
-    activeIngredients:    product.details?.activeIngredients || product.activeIngredients || '',
-    indications:          product.details?.indications || product.indications || '',
-    manufacturer:         product.details?.manufacturer || product.manufacturer || '',
-    createdAt:            product.createdAt ? new Date(product.createdAt).getTime() : Date.now()
+    activeIngredients: product.details?.activeIngredients || product.activeIngredients || '',
+    indications: product.details?.indications || product.indications || '',
+    manufacturer: product.details?.manufacturer || product.manufacturer || '',
+    createdAt: product.createdAt ? new Date(product.createdAt).getTime() : Date.now()
   }
 }
 
 function toArticleDocument(article: any): Record<string, unknown> {
   const mongoId = article._id?.toString() || ''
   return {
-    id:           mongoId,   // ← Typesense primary key
+    id: mongoId, // ← Typesense primary key
     mongoId,
-    title:        article.title || '',
-    slug:         article.slug || '',
-    excerpt:      article.excerpt || '',
-    content:      typeof article.content === 'string'
-      ? article.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 5000)
-      : '',
-    categoryId:   article.categoryId?.toString() || '',
+    title: article.title || '',
+    slug: article.slug || '',
+    excerpt: article.excerpt || '',
+    content:
+      typeof article.content === 'string'
+        ? article.content
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 5000)
+        : '',
+    categoryId: article.categoryId?.toString() || '',
     categoryName: article.category?.name || '',
-    tags:         Array.isArray(article.tags) ? article.tags : [],
-    authorName:   article.authorName || '',
-    isPublished:  Boolean(article.isPublished),
-    isFeatured:   Boolean(article.isFeatured),
-    viewCount:    article.viewCount || 0,
-    publishedAt:  article.publishedAt ? new Date(article.publishedAt).getTime() : undefined,
+    tags: Array.isArray(article.tags) ? article.tags : [],
+    authorName: article.authorName || '',
+    isPublished: Boolean(article.isPublished),
+    isFeatured: Boolean(article.isFeatured),
+    viewCount: article.viewCount || 0,
+    publishedAt: article.publishedAt ? new Date(article.publishedAt).getTime() : undefined,
     featuredImage: article.featuredImage || ''
   }
 }
@@ -208,7 +213,10 @@ class TypesenseService {
   async removeProduct(mongoId: string): Promise<void> {
     if (!this.isAvailable) return
     try {
-      await client.collections(PRODUCTS_COLLECTION).documents().delete({ filter_by: `mongoId:=${mongoId}` })
+      await client
+        .collections(PRODUCTS_COLLECTION)
+        .documents()
+        .delete({ filter_by: `mongoId:=${mongoId}` })
     } catch (err) {
       console.error('[Typesense] removeProduct error:', (err as Error)?.message)
     }
@@ -241,7 +249,10 @@ class TypesenseService {
   async removeArticle(mongoId: string): Promise<void> {
     if (!this.isAvailable) return
     try {
-      await client.collections(ARTICLES_COLLECTION).documents().delete({ filter_by: `mongoId:=${mongoId}` })
+      await client
+        .collections(ARTICLES_COLLECTION)
+        .documents()
+        .delete({ filter_by: `mongoId:=${mongoId}` })
     } catch (err) {
       console.error('[Typesense] removeArticle error:', (err as Error)?.message)
     }
@@ -300,7 +311,19 @@ class TypesenseService {
   }): Promise<any> {
     if (!this.isAvailable) return null // signal caller to fall back to MongoDB
 
-    const { q, page = 1, limit = 20, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
+    const {
+      q,
+      page = 1,
+      limit = 20,
+      categoryId,
+      brandId,
+      requiresPrescription,
+      inStock,
+      priceMin,
+      priceMax,
+      ratingMin,
+      sortBy
+    } = params
 
     // Build filter string
     const filters: string[] = ['isActive:=true']
@@ -321,19 +344,22 @@ class TypesenseService {
     else if (sortBy === 'rating') sortByStr = 'rating:desc'
 
     try {
-      const result = await client.collections(PRODUCTS_COLLECTION).documents().search({
-        q: q || '*',
-        query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName',
-        filter_by: filters.join(' && '),
-        facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock',
-        sort_by: sortByStr,
-        page,
-        per_page: limit,
-        num_typos: 2,
-        typo_tokens_threshold: 1,
-        highlight_full_fields: 'name,shortDescription',
-        highlight_affix_num_tokens: 3
-      })
+      const result = await client
+        .collections(PRODUCTS_COLLECTION)
+        .documents()
+        .search({
+          q: q || '*',
+          query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName',
+          filter_by: filters.join(' && '),
+          facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock',
+          sort_by: sortByStr,
+          page,
+          per_page: limit,
+          num_typos: 2,
+          typo_tokens_threshold: 1,
+          highlight_full_fields: 'name,shortDescription',
+          highlight_affix_num_tokens: 3
+        })
       return result
     } catch (err) {
       console.error('[Typesense] searchProducts error:', (err as Error)?.message)
@@ -341,12 +367,7 @@ class TypesenseService {
     }
   }
 
-  async searchArticles(params: {
-    q: string
-    page?: number
-    limit?: number
-    categoryId?: string
-  }): Promise<any> {
+  async searchArticles(params: { q: string; page?: number; limit?: number; categoryId?: string }): Promise<any> {
     if (!this.isAvailable) return null
 
     const { q, page = 1, limit = 10, categoryId } = params
@@ -354,17 +375,20 @@ class TypesenseService {
     if (categoryId) filters.push(`categoryId:=${categoryId}`)
 
     try {
-      const result = await client.collections(ARTICLES_COLLECTION).documents().search({
-        q: q || '*',
-        query_by: 'title,excerpt,content,tags',
-        filter_by: filters.join(' && '),
-        sort_by: 'viewCount:desc',
-        page,
-        per_page: limit,
-        num_typos: 2,
-        highlight_full_fields: 'title,excerpt',
-        highlight_affix_num_tokens: 5
-      })
+      const result = await client
+        .collections(ARTICLES_COLLECTION)
+        .documents()
+        .search({
+          q: q || '*',
+          query_by: 'title,excerpt,content,tags',
+          filter_by: filters.join(' && '),
+          sort_by: 'viewCount:desc',
+          page,
+          per_page: limit,
+          num_typos: 2,
+          highlight_full_fields: 'title,excerpt',
+          highlight_affix_num_tokens: 5
+        })
       return result
     } catch (err) {
       console.error('[Typesense] searchArticles error:', (err as Error)?.message)

@@ -4,10 +4,10 @@ export interface OrderItem {
   productId: ObjectId
   name: string
   sku: string
-  unit: string           // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
+  unit: string // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
-  unitPrice: number      // Giá mỗi đơn vị
-  totalPrice: number     // quantity * unitPrice
+  unitPrice: number // Giá mỗi đơn vị
+  totalPrice: number // quantity * unitPrice
   prescriptionRequired: boolean
   image?: string
 }

@@ -60,8 +60,6 @@ class PrescriptionsService {
       const limit = Number(query.limit) || 10
       const { status, sort = 'newest', customerId } = query
 
-
-
       const filter: Record<string, string | ObjectId> = {}
       if (status) filter.status = status
       if (customerId) {
@@ -74,8 +72,6 @@ class PrescriptionsService {
         }
         filter.customerId = new ObjectId(customerId)
       }
-
-
 
       const sortOption: Record<string, 1 | -1> = sort === 'newest' ? { createdAt: -1 } : { createdAt: 1 }
 
@@ -96,7 +92,6 @@ class PrescriptionsService {
         }
       }
     } catch (error) {
-
       throw error
     }
   }

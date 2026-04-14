@@ -14,7 +14,18 @@ import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 class OrderService {
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
-    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod, shippingFee: providedShippingFee, estimatedDeliveryDate } = payload
+    const {
+      shippingAddress,
+      paymentMethod,
+      notes,
+      sessionId,
+      req,
+      selectedItems,
+      isDirectBuy,
+      shippingMethod,
+      shippingFee: providedShippingFee,
+      estimatedDeliveryDate
+    } = payload
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -56,7 +67,10 @@ class OrderService {
           unitPrice: price,
           totalPrice: price * item.quantity,
           prescriptionRequired: product.prescriptionRequired,
-          image: product.featuredImage || product.image || (product.images && product.images.length > 0 ? product.images[0] : undefined)
+          image:
+            product.featuredImage ||
+            product.image ||
+            (product.images && product.images.length > 0 ? product.images[0] : undefined)
         })
       }
     } else {
@@ -74,7 +88,7 @@ class OrderService {
       // Filter cart items based on selected items
       orderItems = cart.items
       if (selectedItems && selectedItems.length > 0) {
-        orderItems = cart.items.filter(cartItem => {
+        orderItems = cart.items.filter((cartItem) => {
           const cartItemId = cartItem.productId.toString()
           // Treat null/undefined/empty string as equivalent for unit comparison
           const cartItemUnit = cartItem.unit || undefined
@@ -194,12 +208,7 @@ class OrderService {
       if (selectedItems && selectedItems.length > 0) {
         // Remove only selected items from cart
         for (const item of selectedItems) {
-          await cartService.removeItemFromCart(
-            new ObjectId(item.productId),
-            userId,
-            sessionId,
-            (item as any).unit
-          )
+          await cartService.removeItemFromCart(new ObjectId(item.productId), userId, sessionId, (item as any).unit)
         }
       } else {
         // Clear entire cart

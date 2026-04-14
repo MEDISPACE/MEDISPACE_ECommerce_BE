@@ -18,19 +18,8 @@ export const suggestController = async (req: Request, res: Response) => {
 
 // ─── GET /search/products?q=&page=&limit=&... ─────────────────────────────────
 export const searchProductsController = async (req: Request, res: Response) => {
-  const {
-    q,
-    page,
-    limit,
-    categoryId,
-    brandId,
-    requiresPrescription,
-    inStock,
-    priceMin,
-    priceMax,
-    ratingMin,
-    sortBy
-  } = req.query as Record<string, string>
+  const { q, page, limit, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } =
+    req.query as Record<string, string>
 
   const params = {
     q: q || '*',
@@ -52,16 +41,17 @@ export const searchProductsController = async (req: Request, res: Response) => {
   if (!tsResult) {
     const mongoFilter: Record<string, unknown> = { isActive: true }
     if (q && q !== '*') {
-      mongoFilter.$or = [
-        { name: { $regex: q, $options: 'i' } },
-        { sku: { $regex: q, $options: 'i' } }
-      ]
+      mongoFilter.$or = [{ name: { $regex: q, $options: 'i' } }, { sku: { $regex: q, $options: 'i' } }]
     }
     if (categoryId) {
-      try { mongoFilter.categoryId = new ObjectId(categoryId) } catch {}
+      try {
+        mongoFilter.categoryId = new ObjectId(categoryId)
+      } catch {}
     }
     if (brandId) {
-      try { mongoFilter.brandId = new ObjectId(brandId) } catch {}
+      try {
+        mongoFilter.brandId = new ObjectId(brandId)
+      } catch {}
     }
     if (params.requiresPrescription !== undefined) {
       mongoFilter.requiresPrescription = params.requiresPrescription
@@ -89,7 +79,7 @@ export const searchProductsController = async (req: Request, res: Response) => {
 
     return res.json({
       source: 'mongodb_fallback',
-      hits: products.map(p => ({ document: p })),
+      hits: products.map((p) => ({ document: p })),
       found: total,
       page: params.page,
       facet_counts: []
@@ -115,10 +105,7 @@ export const searchArticlesController = async (req: Request, res: Response) => {
   if (!tsResult) {
     const filter: Record<string, unknown> = { isPublished: true }
     if (q && q !== '*') {
-      filter.$or = [
-        { title: { $regex: q, $options: 'i' } },
-        { excerpt: { $regex: q, $options: 'i' } }
-      ]
+      filter.$or = [{ title: { $regex: q, $options: 'i' } }, { excerpt: { $regex: q, $options: 'i' } }]
     }
     const articles = await databaseService.articles
       .find(filter)
@@ -130,7 +117,7 @@ export const searchArticlesController = async (req: Request, res: Response) => {
 
     return res.json({
       source: 'mongodb_fallback',
-      hits: articles.map(a => ({ document: a })),
+      hits: articles.map((a) => ({ document: a })),
       found: total,
       page: params.page
     })
@@ -143,6 +130,8 @@ export const searchArticlesController = async (req: Request, res: Response) => {
 export const searchStatusController = async (_req: Request, res: Response) => {
   return res.json({
     typesense: typesenseService.getAvailability(),
-    message: typesenseService.getAvailability() ? 'Typesense is healthy' : 'Typesense unavailable, using MongoDB fallback'
+    message: typesenseService.getAvailability()
+      ? 'Typesense is healthy'
+      : 'Typesense unavailable, using MongoDB fallback'
   })
 }

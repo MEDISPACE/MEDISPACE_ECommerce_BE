@@ -44,11 +44,7 @@ class DatabaseService {
 
   async createIndexes() {
     // Helper function to safely create index
-    const safeCreateIndex = async (
-      collection: any,
-      indexSpec: any,
-      options?: any
-    ) => {
+    const safeCreateIndex = async (collection: any, indexSpec: any, options?: any) => {
       try {
         await collection.createIndex(indexSpec, { background: true, ...options })
       } catch (error: any) {
@@ -83,7 +79,6 @@ class DatabaseService {
       await safeCreateIndex(this.returnRequests, { orderId: 1 })
       await safeCreateIndex(this.returnRequests, { status: 1 })
       await safeCreateIndex(this.returnRequests, { requestNumber: 1 }, { unique: true })
-
     } catch (error) {
       // Silent - indexes may already exist
     }

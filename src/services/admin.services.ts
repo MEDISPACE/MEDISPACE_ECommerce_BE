@@ -1,4 +1,4 @@
-﻿import databaseService from './database.services'
+import databaseService from './database.services'
 import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
 import { hashPassword } from '~/utils/crypto'
@@ -178,7 +178,6 @@ class AdminService {
       const revenueGrowth =
         lastMonthRevenueValue > 0 ? ((monthRevenueValue - lastMonthRevenueValue) / lastMonthRevenueValue) * 100 : 0
 
-
       // Order statistics
       const [totalOrders, pendingOrders, processingOrders, completedOrders, cancelledOrders] = await Promise.all([
         databaseService.orders.countDocuments(),
@@ -187,7 +186,6 @@ class AdminService {
         databaseService.orders.countDocuments({ orderStatus: 'delivered' }),
         databaseService.orders.countDocuments({ orderStatus: 'cancelled' })
       ])
-
 
       // User statistics
       const [totalUsers, newTodayUsers, customers, pharmacists, admins, verifiedUsers] = await Promise.all([
@@ -198,7 +196,6 @@ class AdminService {
         databaseService.users.countDocuments({ role: 2 }), // Admin
         databaseService.users.countDocuments({ status: 1 }) // Verified
       ])
-
 
       // Product statistics - optimized with aggregation
       const [productStats, totalProducts, activeProducts, outOfStockProducts, lowStockProducts] = await Promise.all([
@@ -232,7 +229,6 @@ class AdminService {
 
       const totalProductValue = productStats[0]?.totalValue || 0
 
-
       // Prescription statistics
       const [totalPrescriptions, pendingPrescriptions, approvedPrescriptions, rejectedPrescriptions] =
         await Promise.all([
@@ -241,7 +237,6 @@ class AdminService {
           databaseService.prescriptions.countDocuments({ status: 'approved' }),
           databaseService.prescriptions.countDocuments({ status: 'rejected' })
         ])
-
 
       const result = {
         revenue: {
@@ -1047,29 +1042,108 @@ class AdminService {
   /**
    * Get comprehensive reports analytics
    */
-  async getReportsAnalytics(timeRange: string = 'month') {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const dateRanges = this.getDateRanges(timeRange)
+  async getReportsAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
     const [revenueData, ordersData, usersData, productsData] = await Promise.all([
-      this.getRevenueAnalytics(timeRange),
+      this.getRevenueAnalytics(timeRange, customStartDate, customEndDate),
       this.getOrderStats(),
       this.getUserStats(),
-      this.getProductAnalytics(timeRange)
+      this.getProductAnalytics(timeRange, customStartDate, customEndDate)
     ])
+
+    // ---- Calculate REAL orders growth ----
+    const [currentPeriodOrderCount, previousPeriodOrderCount] = await Promise.all([
+      databaseService.orders.countDocuments({
+        createdAt: { $gte: startDate, $lte: endDate }
+      }),
+      databaseService.orders.countDocuments({
+        createdAt: { $gte: previousStartDate, $lte: previousEndDate }
+      })
+    ])
+    const ordersGrowth =
+      previousPeriodOrderCount > 0
+        ? ((currentPeriodOrderCount - previousPeriodOrderCount) / previousPeriodOrderCount) * 100
+        : 0
+
+    // ---- Calculate REAL user metrics ----
+    const [newUsersCount, previousNewUsersCount] = await Promise.all([
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: startDate, $lte: endDate }
+      }),
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: previousStartDate, $lte: previousEndDate }
+      })
+    ])
+    const usersGrowth =
+      previousNewUsersCount > 0 ? ((newUsersCount - previousNewUsersCount) / previousNewUsersCount) * 100 : 0
+
+    // Returning users = unique customers who placed orders in current period AND existed before this period
+    const returningCustomers = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            orderStatus: { $ne: 'cancelled' }
+          }
+        },
+        {
+          $lookup: {
+            from: process.env.USERS_COLLECTION as string,
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        { $unwind: '$user' },
+        {
+          $match: {
+            'user.createdAt': { $lt: startDate } // User registered before this period
+          }
+        },
+        {
+          $group: { _id: '$userId' }
+        }
+      ])
+      .toArray()
+    const returningUsersCount = returningCustomers.length
+
+    // ---- Calculate REAL conversion rate ----
+    // Conversion = (unique customers who completed an order in period / total customers) × 100
+    const uniqueOrderingCustomers = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            orderStatus: { $ne: 'cancelled' }
+          }
+        },
+        { $group: { _id: '$userId' } }
+      ])
+      .toArray()
+    const totalCustomers = usersData.customers
+    const conversionRate = totalCustomers > 0 ? (uniqueOrderingCustomers.length / totalCustomers) * 100 : 0
+
+    // ---- Calculate REAL customer retention ----
+    // Retention = returning customers / (returning + new ordering customers) × 100
+    const newOrderingCustomers = uniqueOrderingCustomers.length - returningUsersCount
+    const customerRetention =
+      uniqueOrderingCustomers.length > 0 ? (returningUsersCount / uniqueOrderingCustomers.length) * 100 : 0
 
     // Calculate metrics
     const avgOrderValue = ordersData.revenue > 0 && ordersData.total > 0 ? ordersData.revenue / ordersData.total : 0
-
-    // Placeholder for conversion rate and retention (would need more complex tracking)
-    const conversionRate = 3.8 // Placeholder
-    const customerRetention = 68.5 // Placeholder
 
     return {
       revenue: revenueData,
       orders: {
         total: ordersData.total,
-        growth: 0, // Calculate from previous period
+        growth: Math.round(ordersGrowth * 100) / 100,
         pending: ordersData.pending,
         processing: ordersData.processing,
         completed: ordersData.delivered,
@@ -1085,9 +1159,9 @@ class AdminService {
       },
       users: {
         total: usersData.total,
-        growth: 0, // Calculate from previous period
-        newUsers: 0, // Would need time-based query
-        returningUsers: 0, // Would need tracking
+        growth: Math.round(usersGrowth * 100) / 100,
+        newUsers: newUsersCount,
+        returningUsers: returningUsersCount,
         customers: usersData.customers,
         pharmacists: usersData.pharmacists,
         admins: usersData.admins,
@@ -1096,8 +1170,8 @@ class AdminService {
       products: productsData,
       metrics: {
         avgOrderValue: Math.round(avgOrderValue),
-        conversionRate,
-        customerRetention
+        conversionRate: Math.round(conversionRate * 100) / 100,
+        customerRetention: Math.round(customerRetention * 100) / 100
       }
     }
   }
@@ -1105,8 +1179,12 @@ class AdminService {
   /**
    * Get revenue analytics with time-based filtering
    */
-  async getRevenueAnalytics(timeRange: string = 'month') {
-    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(timeRange)
+  async getRevenueAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
     // Current period orders
     const currentOrders = await databaseService.orders
@@ -1152,11 +1230,51 @@ class AdminService {
 
     const avgOrderValue = currentOrders.length > 0 ? currentRevenue / currentOrders.length : 0
 
+    // Calculate actual year-to-date revenue
+    const startOfYear = new Date(new Date().getFullYear(), 0, 1)
+    const yearToDateOrders = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startOfYear },
+            paymentStatus: 'paid'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$totalAmount' }
+          }
+        }
+      ])
+      .toArray()
+    const yearRevenue = yearToDateOrders[0]?.total || 0
+
+    // Calculate actual month-to-date revenue
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    const monthToDateOrders = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startOfMonth },
+            paymentStatus: 'paid'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$totalAmount' }
+          }
+        }
+      ])
+      .toArray()
+    const monthRevenue = monthToDateOrders[0]?.total || 0
+
     return {
       total: currentRevenue,
       today: todayRevenue,
-      month: currentRevenue,
-      year: currentRevenue, // Would need year-to-date calculation
+      month: monthRevenue,
+      year: yearRevenue,
       growth: Math.round(growth * 100) / 100,
       monthlyTrends,
       byPaymentMethod,
@@ -1167,21 +1285,44 @@ class AdminService {
   /**
    * Get product analytics
    */
-  async getProductAnalytics(timeRange: string = 'month') {
-    const { startDate, endDate } = this.getDateRanges(timeRange)
+  async getProductAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
-    // Get all products
-    const products = await databaseService.products.find().toArray()
+    // Get all products and categories in parallel
+    const [products, categories] = await Promise.all([
+      databaseService.products.find().toArray(),
+      databaseService.categories.find().toArray()
+    ])
 
-    // Get orders in time range to calculate top products
-    const orders = await databaseService.orders
-      .find({
-        createdAt: { $gte: startDate, $lte: endDate },
-        orderStatus: { $ne: 'cancelled' }
-      })
-      .toArray()
+    // Build category name map for quick lookup
+    const categoryNameMap: Record<string, string> = {}
+    categories.forEach((cat) => {
+      if (cat._id) {
+        categoryNameMap[cat._id.toString()] = cat.name
+      }
+    })
 
-    // Calculate product sales
+    // Get orders in current and previous time range
+    const [orders, previousOrders] = await Promise.all([
+      databaseService.orders
+        .find({
+          createdAt: { $gte: startDate, $lte: endDate },
+          orderStatus: { $ne: 'cancelled' }
+        })
+        .toArray(),
+      databaseService.orders
+        .find({
+          createdAt: { $gte: previousStartDate, $lte: previousEndDate },
+          orderStatus: { $ne: 'cancelled' }
+        })
+        .toArray()
+    ])
+
+    // Calculate product sales for current period
     const productSales: Record<string, { sales: number; revenue: number; product: unknown }> = {}
 
     orders.forEach((order) => {
@@ -1200,22 +1341,41 @@ class AdminService {
       })
     })
 
-    // Get top 10 products
+    // Calculate product sales for previous period (for growth comparison)
+    const prevProductSales: Record<string, { sales: number; revenue: number }> = {}
+    previousOrders.forEach((order) => {
+      order.items.forEach((item: { productId: ObjectId; quantity: number; unitPrice: number }) => {
+        const productId = item.productId.toString()
+        if (!prevProductSales[productId]) {
+          prevProductSales[productId] = { sales: 0, revenue: 0 }
+        }
+        prevProductSales[productId].sales += item.quantity
+        prevProductSales[productId].revenue += item.unitPrice * item.quantity
+      })
+    })
+
+    // Get top 10 products with real category names and growth
     const topProducts = Object.entries(productSales)
-      .map(([id, data]) => ({
-        _id: id,
-        name: (data.product as { name?: string })?.name || 'Unknown',
-        sku: (data.product as { sku?: string })?.sku || '',
-        sales: data.sales,
-        revenue: data.revenue,
-        category: (data.product as { categoryId?: ObjectId })?.categoryId?.toString() || '',
-        categoryName: '', // Would need category lookup
-        growth: 0 // Would need previous period comparison
-      }))
+      .map(([id, data]) => {
+        const categoryId = (data.product as { categoryId?: ObjectId })?.categoryId?.toString() || ''
+        const prevData = prevProductSales[id]
+        const growth =
+          prevData && prevData.revenue > 0 ? ((data.revenue - prevData.revenue) / prevData.revenue) * 100 : 0
+        return {
+          _id: id,
+          name: (data.product as { name?: string })?.name || 'Unknown',
+          sku: (data.product as { sku?: string })?.sku || '',
+          sales: data.sales,
+          revenue: data.revenue,
+          category: categoryId,
+          categoryName: categoryNameMap[categoryId] || 'Chưa phân loại',
+          growth: Math.round(growth * 100) / 100
+        }
+      })
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10)
 
-    // Sales by category
+    // Sales by category with real category names
     const categorySales: Record<string, { count: number; sales: number; revenue: number }> = {}
 
     Object.values(productSales).forEach((data) => {
@@ -1232,7 +1392,7 @@ class AdminService {
 
     const salesByCategory = Object.entries(categorySales).map(([categoryId, data]) => ({
       category: categoryId,
-      categoryName: '', // Would need category lookup
+      categoryName: categoryNameMap[categoryId] || 'Chưa phân loại',
       productCount: data.count,
       totalSales: data.sales,
       totalRevenue: data.revenue,
@@ -1244,6 +1404,19 @@ class AdminService {
     const outOfStockProducts = products.filter((p) => p.stockQuantity === 0).length
     const lowStockProducts = products.filter((p) => p.stockQuantity > 0 && p.stockQuantity < 20).length
 
+    // Product trends — real calculations
+    const newProductsInPeriod = products.filter(
+      (p) => p.createdAt && p.createdAt >= startDate && p.createdAt <= endDate
+    ).length
+    const previousPeriodProducts = products.filter(
+      (p) => p.createdAt && p.createdAt >= previousStartDate && p.createdAt <= previousEndDate
+    ).length
+    const inactiveInPeriod = products.filter(
+      (p) => !p.isActive && p.updatedAt && p.updatedAt >= startDate && p.updatedAt <= endDate
+    ).length
+    const productGrowthRate =
+      previousPeriodProducts > 0 ? ((newProductsInPeriod - previousPeriodProducts) / previousPeriodProducts) * 100 : 0
+
     return {
       topProducts,
       salesByCategory,
@@ -1254,9 +1427,9 @@ class AdminService {
         lowStock: lowStockProducts
       },
       trends: {
-        newProducts: 0, // Would need time-based tracking
-        discontinuedProducts: 0,
-        growthRate: 0
+        newProducts: newProductsInPeriod,
+        discontinuedProducts: inactiveInPeriod,
+        growthRate: Math.round(productGrowthRate * 100) / 100
       }
     }
   }
@@ -1264,8 +1437,12 @@ class AdminService {
   /**
    * Get customer analytics
    */
-  async getCustomerAnalytics(timeRange: string = 'month') {
-    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(timeRange)
+  async getCustomerAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
     // Total customers
     const totalCustomers = await databaseService.users.countDocuments({ role: UserRole.Customer })
@@ -1282,7 +1459,7 @@ class AdminService {
       createdAt: { $gte: previousStartDate, $lte: previousEndDate }
     })
 
-    // Get customers with orders (returning customers)
+    // Get customers with orders in current period (active/returning)
     const customersWithOrders = await databaseService.orders
       .aggregate([
         {
@@ -1298,29 +1475,114 @@ class AdminService {
       ])
       .toArray()
 
-    const returningCustomers = customersWithOrders.length - newCustomers
+    const returningCustomers = Math.max(0, customersWithOrders.length - newCustomers)
 
-    // Retention rate (simplified)
+    // Retention rate
     const retentionRate = totalCustomers > 0 ? (returningCustomers / totalCustomers) * 100 : 0
 
-    // Customer lifetime value (simplified - average order value * average orders per customer)
+    // Customer lifetime value (average order value × average orders per customer)
     const totalOrders = await databaseService.orders.countDocuments({ orderStatus: { $ne: 'cancelled' } })
-    const totalRevenue = await databaseService.orders
+    const totalRevenueResult = await databaseService.orders
       .aggregate([
         { $match: { paymentStatus: 'paid', orderStatus: { $ne: 'cancelled' } } },
         { $group: { _id: null, total: { $sum: '$totalAmount' } } }
       ])
       .toArray()
 
-    const avgOrderValue = totalOrders > 0 && totalRevenue.length > 0 ? totalRevenue[0].total / totalOrders : 0
+    const avgOrderValue =
+      totalOrders > 0 && totalRevenueResult.length > 0 ? totalRevenueResult[0].total / totalOrders : 0
     const avgOrdersPerCustomer = totalCustomers > 0 ? totalOrders / totalCustomers : 0
     const lifetimeValue = avgOrderValue * avgOrdersPerCustomer
 
-    // Growth calculations
-    const dailyGrowth = 0 // Would need daily tracking
-    const weeklyGrowth = 0 // Would need weekly tracking
+    // ---- REAL daily growth ----
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    yesterday.setHours(0, 0, 0, 0)
+    const dayBefore = new Date(yesterday)
+    dayBefore.setDate(dayBefore.getDate() - 1)
+
+    const [todayNewCount, yesterdayNewCount] = await Promise.all([
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: yesterday }
+      }),
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: dayBefore, $lt: yesterday }
+      })
+    ])
+    const dailyGrowth = yesterdayNewCount > 0 ? ((todayNewCount - yesterdayNewCount) / yesterdayNewCount) * 100 : 0
+
+    // ---- REAL weekly growth ----
+    const oneWeekAgo = new Date()
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+    const twoWeeksAgo = new Date()
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+
+    const [thisWeekCount, lastWeekCount] = await Promise.all([
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: oneWeekAgo }
+      }),
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: twoWeeksAgo, $lt: oneWeekAgo }
+      })
+    ])
+    const weeklyGrowth = lastWeekCount > 0 ? ((thisWeekCount - lastWeekCount) / lastWeekCount) * 100 : 0
+
+    // Monthly growth
     const monthlyGrowth =
       previousNewCustomers > 0 ? ((newCustomers - previousNewCustomers) / previousNewCustomers) * 100 : 0
+
+    // ---- REAL byLocation from shipping addresses ----
+    const locationData = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            'shippingAddress.province': { $exists: true, $ne: '' }
+          }
+        },
+        {
+          $group: {
+            _id: '$shippingAddress.province',
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ])
+      .toArray()
+
+    const totalLocationOrders = locationData.reduce((sum, loc) => sum + loc.count, 0)
+    const byLocation = locationData.map((loc) => ({
+      province: loc._id || 'Không xác định',
+      count: loc.count,
+      percentage: totalLocationOrders > 0 ? Math.round((loc.count / totalLocationOrders) * 10000) / 100 : 0
+    }))
+
+    // ---- REAL VIP customers (5+ orders) ----
+    const vipCustomers = await databaseService.orders
+      .aggregate([
+        {
+          $match: { orderStatus: { $ne: 'cancelled' } }
+        },
+        {
+          $group: {
+            _id: '$userId',
+            orderCount: { $sum: 1 }
+          }
+        },
+        {
+          $match: { orderCount: { $gte: 5 } }
+        },
+        {
+          $count: 'total'
+        }
+      ])
+      .toArray()
+    const vipCount = vipCustomers[0]?.total || 0
 
     return {
       total: totalCustomers,
@@ -1328,15 +1590,15 @@ class AdminService {
       returningCustomers,
       retentionRate: Math.round(retentionRate * 100) / 100,
       lifetimeValue: Math.round(lifetimeValue),
-      byLocation: [], // Would need address aggregation
+      byLocation,
       bySegment: {
         active: customersWithOrders.length,
         inactive: totalCustomers - customersWithOrders.length,
-        vip: 0 // Would need VIP tracking
+        vip: vipCount
       },
       growth: {
-        daily: dailyGrowth,
-        weekly: weeklyGrowth,
+        daily: Math.round(dailyGrowth * 100) / 100,
+        weekly: Math.round(weeklyGrowth * 100) / 100,
         monthly: Math.round(monthlyGrowth * 100) / 100
       }
     }
@@ -1375,22 +1637,36 @@ class AdminService {
   /**
    * Helper: Get date ranges based on time range parameter
    */
-  private getDateRanges(timeRange: string) {
+  private getDateRanges(timeRange: string, customStartDate?: string, customEndDate?: string) {
     const now = new Date()
     let startDate: Date
-    const endDate = new Date()
+    let endDate: Date
     let previousStartDate: Date
     let previousEndDate: Date
 
     switch (timeRange) {
+      case 'custom': {
+        // Custom date range from query params
+        startDate = customStartDate ? new Date(customStartDate) : new Date(now.getFullYear(), now.getMonth(), 1)
+        endDate = customEndDate ? new Date(customEndDate) : new Date()
+        // Set end of day for endDate
+        endDate.setHours(23, 59, 59, 999)
+        // Previous period = same duration mirrored before startDate
+        const durationMs = endDate.getTime() - startDate.getTime()
+        previousEndDate = new Date(startDate.getTime() - 1)
+        previousStartDate = new Date(previousEndDate.getTime() - durationMs)
+        break
+      }
       case 'week': {
         startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        endDate = new Date()
         previousStartDate = new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000)
         previousEndDate = new Date(startDate.getTime() - 1)
         break
       }
       case 'month': {
         startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         previousEndDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
         break
@@ -1398,18 +1674,21 @@ class AdminService {
       case 'quarter': {
         const currentQuarter = Math.floor(now.getMonth() / 3)
         startDate = new Date(now.getFullYear(), currentQuarter * 3, 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear(), (currentQuarter - 1) * 3, 1)
         previousEndDate = new Date(now.getFullYear(), currentQuarter * 3, 0, 23, 59, 59)
         break
       }
       case 'year': {
         startDate = new Date(now.getFullYear(), 0, 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear() - 1, 0, 1)
         previousEndDate = new Date(now.getFullYear(), 0, 0, 23, 59, 59)
         break
       }
       default: {
         startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         previousEndDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
         break
