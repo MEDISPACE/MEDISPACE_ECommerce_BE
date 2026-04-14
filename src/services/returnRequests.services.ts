@@ -496,9 +496,6 @@ class ReturnRequestService {
             console.error('Loyalty revoke points error:', err)
         }
 
-        return await databaseService.returnRequests.findOne({ _id: requestId })
-    }
-
     await databaseService.returnRequests.updateOne(
       { _id: requestId },
       {
