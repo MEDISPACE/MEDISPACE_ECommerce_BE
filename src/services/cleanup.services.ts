@@ -39,7 +39,9 @@ class CleanupService {
   // Cancels orders with pending payment status older than ABANDONED_ORDER_TIMEOUT_HOURS
   // Only affects online payment methods (VNPay, PayOS), NOT COD
   startAbandonedOrderCleanup() {
-    console.log(`[CleanupService] Abandoned order cleanup scheduled. Orders older than ${ABANDONED_ORDER_TIMEOUT_HOURS} hours with pending payment will be cancelled.`)
+    console.log(
+      `[CleanupService] Abandoned order cleanup scheduled. Orders older than ${ABANDONED_ORDER_TIMEOUT_HOURS} hours with pending payment will be cancelled.`
+    )
 
     cron.schedule('0 * * * *', async () => {
       try {
@@ -59,12 +61,14 @@ class CleanupService {
     cutoffTime.setHours(cutoffTime.getHours() - ABANDONED_ORDER_TIMEOUT_HOURS)
 
     // Find orders that need to be cancelled
-    const ordersToCancel = await databaseService.orders.find({
-      paymentStatus: 'pending',
-      paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
-      orderStatus: { $nin: ['cancelled', 'delivered'] },
-      createdAt: { $lt: cutoffTime }
-    }).toArray()
+    const ordersToCancel = await databaseService.orders
+      .find({
+        paymentStatus: 'pending',
+        paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
+        orderStatus: { $nin: ['cancelled', 'delivered'] },
+        createdAt: { $lt: cutoffTime }
+      })
+      .toArray()
 
     // Restore stock for each order before cancelling
     for (const order of ordersToCancel) {
@@ -74,10 +78,7 @@ class CleanupService {
           const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
           const quantityPerUnit = variant?.quantityPerUnit || 1
           const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne(
-            { _id: item.productId },
-            { $inc: { stockQuantity: stockToRestore } }
-          )
+          await databaseService.products.updateOne({ _id: item.productId }, { $inc: { stockQuantity: stockToRestore } })
         }
       }
     }
@@ -166,7 +167,9 @@ class CleanupService {
 
   // Cleanup expired prescriptions - runs daily at midnight
   startExpiredPrescriptionCleanup() {
-    console.log('[CleanupService] Expired prescription cleanup scheduled. Prescriptions past validUntil will be marked as expired.')
+    console.log(
+      '[CleanupService] Expired prescription cleanup scheduled. Prescriptions past validUntil will be marked as expired.'
+    )
 
     // Run daily at 00:30
     cron.schedule('30 0 * * *', async () => {

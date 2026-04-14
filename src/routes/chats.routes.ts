@@ -1,14 +1,14 @@
 import { Router } from 'express'
 import {
-    getConversationsController,
-    getOrCreateConversationController,
-    sendMessageController,
-    getMessagesController,
-    markAsReadController,
-    getConversationController,
-    getAvailablePharmacistController,
-    deleteConversationController,
-    assignConversationController
+  getConversationsController,
+  getOrCreateConversationController,
+  sendMessageController,
+  getMessagesController,
+  markAsReadController,
+  getConversationController,
+  getAvailablePharmacistController,
+  deleteConversationController,
+  assignConversationController
 } from '~/controllers/chats.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { sendMessageValidator, rateLimitMessageValidator } from '~/middlewares/chats.middlewares'
@@ -22,10 +22,10 @@ const chatsRouter = Router()
  * Method: GET
  */
 chatsRouter.get(
-    '/available-pharmacist',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getAvailablePharmacistController)
+  '/available-pharmacist',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getAvailablePharmacistController)
 )
 
 /**
@@ -35,10 +35,10 @@ chatsRouter.get(
  * Query: { page?, limit?, status? }
  */
 chatsRouter.get(
-    '/conversations',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getConversationsController)
+  '/conversations',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getConversationsController)
 )
 
 /**
@@ -47,10 +47,10 @@ chatsRouter.get(
  * Method: POST
  */
 chatsRouter.post(
-    '/conversations',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getOrCreateConversationController)
+  '/conversations',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getOrCreateConversationController)
 )
 
 /**
@@ -59,10 +59,10 @@ chatsRouter.post(
  * Method: GET
  */
 chatsRouter.get(
-    '/conversations/:conversationId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getConversationController)
+  '/conversations/:conversationId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getConversationController)
 )
 
 /**
@@ -71,10 +71,10 @@ chatsRouter.get(
  * Method: POST
  */
 chatsRouter.post(
-    '/conversations/:conversationId/assign',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(assignConversationController)
+  '/conversations/:conversationId/assign',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(assignConversationController)
 )
 
 /**
@@ -83,10 +83,10 @@ chatsRouter.post(
  * Method: DELETE
  */
 chatsRouter.delete(
-    '/conversations/:conversationId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(deleteConversationController)
+  '/conversations/:conversationId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(deleteConversationController)
 )
 
 /**
@@ -95,12 +95,12 @@ chatsRouter.delete(
  * Method: POST
  */
 chatsRouter.post(
-    '/messages',
-    accessTokenValidator,
-    verifiedUserValidator,
-    rateLimitMessageValidator,
-    sendMessageValidator,
-    wrapRequestHandler(sendMessageController)
+  '/messages',
+  accessTokenValidator,
+  verifiedUserValidator,
+  rateLimitMessageValidator,
+  sendMessageValidator,
+  wrapRequestHandler(sendMessageController)
 )
 
 /**
@@ -116,6 +116,11 @@ chatsRouter.get('/messages', accessTokenValidator, verifiedUserValidator, wrapRe
  * Path: /messages/read
  * Method: POST
  */
-chatsRouter.post('/messages/read', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(markAsReadController))
+chatsRouter.post(
+  '/messages/read',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(markAsReadController)
+)
 
 export default chatsRouter

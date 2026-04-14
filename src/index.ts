@@ -48,7 +48,7 @@ typesenseService.initCollections() // Initialize Typesense search index
 app.use(cookieParser())
 
 // CORS configuration - Allow frontend to connect
-const allowedOrigins = process.env.FRONTEND_URLS?.split(',').map(url => url.trim()) || []
+const allowedOrigins = process.env.FRONTEND_URLS?.split(',').map((url) => url.trim()) || []
 app.use(
   cors({
     origin: allowedOrigins.length > 0 ? allowedOrigins : true,
@@ -83,10 +83,8 @@ app.use('/coupons', couponsRouter)
 app.use('/campaigns', campaignsRouter)
 app.use('/loyalty', loyaltyRouter)
 
-
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
-
 
 // Create HTTP server for Socket.IO
 import { createServer } from 'http'
@@ -102,4 +100,3 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server is running on port ${port}`)
   console.log(`Socket.IO is ready for chat connections`)
 })
-

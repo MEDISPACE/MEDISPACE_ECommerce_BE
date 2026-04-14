@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { NextFunction } from 'express-serve-static-core'
 import adminService from '~/services/admin.services'
+import { adminExportService, getTimeRangeLabel } from '~/services/admin.export.service'
 import chatsService from '~/services/chats.services'
 import { ADMIN_MESSAGES } from '~/constants/message'
 import { getIO } from '~/sockets/chat.socket'
@@ -374,13 +375,17 @@ export const bulkUpdatePrescriptionsController = async (req: Request, res: Respo
  * Get comprehensive reports analytics
  * Path: /admin/reports/analytics
  * Method: GET
- * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' | 'custom', startDate?: string, endDate?: string }
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 export const getReportsAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { timeRange = 'month' } = req.query
-    const result = await adminService.getReportsAnalytics(timeRange as string)
+    const { timeRange = 'month', startDate, endDate } = req.query
+    const result = await adminService.getReportsAnalytics(
+      timeRange as string,
+      startDate as string | undefined,
+      endDate as string | undefined
+    )
     return res.json({
       message: ADMIN_MESSAGES.GET_REPORTS_ANALYTICS_SUCCESS,
       result
@@ -391,16 +396,76 @@ export const getReportsAnalyticsController = async (req: Request, res: Response,
 }
 
 /**
+ * Export reports
+ * Path: /admin/reports/export
+ * Method: GET
+ * Query: { timeRange?: string, startDate?: string, endDate?: string, format: 'excel' | 'pdf' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const exportReportsAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { timeRange = 'month', startDate, endDate, format = 'excel' } = req.query
+
+    // 1. Lấy dữ liệu
+    const data = await adminService.getReportsAnalytics(
+      timeRange as string,
+      startDate as string | undefined,
+      endDate as string | undefined
+    )
+
+    // 2. Tạo file
+    let buffer: Buffer
+    let mimeType: string
+    let extension: string
+    const label = getTimeRangeLabel(timeRange as string, startDate as string | undefined, endDate as string | undefined)
+
+    if (format === 'pdf') {
+      buffer = await adminExportService.exportToPDF(
+        data,
+        timeRange as string,
+        startDate as string | undefined,
+        endDate as string | undefined
+      )
+      mimeType = 'application/pdf'
+      extension = 'pdf'
+    } else {
+      buffer = await adminExportService.exportToExcel(
+        data,
+        timeRange as string,
+        startDate as string | undefined,
+        endDate as string | undefined
+      )
+      mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      extension = 'xlsx'
+    }
+
+    const filename = `MEDISPACE_BaoCao_${label}_${new Date().toISOString().split('T')[0]}.${extension}`
+
+    // 3. Trả về stream
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
+    res.setHeader('Content-Type', mimeType)
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition')
+    return res.end(buffer)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
  * Get revenue analytics
  * Path: /admin/reports/revenue
  * Method: GET
- * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' | 'custom', startDate?: string, endDate?: string }
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 export const getRevenueAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { timeRange = 'month' } = req.query
-    const result = await adminService.getRevenueAnalytics(timeRange as string)
+    const { timeRange = 'month', startDate, endDate } = req.query
+    const result = await adminService.getRevenueAnalytics(
+      timeRange as string,
+      startDate as string | undefined,
+      endDate as string | undefined
+    )
     return res.json({
       message: ADMIN_MESSAGES.GET_REVENUE_ANALYTICS_SUCCESS,
       result
@@ -414,13 +479,17 @@ export const getRevenueAnalyticsController = async (req: Request, res: Response,
  * Get product analytics
  * Path: /admin/reports/products
  * Method: GET
- * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' | 'custom', startDate?: string, endDate?: string }
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 export const getProductAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { timeRange = 'month' } = req.query
-    const result = await adminService.getProductAnalytics(timeRange as string)
+    const { timeRange = 'month', startDate, endDate } = req.query
+    const result = await adminService.getProductAnalytics(
+      timeRange as string,
+      startDate as string | undefined,
+      endDate as string | undefined
+    )
     return res.json({
       message: ADMIN_MESSAGES.GET_PRODUCT_ANALYTICS_SUCCESS,
       result
@@ -434,13 +503,17 @@ export const getProductAnalyticsController = async (req: Request, res: Response,
  * Get customer analytics
  * Path: /admin/reports/customers
  * Method: GET
- * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' }
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' | 'custom', startDate?: string, endDate?: string }
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 export const getCustomerAnalyticsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { timeRange = 'month' } = req.query
-    const result = await adminService.getCustomerAnalytics(timeRange as string)
+    const { timeRange = 'month', startDate, endDate } = req.query
+    const result = await adminService.getCustomerAnalytics(
+      timeRange as string,
+      startDate as string | undefined,
+      endDate as string | undefined
+    )
     return res.json({
       message: ADMIN_MESSAGES.GET_CUSTOMER_ANALYTICS_SUCCESS,
       result
@@ -519,7 +592,9 @@ export const adminCloseConversationController = async (req: Request, res: Respon
       }
       // Notify pharmacists room to update inbox
       io.to('pharmacists').emit('conversation:closed', payload)
-    } catch { /* socket not critical */ }
+    } catch {
+      /* socket not critical */
+    }
 
     return res.json({ message: 'Đã đóng cuộc trò chuyện', result })
   } catch (error) {
@@ -561,7 +636,9 @@ export const adminTransferConversationController = async (req: Request, res: Res
       io.to(`user:${pharmacistId}`).emit('conversation:transferred', payload)
       // Notify all pharmacists to refresh lists
       io.to('pharmacists').emit('conversation:transferred', payload)
-    } catch { /* socket not critical */ }
+    } catch {
+      /* socket not critical */
+    }
 
     return res.json({ message: 'Đã chuyển cuộc trò chuyện thành công', result })
   } catch (error) {

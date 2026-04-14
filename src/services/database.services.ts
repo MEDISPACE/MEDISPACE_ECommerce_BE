@@ -49,11 +49,7 @@ class DatabaseService {
 
   async createIndexes() {
     // Helper function to safely create index
-    const safeCreateIndex = async (
-      collection: any,
-      indexSpec: any,
-      options?: any
-    ) => {
+    const safeCreateIndex = async (collection: any, indexSpec: any, options?: any) => {
       try {
         await collection.createIndex(indexSpec, { background: true, ...options })
       } catch (error: any) {

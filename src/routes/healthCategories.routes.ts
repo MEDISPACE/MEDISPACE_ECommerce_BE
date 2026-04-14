@@ -1,16 +1,16 @@
 import { Router } from 'express'
 import {
-    createHealthCategoryController,
-    getHealthCategoriesController,
-    getHealthCategoryController,
-    updateHealthCategoryController,
-    deleteHealthCategoryController
+  createHealthCategoryController,
+  getHealthCategoriesController,
+  getHealthCategoryController,
+  updateHealthCategoryController,
+  deleteHealthCategoryController
 } from '~/controllers/healthCategories.controllers'
 import {
-    createHealthCategoryValidator,
-    updateHealthCategoryValidator,
-    getHealthCategoriesValidator,
-    healthCategoryIdValidator
+  createHealthCategoryValidator,
+  updateHealthCategoryValidator,
+  getHealthCategoriesValidator,
+  healthCategoryIdValidator
 } from '~/middlewares/healthCategories.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
@@ -42,11 +42,11 @@ healthCategoriesRouter.get('/:categoryId', healthCategoryIdValidator, wrapReques
  * Headers: { Authorization: Bearer <access_token> }
  */
 healthCategoriesRouter.post(
-    '/',
-    accessTokenValidator,
-    adminValidator,
-    createHealthCategoryValidator,
-    wrapRequestHandler(createHealthCategoryController)
+  '/',
+  accessTokenValidator,
+  adminValidator,
+  createHealthCategoryValidator,
+  wrapRequestHandler(createHealthCategoryController)
 )
 
 /**
@@ -58,12 +58,12 @@ healthCategoriesRouter.post(
  * Headers: { Authorization: Bearer <access_token> }
  */
 healthCategoriesRouter.patch(
-    '/:categoryId',
-    accessTokenValidator,
-    adminValidator,
-    healthCategoryIdValidator,
-    updateHealthCategoryValidator,
-    wrapRequestHandler(updateHealthCategoryController)
+  '/:categoryId',
+  accessTokenValidator,
+  adminValidator,
+  healthCategoryIdValidator,
+  updateHealthCategoryValidator,
+  wrapRequestHandler(updateHealthCategoryController)
 )
 
 /**
@@ -74,11 +74,11 @@ healthCategoriesRouter.patch(
  * Headers: { Authorization: Bearer <access_token> }
  */
 healthCategoriesRouter.delete(
-    '/:categoryId',
-    accessTokenValidator,
-    adminValidator,
-    healthCategoryIdValidator,
-    wrapRequestHandler(deleteHealthCategoryController)
+  '/:categoryId',
+  accessTokenValidator,
+  adminValidator,
+  healthCategoryIdValidator,
+  wrapRequestHandler(deleteHealthCategoryController)
 )
 
 export default healthCategoriesRouter
