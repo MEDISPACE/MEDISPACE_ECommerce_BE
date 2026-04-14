@@ -17,7 +17,18 @@ import campaignsService from './campaigns.services'
 class OrderService {
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
-    const { shippingAddress, paymentMethod, notes, sessionId, req, selectedItems, isDirectBuy, shippingMethod, shippingFee: providedShippingFee, estimatedDeliveryDate } = payload
+    const {
+      shippingAddress,
+      paymentMethod,
+      notes,
+      sessionId,
+      req,
+      selectedItems,
+      isDirectBuy,
+      shippingMethod,
+      shippingFee: providedShippingFee,
+      estimatedDeliveryDate
+    } = payload
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -71,7 +82,10 @@ class OrderService {
           totalPrice: unitPrice * item.quantity,
           campaignId: campaign?._id,
           prescriptionRequired: product.prescriptionRequired,
-          image: product.featuredImage || product.image || (product.images && product.images.length > 0 ? product.images[0] : undefined)
+          image:
+            product.featuredImage ||
+            product.image ||
+            (product.images && product.images.length > 0 ? product.images[0] : undefined)
         })
       }
     } else {
@@ -318,12 +332,7 @@ class OrderService {
       if (selectedItems && selectedItems.length > 0) {
         // Remove only selected items from cart
         for (const item of selectedItems) {
-          await cartService.removeItemFromCart(
-            new ObjectId(item.productId),
-            userId,
-            sessionId,
-            (item as any).unit
-          )
+          await cartService.removeItemFromCart(new ObjectId(item.productId), userId, sessionId, (item as any).unit)
         }
         // Xóa applied coupons sau khi đặt hàng (chỉ coupons đã dùng)
         await databaseService.carts.updateOne(

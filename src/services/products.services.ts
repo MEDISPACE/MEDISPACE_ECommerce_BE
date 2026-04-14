@@ -134,7 +134,12 @@ class ProductsService {
     await databaseService.products.insertOne(product)
 
     // Sync to Typesense (fire-and-forget)
-    typesenseService.indexProduct({ ...product, category: { name: (await categoriesService.getCategoryById(payload.categoryId.toString())).name } }).catch(() => {})
+    typesenseService
+      .indexProduct({
+        ...product,
+        category: { name: (await categoriesService.getCategoryById(payload.categoryId.toString())).name }
+      })
+      .catch(() => {})
 
     // Update category product count
     await databaseService.categories.updateOne(
@@ -274,20 +279,20 @@ class ProductsService {
           // Enhanced search filter after lookup
           ...(searchQuery
             ? [
-              {
-                $match: {
-                  $or: [
-                    { name: { $regex: searchQuery, $options: 'i' } },
-                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
-                    { longDescription: { $regex: searchQuery, $options: 'i' } },
-                    { sku: { $regex: searchQuery, $options: 'i' } },
-                    { ingredients: { $regex: searchQuery, $options: 'i' } },
-                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
-                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
-                  ]
+                {
+                  $match: {
+                    $or: [
+                      { name: { $regex: searchQuery, $options: 'i' } },
+                      { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                      { longDescription: { $regex: searchQuery, $options: 'i' } },
+                      { sku: { $regex: searchQuery, $options: 'i' } },
+                      { ingredients: { $regex: searchQuery, $options: 'i' } },
+                      { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                      { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                    ]
+                  }
                 }
-              }
-            ]
+              ]
             : []),
           {
             $project: {
@@ -322,49 +327,49 @@ class ProductsService {
       // Count with search filter
       searchQuery
         ? databaseService.products
-          .aggregate([
-            { $match: filter },
-            {
-              $lookup: {
-                from: 'categories',
-                localField: 'categoryId',
-                foreignField: '_id',
-                as: 'category',
-                pipeline: [{ $project: { name: 1 } }]
-              }
-            },
-            {
-              $lookup: {
-                from: 'brands',
-                localField: 'brandId',
-                foreignField: '_id',
-                as: 'brand',
-                pipeline: [{ $project: { name: 1 } }]
-              }
-            },
-            {
-              $addFields: {
-                category: { $arrayElemAt: ['$category', 0] },
-                brand: { $arrayElemAt: ['$brand', 0] }
-              }
-            },
-            {
-              $match: {
-                $or: [
-                  { name: { $regex: searchQuery, $options: 'i' } },
-                  { shortDescription: { $regex: searchQuery, $options: 'i' } },
-                  { longDescription: { $regex: searchQuery, $options: 'i' } },
-                  { sku: { $regex: searchQuery, $options: 'i' } },
-                  { ingredients: { $regex: searchQuery, $options: 'i' } },
-                  { 'category.name': { $regex: searchQuery, $options: 'i' } },
-                  { 'brand.name': { $regex: searchQuery, $options: 'i' } }
-                ]
-              }
-            },
-            { $count: 'total' }
-          ])
-          .toArray()
-          .then((result) => result[0]?.total || 0)
+            .aggregate([
+              { $match: filter },
+              {
+                $lookup: {
+                  from: 'categories',
+                  localField: 'categoryId',
+                  foreignField: '_id',
+                  as: 'category',
+                  pipeline: [{ $project: { name: 1 } }]
+                }
+              },
+              {
+                $lookup: {
+                  from: 'brands',
+                  localField: 'brandId',
+                  foreignField: '_id',
+                  as: 'brand',
+                  pipeline: [{ $project: { name: 1 } }]
+                }
+              },
+              {
+                $addFields: {
+                  category: { $arrayElemAt: ['$category', 0] },
+                  brand: { $arrayElemAt: ['$brand', 0] }
+                }
+              },
+              {
+                $match: {
+                  $or: [
+                    { name: { $regex: searchQuery, $options: 'i' } },
+                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                    { longDescription: { $regex: searchQuery, $options: 'i' } },
+                    { sku: { $regex: searchQuery, $options: 'i' } },
+                    { ingredients: { $regex: searchQuery, $options: 'i' } },
+                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                  ]
+                }
+              },
+              { $count: 'total' }
+            ])
+            .toArray()
+            .then((result) => result[0]?.total || 0)
         : databaseService.products.countDocuments(filter)
     ])
 

@@ -15,7 +15,13 @@ const MONGO_URI = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PAS
 import Typesense from 'typesense'
 
 const tsClient = new Typesense.Client({
-  nodes: [{ host: process.env.TYPESENSE_HOST || 'localhost', port: Number(process.env.TYPESENSE_PORT) || 7700, protocol: 'http' }],
+  nodes: [
+    {
+      host: process.env.TYPESENSE_HOST || 'localhost',
+      port: Number(process.env.TYPESENSE_PORT) || 7700,
+      protocol: 'http'
+    }
+  ],
   apiKey: process.env.TYPESENSE_API_KEY || 'medispace-ts-secret',
   connectionTimeoutSeconds: 5
 })
@@ -30,8 +36,14 @@ async function seed() {
   const force = process.argv.includes('--force')
   if (force) {
     console.log('[Seed] --force mode: dropping existing collections...')
-    try { await tsClient.collections('products').delete(); console.log('[Seed] Dropped "products".') } catch {}
-    try { await tsClient.collections('articles').delete(); console.log('[Seed] Dropped "articles".') } catch {}
+    try {
+      await tsClient.collections('products').delete()
+      console.log('[Seed] Dropped "products".')
+    } catch {}
+    try {
+      await tsClient.collections('articles').delete()
+      console.log('[Seed] Dropped "articles".')
+    } catch {}
   }
 
   // ── Init Typesense collections ──────────────────────────────────────────────
@@ -72,8 +84,8 @@ async function seed() {
       {
         $addFields: {
           category: { $arrayElemAt: ['$category', 0] },
-          brand:    { $arrayElemAt: ['$brand', 0] },
-          details:  { $arrayElemAt: ['$details', 0] }
+          brand: { $arrayElemAt: ['$brand', 0] },
+          details: { $arrayElemAt: ['$details', 0] }
         }
       }
     ])

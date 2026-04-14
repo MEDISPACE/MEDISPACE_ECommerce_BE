@@ -2,8 +2,8 @@
 export interface AddToCartReqBody {
   productId: string
   quantity: number
-  unit?: string    // Selected unit from priceVariants
-  price?: number   // Unit price for the selected variant
+  unit?: string // Selected unit from priceVariants
+  price?: number // Unit price for the selected variant
 }
 
 export interface UpdateCartItemReqBody {

@@ -4,7 +4,7 @@ export interface CartItem {
   productId: ObjectId
   name: string
   sku: string
-  unit: string           // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
+  unit: string // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
   unitPrice: number      // Giá sau campaign (salePrice) hoặc giá gốc
   originalUnitPrice: number  // Giá gốc (trước campaign)

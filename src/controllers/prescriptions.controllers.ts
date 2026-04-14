@@ -34,7 +34,6 @@ export const getPrescriptionsController = async (
   try {
     const { userId } = req.decoded_authorization as TokenPayload
 
-
     const result = await prescriptionsService.getPrescriptions({
       ...req.query,
       customerId: userId
@@ -45,7 +44,6 @@ export const getPrescriptionsController = async (
       result
     })
   } catch (error) {
-
     throw error
   }
 }
@@ -111,7 +109,6 @@ export const verifyPrescriptionController = async (
       result
     })
   } catch (error) {
-
     throw error
   }
 }
@@ -119,7 +116,6 @@ export const verifyPrescriptionController = async (
 // Get prescription statistics - Pharmacist
 export const getPrescriptionStatsController = async (req: Request, res: Response) => {
   try {
-
     const result = await prescriptionsService.getPrescriptionStats()
 
     return res.status(HTTP_STATUS.OK).json({
@@ -127,7 +123,6 @@ export const getPrescriptionStatsController = async (req: Request, res: Response
       result
     })
   } catch (error) {
-
     throw error
   }
 }

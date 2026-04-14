@@ -1,26 +1,26 @@
 import { Router } from 'express'
 import {
-    createReturnRequestController,
-    getMyReturnRequestsController,
-    getReturnRequestByIdController,
-    cancelReturnRequestController,
-    updateReturnShippingController,
-    getAllReturnRequestsController,
-    getReturnRequestByIdAdminController,
-    reviewReturnRequestController,
-    receiveReturnItemsController,
-    processRefundController,
-    completeReturnRequestController,
-    getReturnRequestStatsController
+  createReturnRequestController,
+  getMyReturnRequestsController,
+  getReturnRequestByIdController,
+  cancelReturnRequestController,
+  updateReturnShippingController,
+  getAllReturnRequestsController,
+  getReturnRequestByIdAdminController,
+  reviewReturnRequestController,
+  receiveReturnItemsController,
+  processRefundController,
+  completeReturnRequestController,
+  getReturnRequestStatsController
 } from '~/controllers/returnRequests.controllers'
 import {
-    createReturnRequestValidator,
-    requestIdValidator,
-    getReturnRequestsValidator,
-    reviewReturnRequestValidator,
-    updateReturnShippingValidator,
-    receiveReturnItemsValidator,
-    processRefundValidator
+  createReturnRequestValidator,
+  requestIdValidator,
+  getReturnRequestsValidator,
+  reviewReturnRequestValidator,
+  updateReturnShippingValidator,
+  receiveReturnItemsValidator,
+  processRefundValidator
 } from '~/middlewares/returnRequests.middlewares'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
 import { isAdminOrPharmacist } from '~/middlewares/common.middlewares'
@@ -38,10 +38,10 @@ const returnRequestsRouter = Router()
  *       - bearerAuth: []
  */
 returnRequestsRouter.post(
-    '/',
-    accessTokenValidator,
-    createReturnRequestValidator,
-    wrapRequestHandler(createReturnRequestController)
+  '/',
+  accessTokenValidator,
+  createReturnRequestValidator,
+  wrapRequestHandler(createReturnRequestController)
 )
 
 /**
@@ -54,10 +54,10 @@ returnRequestsRouter.post(
  *       - bearerAuth: []
  */
 returnRequestsRouter.get(
-    '/',
-    accessTokenValidator,
-    getReturnRequestsValidator,
-    wrapRequestHandler(getMyReturnRequestsController)
+  '/',
+  accessTokenValidator,
+  getReturnRequestsValidator,
+  wrapRequestHandler(getMyReturnRequestsController)
 )
 
 /**
@@ -70,10 +70,10 @@ returnRequestsRouter.get(
  *       - bearerAuth: []
  */
 returnRequestsRouter.get(
-    '/:requestId',
-    accessTokenValidator,
-    requestIdValidator,
-    wrapRequestHandler(getReturnRequestByIdController)
+  '/:requestId',
+  accessTokenValidator,
+  requestIdValidator,
+  wrapRequestHandler(getReturnRequestByIdController)
 )
 
 /**
@@ -86,10 +86,10 @@ returnRequestsRouter.get(
  *       - bearerAuth: []
  */
 returnRequestsRouter.patch(
-    '/:requestId/cancel',
-    accessTokenValidator,
-    requestIdValidator,
-    wrapRequestHandler(cancelReturnRequestController)
+  '/:requestId/cancel',
+  accessTokenValidator,
+  requestIdValidator,
+  wrapRequestHandler(cancelReturnRequestController)
 )
 
 /**
@@ -102,11 +102,11 @@ returnRequestsRouter.patch(
  *       - bearerAuth: []
  */
 returnRequestsRouter.patch(
-    '/:requestId/shipping',
-    accessTokenValidator,
-    requestIdValidator,
-    updateReturnShippingValidator,
-    wrapRequestHandler(updateReturnShippingController)
+  '/:requestId/shipping',
+  accessTokenValidator,
+  requestIdValidator,
+  updateReturnShippingValidator,
+  wrapRequestHandler(updateReturnShippingController)
 )
 
 // ==================== ADMIN/PHARMACIST ROUTES ====================
@@ -121,10 +121,10 @@ returnRequestsRouter.patch(
  *       - bearerAuth: []
  */
 returnRequestsRouter.get(
-    '/admin/stats',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    wrapRequestHandler(getReturnRequestStatsController)
+  '/admin/stats',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  wrapRequestHandler(getReturnRequestStatsController)
 )
 
 /**
@@ -137,11 +137,11 @@ returnRequestsRouter.get(
  *       - bearerAuth: []
  */
 returnRequestsRouter.get(
-    '/admin/all',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    getReturnRequestsValidator,
-    wrapRequestHandler(getAllReturnRequestsController)
+  '/admin/all',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  getReturnRequestsValidator,
+  wrapRequestHandler(getAllReturnRequestsController)
 )
 
 /**
@@ -154,11 +154,11 @@ returnRequestsRouter.get(
  *       - bearerAuth: []
  */
 returnRequestsRouter.get(
-    '/admin/:requestId',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    requestIdValidator,
-    wrapRequestHandler(getReturnRequestByIdAdminController)
+  '/admin/:requestId',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  requestIdValidator,
+  wrapRequestHandler(getReturnRequestByIdAdminController)
 )
 
 /**
@@ -171,12 +171,12 @@ returnRequestsRouter.get(
  *       - bearerAuth: []
  */
 returnRequestsRouter.patch(
-    '/admin/:requestId/review',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    requestIdValidator,
-    reviewReturnRequestValidator,
-    wrapRequestHandler(reviewReturnRequestController)
+  '/admin/:requestId/review',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  requestIdValidator,
+  reviewReturnRequestValidator,
+  wrapRequestHandler(reviewReturnRequestController)
 )
 
 /**
@@ -189,12 +189,12 @@ returnRequestsRouter.patch(
  *       - bearerAuth: []
  */
 returnRequestsRouter.patch(
-    '/admin/:requestId/receive',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    requestIdValidator,
-    receiveReturnItemsValidator,
-    wrapRequestHandler(receiveReturnItemsController)
+  '/admin/:requestId/receive',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  requestIdValidator,
+  receiveReturnItemsValidator,
+  wrapRequestHandler(receiveReturnItemsController)
 )
 
 /**
@@ -207,12 +207,12 @@ returnRequestsRouter.patch(
  *       - bearerAuth: []
  */
 returnRequestsRouter.patch(
-    '/admin/:requestId/refund',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    requestIdValidator,
-    processRefundValidator,
-    wrapRequestHandler(processRefundController)
+  '/admin/:requestId/refund',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  requestIdValidator,
+  processRefundValidator,
+  wrapRequestHandler(processRefundController)
 )
 
 /**
@@ -225,11 +225,11 @@ returnRequestsRouter.patch(
  *       - bearerAuth: []
  */
 returnRequestsRouter.patch(
-    '/admin/:requestId/complete',
-    accessTokenValidator,
-    isAdminOrPharmacist,
-    requestIdValidator,
-    wrapRequestHandler(completeReturnRequestController)
+  '/admin/:requestId/complete',
+  accessTokenValidator,
+  isAdminOrPharmacist,
+  requestIdValidator,
+  wrapRequestHandler(completeReturnRequestController)
 )
 
 export default returnRequestsRouter

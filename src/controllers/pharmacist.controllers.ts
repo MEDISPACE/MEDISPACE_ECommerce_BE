@@ -32,13 +32,13 @@ export const getRecentActivitiesController = async (req: Request, res: Response)
   })
 }
 
-// Get patient by phone
-export const getPatientByPhoneController = async (req: Request, res: Response) => {
+// Search patients by phone or partial name
+export const searchPatientsController = async (req: Request, res: Response) => {
   const { phone } = req.query as { phone: string }
-  const result = await pharmacistService.getPatientByPhone(phone)
+  const result = await pharmacistService.searchPatients(phone)
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_PATIENT_INFO_SUCCESS,
-    result
+    result // Now returns an array of users instead of exactly 1 user
   })
 }
 
@@ -108,12 +108,14 @@ export const createPatientNoteController = async (req: Request<{ customerId: str
   const { userId } = req.decoded_authorization as TokenPayload
   const { note_type, content, related_prescription_id } = req.body
 
-  // Check prescription status
-  const prescription = await pharmacistService.getPrescriptionById(related_prescription_id)
-  if (!prescription || prescription.status !== 'pending') {
-    return res.status(HTTP_STATUS.FORBIDDEN).json({
-      message: 'Chỉ đơn thuốc ở trạng thái chờ xử lý mới có thể ghi chú.'
-    })
+  // Check prescription status - allow notes for pending and verified prescriptions
+  if (related_prescription_id) {
+    const prescription = await pharmacistService.getPrescriptionById(related_prescription_id)
+    if (!prescription || !['pending', 'verified'].includes(prescription.status)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        message: 'Chỉ đơn thuốc ở trạng thái chờ xử lý hoặc đã duyệt mới có thể ghi chú.'
+      })
+    }
   }
 
   const result = await pharmacistService.createPatientNote(customerId, new ObjectId(userId), {
@@ -229,9 +231,9 @@ export const getOrderStatisticsController = async (req: Request, res: Response) 
   const dateRange =
     startDate && endDate
       ? {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate)
-      }
+          startDate: new Date(startDate),
+          endDate: new Date(endDate)
+        }
       : undefined
 
   const result = await pharmacistService.getOrderStatistics(dateRange)
@@ -286,9 +288,9 @@ export const getWorkingStatsController = async (req: Request, res: Response) => 
   const dateRange =
     startDate && endDate
       ? {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate)
-      }
+          startDate: new Date(startDate),
+          endDate: new Date(endDate)
+        }
       : undefined
 
   const result = await pharmacistService.getWorkingStats(new ObjectId(userId), dateRange)

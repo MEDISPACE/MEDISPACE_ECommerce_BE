@@ -74,12 +74,7 @@ reviewsRouter.patch(
 )
 
 // Admin-only routes - Review management
-reviewsRouter.get(
-  '/admin',
-  accessTokenValidator,
-  isAdminOrPharmacist,
-  wrapRequestHandler(getAdminReviewsController)
-)
+reviewsRouter.get('/admin', accessTokenValidator, isAdminOrPharmacist, wrapRequestHandler(getAdminReviewsController))
 
 reviewsRouter.get(
   '/admin/stats',
