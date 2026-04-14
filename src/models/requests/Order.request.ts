@@ -23,6 +23,8 @@ export interface CreateOrderReqBody {
   paymentMethod: string // 'cod', 'bank_transfer', 'credit_card', 'e_wallet'
   shippingMethod?: string // 'standard', 'fast', 'express'
   notes?: string
+  couponCodes?: string[] // For applying coupons to direct buy orders
+  pointsToRedeem?: number // Số điểm loyalty muốn đổi
 }
 
 export interface UpdateOrderStatusReqBody {

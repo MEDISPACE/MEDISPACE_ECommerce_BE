@@ -6,8 +6,10 @@ export interface OrderItem {
   sku: string
   unit: string // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
-  unitPrice: number // Giá mỗi đơn vị
-  totalPrice: number // quantity * unitPrice
+  unitPrice: number      // Giá sau campaign hoặc giá gốc
+  originalUnitPrice?: number // Giá gốc
+  totalPrice: number     // quantity * unitPrice
+  campaignId?: ObjectId  // Campaign ID
   prescriptionRequired: boolean
   image?: string
 }
@@ -47,6 +49,10 @@ export interface OrderType {
   trackingNumber?: string
   estimatedDeliveryDate?: string
 
+  // Loyalty points
+  pointsRedeemed?: number      // Số điểm đã đổi
+  pointsRedeemAmount?: number  // Số tiền giảm từ điểm
+
   createdAt?: Date
   updatedAt?: Date
   paidAt?: Date
@@ -76,6 +82,10 @@ export default class Order {
   notes?: string
   trackingNumber?: string
   estimatedDeliveryDate?: string
+
+  // Loyalty points
+  pointsRedeemed?: number
+  pointsRedeemAmount?: number
 
   createdAt?: Date
   updatedAt?: Date
@@ -107,6 +117,8 @@ export default class Order {
     this.notes = order.notes
     this.trackingNumber = order.trackingNumber
     this.estimatedDeliveryDate = order.estimatedDeliveryDate
+    this.pointsRedeemed = order.pointsRedeemed || 0
+    this.pointsRedeemAmount = order.pointsRedeemAmount || 0
 
     this.createdAt = order.createdAt || date
     this.updatedAt = order.updatedAt || date
