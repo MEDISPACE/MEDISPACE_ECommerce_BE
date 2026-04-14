@@ -106,7 +106,14 @@ class CartService {
   }
 
   // Add item to cart
-  async addItemToCart(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string, requestedUnit?: string, requestedPrice?: number) {
+  async addItemToCart(
+    productId: ObjectId,
+    quantity: number,
+    userId?: ObjectId,
+    sessionId?: string,
+    requestedUnit?: string,
+    requestedPrice?: number
+  ) {
     // Verify product exists and get details
     const product = await productsService.getProductById(productId.toString())
     if (!product) {
@@ -188,7 +195,13 @@ class CartService {
   }
 
   // Update item quantity
-  async updateItemQuantity(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string, unit?: string) {
+  async updateItemQuantity(
+    productId: ObjectId,
+    quantity: number,
+    userId?: ObjectId,
+    sessionId?: string,
+    unit?: string
+  ) {
     if (quantity < 1 || quantity > 10) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
@@ -416,12 +429,12 @@ class CartService {
           ...item,
           product: product
             ? {
-              _id: product._id,
-              name: product.name,
-              sku: product.sku,
-              featuredImage: product.featuredImage,
-              requiresPrescription: product.requiresPrescription
-            }
+                _id: product._id,
+                name: product.name,
+                sku: product.sku,
+                featuredImage: product.featuredImage,
+                requiresPrescription: product.requiresPrescription
+              }
             : null
         }
       })

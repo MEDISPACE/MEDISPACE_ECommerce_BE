@@ -173,10 +173,7 @@ class CategoriesService {
       filter.isActive = true
     }
 
-    const categories = await databaseService.categories
-      .find(filter)
-      .sort({ level: 1, sortOrder: 1, name: 1 })
-      .toArray()
+    const categories = await databaseService.categories.find(filter).sort({ level: 1, sortOrder: 1, name: 1 }).toArray()
 
     // Build tree structure
     const categoryMap = new Map()
@@ -220,7 +217,6 @@ class CategoriesService {
     }
     return category
   }
-
 
   // Lấy chi tiết category theo slug
   async getCategoryBySlug(slug: string) {
@@ -290,7 +286,10 @@ class CategoriesService {
     }
 
     // Remove fields that should not be updated
-    const { _id, children, productCount, createdAt, level, path, ...allowedPayload } = payload as Record<string, unknown>
+    const { _id, children, productCount, createdAt, level, path, ...allowedPayload } = payload as Record<
+      string,
+      unknown
+    >
 
     const updateData: Record<string, unknown> = {
       ...allowedPayload,

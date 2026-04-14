@@ -38,13 +38,16 @@ export enum PaymentMethod {
   COD = 'cod',
   BankTransfer = 'bank_transfer',
   VNPay = 'vnpay',
-  PayOS = 'payos'
+  PayOS = 'payos',
+  Cash = 'cash',
+  CreditCard_POS = 'credit_card_pos'
 }
 
 export enum ShippingMethod {
   Standard = 'standard',
   Fast = 'fast',
-  Express = 'express'
+  Express = 'express',
+  InStore = 'instore'
 }
 
 export enum ReviewStatus {

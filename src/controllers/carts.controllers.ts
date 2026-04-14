@@ -90,7 +90,10 @@ export const updateCartItemUnitController = async (
 }
 
 // Remove item from cart
-export const removeCartItemController = async (req: Request<ParamsDictionary, unknown, unknown, { unit?: string }>, res: Response) => {
+export const removeCartItemController = async (
+  req: Request<ParamsDictionary, unknown, unknown, { unit?: string }>,
+  res: Response
+) => {
   const { userId, sessionId } = getUserAndSession(req)
   const { productId } = req.params as { productId: string }
   const { unit } = req.query

@@ -1,5 +1,10 @@
 import { Router } from 'express'
-import { vnpayReturnController, vnpayIpnController, payOSIpnController, payOSReturnController } from '~/controllers/payment.controllers'
+import {
+  vnpayReturnController,
+  vnpayIpnController,
+  payOSIpnController,
+  payOSReturnController
+} from '~/controllers/payment.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const paymentRouter = Router()

@@ -8,6 +8,7 @@ import PatientNote from '~/models/schemas/PatientNote.schema'
 import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
 import prescriptionsService from './prescriptions.services'
 import { hashPassword } from '~/utils/crypto'
+import { ShippingMethod } from '~/constants/enum'
 
 class PharmacistService {
   // Get dashboard statistics
@@ -71,7 +72,7 @@ class PharmacistService {
   // Get recent prescriptions
   async getRecentPrescriptions(limit = 5) {
     const prescriptions = await databaseService.prescriptions
-      .find({ status: 'Pending' })
+      .find({ status: 'pending' })
       .sort({ createdAt: -1 })
       .limit(limit)
       .toArray()
@@ -86,18 +87,22 @@ class PharmacistService {
     return orders
   }
 
-  // Get patient by phone
-  async getPatientByPhone(phone: string) {
-    const user = await databaseService.users.findOne({ phoneNumber: phone })
+  // Search patients by phone or partial name
+  async searchPatients(searchQuery: string) {
+    if (!searchQuery) return []
 
-    if (!user) {
-      throw new ErrorWithStatus({
-        message: PHARMACIST_MESSAGES.PATIENT_NOT_FOUND,
-        status: HTTP_STATUS.NOT_FOUND
+    const users = await databaseService.users
+      .find({
+        $or: [
+          { phoneNumber: { $regex: searchQuery, $options: 'i' } },
+          { firstName: { $regex: searchQuery, $options: 'i' } },
+          { lastName: { $regex: searchQuery, $options: 'i' } }
+        ]
       })
-    }
+      .limit(10)
+      .toArray()
 
-    return user
+    return users
   }
 
   // Get patient history
@@ -261,7 +266,7 @@ class PharmacistService {
     const prescriptions = await databaseService.prescriptions
       .find({
         customerId: customerObjectId,
-        status: 'Verified',
+        status: 'verified',
         verifiedAt: { $gte: dateLimit }
       })
       .sort({ verifiedAt: -1 })
@@ -364,7 +369,10 @@ class PharmacistService {
       }
 
       // Check stock with unit conversion
-      const variant = product.priceVariants?.find((v: any) => v.unit === item.unit) || product.priceVariants?.find((v: any) => v.isDefault) || product.priceVariants?.[0]
+      const variant =
+        product.priceVariants?.find((v: any) => v.unit === item.unit) ||
+        product.priceVariants?.find((v: any) => v.isDefault) ||
+        product.priceVariants?.[0]
       const unitPrice = variant?.price || 0
       const quantityPerUnit = variant?.quantityPerUnit || 1
       const requiredStock = item.quantity * quantityPerUnit
@@ -393,12 +401,24 @@ class PharmacistService {
     }
 
     // Calculate delivery fee based on method
-    const deliveryFees: Record<string, number> = {
-      standard: 0,
-      fast: 15000,
-      express: 25000
+    let shippingFee = 0
+    if (orderData.deliveryMethod === ShippingMethod.InStore) {
+      shippingFee = 0
+    } else {
+      // For standard, fast, express - backend will accept the shippingFee provided by frontend payload if available,
+      // but for now we fallback to standard fees if not provided
+      const deliveryFees: Record<string, number> = {
+        standard: 0,
+        fast: 15000,
+        express: 25000
+      }
+      // If frontend provides an explicit shippingFee we should ideally use it, but since the schema
+      // of orderData in createPharmacistOrder doesn't explicitly accept it yet, we use the fallback or 0
+      shippingFee =
+        (orderData as any).shippingFee !== undefined
+          ? (orderData as any).shippingFee
+          : deliveryFees[orderData.deliveryMethod] || 0
     }
-    const shippingFee = deliveryFees[orderData.deliveryMethod] || 0
 
     // Calculate tax and total
     const taxAmount = Math.round(subtotal * 0.1) // 10% VAT
@@ -409,8 +429,13 @@ class PharmacistService {
     const orderNumber = `DH${Date.now()}${Math.floor(Math.random() * 1000)}`
 
     // Find customer
-    const customer = await databaseService.users.findOne({ phoneNumber: orderData.customerId })
+    // customerId can be empty for anonymous guest in POS
+    const customer = orderData.customerId
+      ? await databaseService.users.findOne({ phoneNumber: orderData.customerId })
+      : null
     const userId = customer ? customer._id : new ObjectId() // If customer not found, create temp ID
+
+    const isInstore = orderData.deliveryMethod === ShippingMethod.InStore
 
     // Create order document
     const order = {
@@ -421,8 +446,8 @@ class PharmacistService {
       itemCount: orderItems.length,
       shippingAddress: orderData.shippingAddress,
       paymentMethod: orderData.paymentMethod,
-      paymentStatus: 'pending',
-      orderStatus: 'pending',
+      paymentStatus: isInstore ? 'paid' : 'pending',
+      orderStatus: isInstore ? 'delivered' : 'pending',
       subtotal,
       taxAmount,
       shippingFee,
@@ -433,7 +458,9 @@ class PharmacistService {
       prescriptionId: orderData.prescriptionId ? new ObjectId(orderData.prescriptionId) : undefined,
       createdBy: pharmacistId, // Track who created this order
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      paidAt: isInstore ? new Date() : undefined,
+      deliveredAt: isInstore ? new Date() : undefined
     }
 
     // Insert order
@@ -524,11 +551,11 @@ class PharmacistService {
       ...order,
       customer: customer
         ? {
-          _id: customer._id,
-          email: customer.email,
-          firstName: customer.firstName,
-          lastName: customer.lastName
-        }
+            _id: customer._id,
+            email: customer.email,
+            firstName: customer.firstName,
+            lastName: customer.lastName
+          }
         : null
     }
   }
@@ -891,19 +918,20 @@ class PharmacistService {
       })
       .toArray()
 
-    const growth = previousPrescriptions.length > 0
-      ? ((currentPrescriptions.length - previousPrescriptions.length) / previousPrescriptions.length) * 100
-      : 0
+    const growth =
+      previousPrescriptions.length > 0
+        ? ((currentPrescriptions.length - previousPrescriptions.length) / previousPrescriptions.length) * 100
+        : 0
 
     // Count by status
     const byStatus: Record<string, number> = {}
-    currentPrescriptions.forEach(p => {
+    currentPrescriptions.forEach((p) => {
       byStatus[p.status] = (byStatus[p.status] || 0) + 1
     })
 
     // Daily breakdown
     const dailyMap = new Map<string, { count: number; verified: number; rejected: number }>()
-    currentPrescriptions.forEach(p => {
+    currentPrescriptions.forEach((p) => {
       const day = p.verifiedAt?.toLocaleDateString('vi-VN', { weekday: 'short' }) || 'Unknown'
       if (!dailyMap.has(day)) {
         dailyMap.set(day, { count: 0, verified: 0, rejected: 0 })
@@ -971,8 +999,8 @@ class PharmacistService {
 
     // Analyze drug categories (simplified - would need product category lookup)
     const drugCategories: Record<string, number> = {}
-    prescriptions.forEach(p => {
-      (p.medications || []).forEach((med: any) => {
+    prescriptions.forEach((p) => {
+      ;(p.medications || []).forEach((med: any) => {
         const category = 'General' // Would need category lookup
         drugCategories[category] = (drugCategories[category] || 0) + 1
       })
@@ -994,7 +1022,7 @@ class PharmacistService {
       'Đêm (0-6h)': 0
     }
 
-    prescriptions.forEach(p => {
+    prescriptions.forEach((p) => {
       const hour = p.verifiedAt?.getHours() || 0
       if (hour >= 6 && hour < 12) timeSlots['Sáng (6-12h)']++
       else if (hour >= 12 && hour < 18) timeSlots['Chiều (12-18h)']++
@@ -1013,9 +1041,7 @@ class PharmacistService {
     return {
       drugCategories: drugCategoriesArray,
       timeSlots: timeSlotsArray,
-      prescriptionTypes: [
-        { type: 'Kê đơn thường', count: prescriptions.length, percentage: 100 }
-      ]
+      prescriptionTypes: [{ type: 'Kê đơn thường', count: prescriptions.length, percentage: 100 }]
     }
   }
 
@@ -1040,7 +1066,7 @@ class PharmacistService {
       .toArray()
 
     const totalPrescriptions = prescriptions.length
-    const verifiedPrescriptions = prescriptions.filter(p => p.status === 'verified').length
+    const verifiedPrescriptions = prescriptions.filter((p) => p.status === 'verified').length
     const completionRate = totalPrescriptions > 0 ? (verifiedPrescriptions / totalPrescriptions) * 100 : 0
 
     // Calculate days in range
@@ -1074,7 +1100,7 @@ class PharmacistService {
   private getDateRanges(timeRange: string) {
     const now = new Date()
     let startDate: Date
-    let endDate = new Date()
+    const endDate = new Date()
     let previousStartDate: Date
     let previousEndDate: Date
 
