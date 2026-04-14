@@ -8,6 +8,7 @@ import { ErrorWithStatus } from '~/models/Error'
 import brandsService from './brands.services'
 import categoriesService from './categories.services'
 import typesenseService from './typesense.services'
+import campaignService from './campaigns.services'
 
 class ProductsService {
   // Generate slug from name
@@ -375,7 +376,7 @@ class ProductsService {
     const endTime = Date.now()
 
     return {
-      products,
+      products: await campaignService.enrichProductsWithCampaigns(products),
       pagination: {
         page,
         limit,
@@ -440,7 +441,7 @@ class ProductsService {
       })
     }
 
-    return products[0]
+    return campaignService.enrichProductWithCampaign(products[0])
   }
 
   // Get product by slug with populated category and brand data
@@ -498,7 +499,7 @@ class ProductsService {
       })
     }
 
-    return products[0]
+    return campaignService.enrichProductWithCampaign(products[0])
   }
 
   // Update product

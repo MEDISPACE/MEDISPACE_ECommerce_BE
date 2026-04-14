@@ -11,6 +11,7 @@ import ReturnRequest, {
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { RETURN_REQUESTS_MESSAGES, ORDERS_MESSAGES } from '~/constants/message'
+import loyaltyService from './loyalty.services'
 
 // Return period in days
 const RETURN_PERIOD_OTC = 7 // 7 days for OTC products
@@ -480,11 +481,22 @@ class ReturnRequestService {
       })
     }
 
-    if (request.status !== ReturnStatus.RECEIVED) {
-      throw new ErrorWithStatus({
-        message: RETURN_REQUESTS_MESSAGES.REFUND_ALREADY_PROCESSED,
-        status: HTTP_STATUS.BAD_REQUEST
-      })
+        // Loyalty: thu hồi điểm khi hoàn trả
+        try {
+            const order = await databaseService.orders.findOne({ _id: request.orderId })
+            if (order) {
+                await loyaltyService.revokePointsForReturn(
+                    request.userId,
+                    request.orderId,
+                    order.totalAmount,
+                    order.orderNumber
+                )
+            }
+        } catch (err) {
+            console.error('Loyalty revoke points error:', err)
+        }
+
+        return await databaseService.returnRequests.findOne({ _id: requestId })
     }
 
     await databaseService.returnRequests.updateOne(
