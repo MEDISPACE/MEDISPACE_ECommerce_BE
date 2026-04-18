@@ -27,7 +27,10 @@ import {
   adminGetConversationsController,
   adminGetConversationMessagesController,
   adminCloseConversationController,
-  adminTransferConversationController
+  adminTransferConversationController,
+  getInventoryStatsController,
+  getInventoryProductsController,
+  updateProductStockController
 } from '~/controllers/admin.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -239,8 +242,6 @@ adminRouter.patch(
   wrapRequestHandler(updateOrderStatusController)
 )
 
-export default adminRouter
-
 // ==================== CHAT MANAGEMENT ====================
 
 // GET /admin/chats/stats
@@ -425,3 +426,51 @@ adminRouter.get(
   adminRequired,
   wrapRequestHandler(getCustomerAnalyticsController)
 )
+
+// ==================== INVENTORY MANAGEMENT ====================
+
+/**
+ * Description: Get inventory statistics
+ * Path: /admin/inventory/stats
+ * Method: GET
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+  '/inventory/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getInventoryStatsController)
+)
+
+/**
+ * Description: Get inventory products
+ * Path: /admin/inventory/products
+ * Method: GET
+ * Query: { page, limit, stockFilter, search, sortBy, sortOrder }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+  '/inventory/products',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getInventoryProductsController)
+)
+
+/**
+ * Description: Update product stock
+ * Path: /admin/inventory/:productId/stock
+ * Method: PATCH
+ * Body: { stockQuantity: number }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.patch(
+  '/inventory/:productId/stock',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(updateProductStockController)
+)
+
+export default adminRouter
