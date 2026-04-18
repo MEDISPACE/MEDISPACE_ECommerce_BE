@@ -1,6 +1,8 @@
 import { Request, Response } from 'express'
 import { ParamsDictionary } from 'express-serve-static-core'
 import { ObjectId } from 'mongodb'
+import axios from 'axios'
+import FormData from 'form-data'
 import { UserRole } from '~/constants/enum'
 import { TokenPayload } from '~/models/requests/User.request'
 import {
@@ -124,5 +126,75 @@ export const getPrescriptionStatsController = async (req: Request, res: Response
     })
   } catch (error) {
     throw error
+  }
+}
+
+// ★ Scan prescription via OCR Service proxy
+const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8001'
+
+export const scanPrescriptionController = async (req: Request, res: Response) => {
+  try {
+    const { imageUrl } = req.body as { imageUrl: string }
+
+    if (!imageUrl) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'imageUrl is required'
+      })
+    }
+
+    // 1. Download image from the URL (e.g. S3)
+    const imageResponse = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000
+    })
+
+    const contentType = imageResponse.headers['content-type'] || 'image/jpeg'
+    const buffer = Buffer.from(imageResponse.data as ArrayBuffer)
+
+    // Determine file extension from content-type
+    const extMap: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp'
+    }
+    const ext = extMap[contentType] || 'jpg'
+
+    // 2. Forward to OCR service as multipart upload
+    const formData = new FormData()
+    formData.append('file', buffer, {
+      filename: `prescription.${ext}`,
+      contentType: contentType
+    })
+
+    const ocrResponse = await axios.post(
+      `${OCR_SERVICE_URL}/api/ocr/extract-prescription`,
+      formData,
+      {
+        headers: formData.getHeaders(),
+        timeout: 150000, // OCR + LLM can take up to ~50s
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      }
+    )
+
+    return res.status(HTTP_STATUS.OK).json({
+      message: 'Prescription scanned successfully',
+      result: ocrResponse.data
+    })
+  } catch (error: any) {
+    console.error('[scanPrescription] Error:', error?.message || error)
+
+    // Forward OCR service errors
+    if (error?.response?.data) {
+      return res.status(error.response.status || HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+        message: 'OCR service error',
+        detail: error.response.data
+      })
+    }
+
+    return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      message: 'Failed to scan prescription',
+      detail: error?.message || 'Unknown error'
+    })
   }
 }
