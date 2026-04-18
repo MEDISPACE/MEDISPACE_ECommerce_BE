@@ -1697,6 +1697,180 @@ class AdminService {
 
     return { startDate, endDate, previousStartDate, previousEndDate }
   }
+
+  // ==================== INVENTORY MANAGEMENT ====================
+
+  /**
+   * Get inventory statistics
+   */
+  async getInventoryStats() {
+    const LOW_STOCK_THRESHOLD = 10
+
+    const [total, active, outOfStock, lowStock, totalValueResult] = await Promise.all([
+      databaseService.products.countDocuments(),
+      databaseService.products.countDocuments({ isActive: true, stockQuantity: { $gt: 0 } }),
+      databaseService.products.countDocuments({ stockQuantity: { $lte: 0 } }),
+      databaseService.products.countDocuments({ stockQuantity: { $gt: 0, $lte: LOW_STOCK_THRESHOLD } }),
+      databaseService.products
+        .aggregate([
+          {
+            $project: {
+              value: {
+                $multiply: [
+                  '$stockQuantity',
+                  { $ifNull: [{ $arrayElemAt: ['$priceVariants.price', 0] }, 0] }
+                ]
+              }
+            }
+          },
+          { $group: { _id: null, totalValue: { $sum: '$value' } } }
+        ])
+        .toArray()
+    ])
+
+    return {
+      total,
+      active,
+      outOfStock,
+      lowStock,
+      totalValue: totalValueResult[0]?.totalValue || 0,
+      lowStockThreshold: LOW_STOCK_THRESHOLD
+    }
+  }
+
+  /**
+   * Get inventory products with pagination and stock filters
+   */
+  async getInventoryProducts(params: {
+    page?: number
+    limit?: number
+    stockFilter?: string // 'all' | 'inStock' | 'lowStock' | 'outOfStock'
+    search?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  }) {
+    const LOW_STOCK_THRESHOLD = 10
+    const page = params.page || 1
+    const limit = params.limit || 20
+    const skip = (page - 1) * limit
+
+    const filter: Record<string, unknown> = {}
+
+    // Stock filter
+    switch (params.stockFilter) {
+      case 'inStock':
+        filter.stockQuantity = { $gt: LOW_STOCK_THRESHOLD }
+        break
+      case 'lowStock':
+        filter.stockQuantity = { $gt: 0, $lte: LOW_STOCK_THRESHOLD }
+        break
+      case 'outOfStock':
+        filter.stockQuantity = { $lte: 0 }
+        break
+      // 'all' or undefined — no filter
+    }
+
+    // Search filter
+    if (params.search) {
+      filter.$or = [
+        { name: { $regex: params.search, $options: 'i' } },
+        { sku: { $regex: params.search, $options: 'i' } },
+        { barcode: { $regex: params.search, $options: 'i' } }
+      ]
+    }
+
+    const sortBy = params.sortBy || 'stockQuantity'
+    const sortOrder = params.sortOrder === 'desc' ? -1 : 1
+
+    const [products, total] = await Promise.all([
+      databaseService.products
+        .aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'categoryId',
+              foreignField: '_id',
+              as: 'category',
+              pipeline: [{ $project: { _id: 1, name: 1 } }]
+            }
+          },
+          {
+            $lookup: {
+              from: 'brands',
+              localField: 'brandId',
+              foreignField: '_id',
+              as: 'brand',
+              pipeline: [{ $project: { _id: 1, name: 1 } }]
+            }
+          },
+          {
+            $addFields: {
+              category: { $arrayElemAt: ['$category', 0] },
+              brand: { $arrayElemAt: ['$brand', 0] }
+            }
+          },
+          {
+            $project: {
+              _id: 1,
+              name: 1,
+              sku: 1,
+              barcode: 1,
+              featuredImage: 1,
+              stockQuantity: 1,
+              status: 1,
+              isActive: 1,
+              priceVariants: 1,
+              category: 1,
+              brand: 1,
+              updatedAt: 1
+            }
+          },
+          { $sort: { [sortBy]: sortOrder } },
+          { $skip: skip },
+          { $limit: limit }
+        ])
+        .toArray(),
+      databaseService.products.countDocuments(filter)
+    ])
+
+    return {
+      products,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    }
+  }
+
+  /**
+   * Update product stock quantity
+   */
+  async updateProductStock(productId: string, stockQuantity: number) {
+    if (stockQuantity < 0) {
+      throw new Error('Stock quantity cannot be negative')
+    }
+
+    const result = await databaseService.products.findOneAndUpdate(
+      { _id: new ObjectId(productId) },
+      {
+        $set: {
+          stockQuantity,
+          status: stockQuantity === 0 ? 'out_of_stock' : 'active',
+          updatedAt: new Date()
+        }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!result) {
+      throw new Error('Product not found')
+    }
+
+    return result
+  }
 }
 
 const adminService = new AdminService()

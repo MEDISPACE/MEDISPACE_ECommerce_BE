@@ -645,3 +645,75 @@ export const adminTransferConversationController = async (req: Request, res: Res
     next(error)
   }
 }
+
+// ==================== INVENTORY MANAGEMENT ====================
+
+/**
+ * Get inventory statistics
+ * Path: /admin/inventory/stats
+ * Method: GET
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const getInventoryStatsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await adminService.getInventoryStats()
+    return res.json({
+      message: 'Lấy thống kê tồn kho thành công',
+      result
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Get inventory products
+ * Path: /admin/inventory/products
+ * Method: GET
+ * Query: { page, limit, stockFilter, search, sortBy, sortOrder }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const getInventoryProductsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await adminService.getInventoryProducts({
+      page: req.query.page ? parseInt(req.query.page as string) : undefined,
+      limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
+      stockFilter: req.query.stockFilter as string,
+      search: req.query.search as string,
+      sortBy: req.query.sortBy as string,
+      sortOrder: req.query.sortOrder as 'asc' | 'desc'
+    })
+    return res.json({
+      message: 'Lấy danh sách tồn kho thành công',
+      result
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Update product stock
+ * Path: /admin/inventory/:productId/stock
+ * Method: PATCH
+ * Body: { stockQuantity: number }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+export const updateProductStockController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { productId } = req.params
+    const { stockQuantity } = req.body
+
+    if (stockQuantity === undefined || stockQuantity === null) {
+      return res.status(400).json({ message: 'stockQuantity là bắt buộc' })
+    }
+
+    const result = await adminService.updateProductStock(productId as string, parseInt(stockQuantity))
+    return res.json({
+      message: 'Cập nhật tồn kho thành công',
+      result
+    })
+  } catch (error) {
+    next(error)
+  }
+}
