@@ -9,6 +9,10 @@ import brandsService from './brands.services'
 import categoriesService from './categories.services'
 import typesenseService from './typesense.services'
 import campaignService from './campaigns.services'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
+
+const LOW_STOCK_THRESHOLD = 30
 
 class ProductsService {
   // Generate slug from name
@@ -625,6 +629,19 @@ class ProductsService {
 
     // Sync to Typesense (fire-and-forget) — cập nhật inStock & stockQuantity
     typesenseService.indexProduct(updated).catch(() => {})
+
+    // Low-stock alert: cảnh báo admin nếu tồn kho sau khi cập nhật ≤ 30 (fire-and-forget)
+    if (quantity <= LOW_STOCK_THRESHOLD) {
+      try {
+        const io = getIO()
+        notificationService.notifyLowStock(
+          new ObjectId(productId),
+          (updated as unknown as { name: string }).name,
+          quantity,
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
+    }
 
     return updated
   }

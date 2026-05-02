@@ -91,6 +91,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         if (socket.userRole === 'pharmacist') {
           socket.join('pharmacists')
         }
+        if (socket.userRole === 'admin') {
+          socket.join('admins')
+        }
       }
     })
 

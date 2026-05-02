@@ -4,6 +4,8 @@ import User from '~/models/schemas/User.schema'
 import { hashPassword } from '~/utils/crypto'
 import { UserRole, UserStatus } from '~/constants/enum'
 import { config } from 'dotenv'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 config()
 
@@ -1700,17 +1702,21 @@ class AdminService {
 
   // ==================== INVENTORY MANAGEMENT ====================
 
+  /** Ngưỡng cảnh báo sắp hết hàng (đơn vị nhỏ nhất) */
+  static readonly LOW_STOCK_THRESHOLD = 10
+
   /**
    * Get inventory statistics
    */
   async getInventoryStats() {
-    const LOW_STOCK_THRESHOLD = 10
+    const LOW_STOCK_THRESHOLD = AdminService.LOW_STOCK_THRESHOLD
 
     const [total, active, outOfStock, lowStock, totalValueResult] = await Promise.all([
       databaseService.products.countDocuments(),
       databaseService.products.countDocuments({ isActive: true, stockQuantity: { $gt: 0 } }),
       databaseService.products.countDocuments({ stockQuantity: { $lte: 0 } }),
       databaseService.products.countDocuments({ stockQuantity: { $gt: 0, $lte: LOW_STOCK_THRESHOLD } }),
+      // Fix: dùng giá của đơn vị nhỏ nhất (quantityPerUnit===1) hoặc isDefault để tính giá trị kho chính xác
       databaseService.products
         .aggregate([
           {
@@ -1718,7 +1724,47 @@ class AdminService {
               value: {
                 $multiply: [
                   '$stockQuantity',
-                  { $ifNull: [{ $arrayElemAt: ['$priceVariants.price', 0] }, 0] }
+                  {
+                    $ifNull: [
+                      // Ưu tiên 1: variant có quantityPerUnit === 1 (đơn vị cơ sở)
+                      {
+                        $let: {
+                          vars: {
+                            baseVariant: {
+                              $first: {
+                                $filter: {
+                                  input: { $ifNull: ['$priceVariants', []] },
+                                  as: 'v',
+                                  cond: { $eq: ['$$v.quantityPerUnit', 1] }
+                                }
+                              }
+                            }
+                          },
+                          in: '$$baseVariant.price'
+                        }
+                      },
+                      // Ưu tiên 2: variant isDefault
+                      {
+                        $let: {
+                          vars: {
+                            defaultVariant: {
+                              $first: {
+                                $filter: {
+                                  input: { $ifNull: ['$priceVariants', []] },
+                                  as: 'v',
+                                  cond: { $eq: ['$$v.isDefault', true] }
+                                }
+                              }
+                            }
+                          },
+                          in: '$$defaultVariant.price'
+                        }
+                      },
+                      // Fallback: variant đầu tiên
+                      { $arrayElemAt: ['$priceVariants.price', 0] },
+                      0
+                    ]
+                  }
                 ]
               }
             }
@@ -1749,7 +1795,7 @@ class AdminService {
     sortBy?: string
     sortOrder?: 'asc' | 'desc'
   }) {
-    const LOW_STOCK_THRESHOLD = 10
+    const LOW_STOCK_THRESHOLD = AdminService.LOW_STOCK_THRESHOLD
     const page = params.page || 1
     const limit = params.limit || 20
     const skip = (page - 1) * limit
@@ -1846,10 +1892,52 @@ class AdminService {
   }
 
   /**
-   * Update product stock quantity
+   * Update product stock quantity.
+   * Hỗ trợ 2 mode:
+   * - Absolute mode (mặc định): truyền `stockQuantity` trực tiếp
+   * - Unit mode: truyền `unit` + `quantityInput` để hệ thống tự quy đổi
+   *   VD: unit='Hộp', quantityInput=5 → nếu 1 Hộp = 30 Viên → stockQuantity += 5×30
+   *   adjustment='add' | 'subtract' | 'set' (mặc định 'set')
    */
-  async updateProductStock(productId: string, stockQuantity: number) {
-    if (stockQuantity < 0) {
+  async updateProductStock(
+    productId: string,
+    stockQuantity: number,
+    options?: {
+      unit?: string
+      quantityInput?: number
+      adjustment?: 'add' | 'subtract' | 'set'
+    }
+  ) {
+    // Fetch current product to resolve priceVariants
+    const product = await databaseService.products.findOne({ _id: new ObjectId(productId) })
+    if (!product) {
+      throw new Error('Product not found')
+    }
+
+    let finalStock: number
+
+    if (options?.unit && options?.quantityInput !== undefined) {
+      // Unit mode: tìm quantityPerUnit cho đơn vị được chọn, rồi quy đổi
+      const variant = (product.priceVariants as Array<{ unit: string; quantityPerUnit?: number }> | undefined)
+        ?.find((v) => v.unit === options.unit)
+      const quantityPerUnit = variant?.quantityPerUnit || 1
+      const baseUnitAmount = options.quantityInput * quantityPerUnit
+
+      const adjustment = options.adjustment || 'set'
+      if (adjustment === 'add') {
+        finalStock = (product.stockQuantity || 0) + baseUnitAmount
+      } else if (adjustment === 'subtract') {
+        finalStock = (product.stockQuantity || 0) - baseUnitAmount
+      } else {
+        // 'set' — đặt thẳng giá trị, nhưng đơn vị đang được chọn → vẫn quy đổi
+        finalStock = baseUnitAmount
+      }
+    } else {
+      // Absolute mode: dùng stockQuantity trực tiếp
+      finalStock = stockQuantity
+    }
+
+    if (finalStock < 0) {
       throw new Error('Stock quantity cannot be negative')
     }
 
@@ -1857,8 +1945,8 @@ class AdminService {
       { _id: new ObjectId(productId) },
       {
         $set: {
-          stockQuantity,
-          status: stockQuantity === 0 ? 'out_of_stock' : 'active',
+          stockQuantity: finalStock,
+          status: finalStock === 0 ? 'out_of_stock' : 'active',
           updatedAt: new Date()
         }
       },
@@ -1867,6 +1955,20 @@ class AdminService {
 
     if (!result) {
       throw new Error('Product not found')
+    }
+
+    // Low-stock alert: cảnh báo admin nếu tồn kho sau cập nhật ≤ 30 (fire-and-forget)
+    const NOTIFICATION_LOW_STOCK_THRESHOLD = 30
+    if (finalStock <= NOTIFICATION_LOW_STOCK_THRESHOLD) {
+      try {
+        const io = getIO()
+        notificationService.notifyLowStock(
+          result._id!,
+          result.name,
+          finalStock,
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
     }
 
     return result

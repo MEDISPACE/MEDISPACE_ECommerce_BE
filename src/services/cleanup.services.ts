@@ -163,6 +163,7 @@ class CleanupService {
     this.startCartCleanup()
     this.startAbandonedOrderCleanup()
     this.startExpiredPrescriptionCleanup()
+    this.startStaleConversationReassign() // Fix: was defined but never called
   }
 
   // Cleanup expired prescriptions - runs daily at midnight
