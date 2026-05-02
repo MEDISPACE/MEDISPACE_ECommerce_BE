@@ -23,6 +23,7 @@ import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
 import Campaign from '~/models/schemas/Campaign.schema'
 import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
 import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
+import Notification from '~/models/schemas/Notification.schema'
 
 config()
 
@@ -110,6 +111,11 @@ class DatabaseService {
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, orderId: 1, type: 1 })
       await safeCreateIndex(this.loyaltyTransactions, { type: 1, isExpired: 1, expiresAt: 1 })
 
+      // Notifications collection indexes
+      await safeCreateIndex(this.notifications, { userId: 1, isRead: 1, createdAt: -1 })
+      await safeCreateIndex(this.notifications, { userId: 1, targetRole: 1, createdAt: -1 })
+      await safeCreateIndex(this.notifications, { targetRole: 1, createdAt: -1 })
+
     } catch (error) {
       // Silent - indexes may already exist
     }
@@ -182,6 +188,9 @@ class DatabaseService {
   }
   get loyaltyTransactions(): Collection<LoyaltyTransaction> {
     return this.db.collection(process.env.DB_LOYALTY_TRANSACTIONS_COLLECTION as string)
+  }
+  get notifications(): Collection<Notification> {
+    return this.db.collection('notifications')
   }
 }
 

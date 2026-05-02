@@ -13,6 +13,8 @@ import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 import couponService from './coupons.services'
 import loyaltyService from './loyalty.services'
 import campaignsService from './campaigns.services'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 class OrderService {
   // Create order from cart
@@ -311,18 +313,46 @@ class OrderService {
 
     const result = await databaseService.orders.insertOne(order)
 
-    // Deduct stock for each order item
+    // Deduct stock for each order item (atomic update to prevent race condition / stock going negative)
     for (const item of orderItems) {
-      // Find the quantityPerUnit for this unit from the product
       const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
       if (product) {
         const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
         const quantityPerUnit = variant?.quantityPerUnit || 1
         const stockToDeduct = item.quantity * quantityPerUnit
-        await databaseService.products.updateOne(
-          { _id: new ObjectId(item.productId) },
+
+        // Atomic: chỉ trừ khi tồn kho >= stockToDeduct (tránh stock âm do race condition)
+        const deductResult = await databaseService.products.updateOne(
+          { _id: new ObjectId(item.productId), stockQuantity: { $gte: stockToDeduct } },
           { $inc: { stockQuantity: -stockToDeduct } }
         )
+
+        if (deductResult.modifiedCount === 0) {
+          // Stock không đủ (do concurrent order) — roll back đơn hàng và thông báo
+          await databaseService.orders.deleteOne({ _id: result.insertedId })
+          throw new ErrorWithStatus({
+            message: `Sản phẩm "${item.name}" vừa hết hàng. Vui lòng kiểm tra lại giỏ hàng.`,
+            status: HTTP_STATUS.CONFLICT
+          })
+        }
+
+        // Low-stock alert: check tồn kho sau khi trừ, cảnh báo nếu ≤ 30 (fire-and-forget)
+        const LOW_STOCK_THRESHOLD = 30
+        const updatedProduct = await databaseService.products.findOne(
+          { _id: new ObjectId(item.productId) },
+          { projection: { _id: 1, name: 1, stockQuantity: 1 } }
+        )
+        if (updatedProduct && updatedProduct.stockQuantity <= LOW_STOCK_THRESHOLD) {
+          try {
+            const io = getIO()
+            notificationService.notifyLowStock(
+              updatedProduct._id!,
+              updatedProduct.name,
+              updatedProduct.stockQuantity,
+              io
+            ).catch(() => {})
+          } catch { /* socket not ready */ }
+        }
       }
     }
 
@@ -376,6 +406,47 @@ class OrderService {
         ).catch(() => { /* silent */ })
       }
     }
+
+    // Notify all admins about new order (fire-and-forget)
+    try {
+      const io = getIO()
+      notificationService.notifyNewOrderToAdmin(orderNumber, totalAmount, io).catch(() => {})
+    } catch { /* socket not ready */ }
+
+    // Notify customer that their order was placed successfully (fire-and-forget)
+    try {
+      const io = getIO()
+      const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
+      notificationService.createAndPush(
+        {
+          userId,
+          type: 'order' as any,
+          title: 'Đặt hàng thành công! 🎉',
+          message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
+          actionUrl: '/account/orders',
+          metadata: { orderNumber, totalAmount },
+          targetRole: 'customer',
+        },
+        io
+      ).catch(() => {})
+    } catch { /* socket not ready */ }
+
+    // Notify all pharmacists about new order to prepare (fire-and-forget)
+    try {
+      const io = getIO()
+      const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
+      notificationService.broadcastToRole(
+        'pharmacist',
+        {
+          type: 'order' as any,
+          title: 'Đơn hàng mới cần chuẩn bị',
+          message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
+          actionUrl: '/pharmacist/orders',
+          metadata: { orderNumber, totalAmount },
+        },
+        io
+      ).catch(() => {})
+    } catch { /* socket not ready */ }
 
     return {
       order: { ...order, _id: result.insertedId },
@@ -516,7 +587,23 @@ class OrderService {
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
 
-    return await databaseService.orders.findOne({ _id: orderId })
+    const updatedOrder = await databaseService.orders.findOne({ _id: orderId })
+
+    // Notify customer about order status change (fire-and-forget)
+    if (updatedOrder && order.userId) {
+      try {
+        const io = getIO()
+        notificationService.notifyOrderStatusChange(
+          order.userId,
+          orderId,
+          order.orderNumber,
+          newStatus,
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
+    }
+
+    return updatedOrder
   }
 
   // Update payment status
