@@ -1,0 +1,132 @@
+# =====================================================
+# MEDISPACE - Docker Compose
+# Đặt trong: MEDISPACE_ECommerce_BE/
+# Chạy: docker compose up --build -d
+# Services: backend, frontend, ocr-service, ml-service, typesense
+# =====================================================
+
+services:
+
+  # ── Backend (Node.js / Express / TypeScript) ──────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medispace-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: 8108
+      OCR_SERVICE_URL: http://ocr-service:8001
+      ML_SERVICE_URL: http://ml-service:8002
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      typesense:
+        condition: service_started
+      ocr-service:
+        condition: service_started
+      ml-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - medispace-net
+
+  # ── Frontend (React / Vite → Nginx) ──────────────────────────────────────
+  frontend:
+    build:
+      context: ../MEDISPACE_ECommerce_FE
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
+        VITE_GOOGLE_REDIRECT_URI: ${VITE_GOOGLE_REDIRECT_URI}
+    container_name: medispace-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - medispace-net
+
+  # ── OCR Service (Python / FastAPI / PaddleOCR + VietOCR) ─────────────────
+  # Đã chuyển sang repo mới: MEDISPACE_Python_Services/MEDISPACE_OCR_Service
+  ocr-service:
+    build:
+      context: ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service
+      dockerfile: Dockerfile
+    container_name: medispace-ocr
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service/.env
+    volumes:
+      - ocr-paddle-models:/root/.paddleocr
+      - ocr-vietocr-models:/root/.cache/vietocr
+      - ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service/logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ── ML Recommendation Service (Python / FastAPI / scikit-learn) ──────────
+  ml-service:
+    build:
+      context: ../MEDISPACE_Python_Services/MEDISPACE_ML_Service
+      dockerfile: Dockerfile
+    container_name: medispace-ml
+    ports:
+      - "8002:8002"
+    env_file:
+      - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/.env
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── Typesense (Search Engine) ─────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:27.1
+    container_name: medispace-typesense
+    ports:
+      - "7700:8108"
+    volumes:
+      - ../typesense-data:/data
+    environment:
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-medispace-ts-secret}
+      TYPESENSE_DATA_DIR: /data
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8108/health | grep -q ok || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  ocr-paddle-models:
+    driver: local
+  ocr-vietocr-models:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  medispace-net:
+    driver: bridge
