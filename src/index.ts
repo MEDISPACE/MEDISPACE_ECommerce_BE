@@ -28,6 +28,7 @@ import searchRouter from './routes/search.routes'
 import couponsRouter from './routes/coupons.routes'
 import campaignsRouter from './routes/campaigns.routes'
 import loyaltyRouter from './routes/loyalty.routes'
+import recommendationsRouter from './routes/recommendations.routes'
 import typesenseService from './services/typesense.services'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
@@ -82,6 +83,7 @@ app.use('/search', searchRouter)
 app.use('/coupons', couponsRouter)
 app.use('/campaigns', campaignsRouter)
 app.use('/loyalty', loyaltyRouter)
+app.use('/recommendations', recommendationsRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
