@@ -1,0 +1,114 @@
+# =====================================================
+# MEDISPACE - Docker Compose
+# Đặt trong: MEDISPACE_ECommerce_BE/
+# Chạy: docker compose up --build -d
+# Services: backend, frontend, ocr-service, typesense
+# =====================================================
+
+services:
+
+  # ── Backend (Node.js / Express / TypeScript) ──────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medispace-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: 8108
+      OCR_SERVICE_URL: http://ocr-service:8001
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      typesense:
+        condition: service_started
+      ocr-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Frontend (React / Vite → Nginx) ──────────────────────────────────────
+  frontend:
+    build:
+      context: ../MEDISPACE_ECommerce_FE
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
+        VITE_GOOGLE_REDIRECT_URI: ${VITE_GOOGLE_REDIRECT_URI}
+    container_name: medispace-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - medispace-net
+
+  # ── OCR Service (Python / FastAPI / PaddleOCR + VietOCR) ─────────────────
+  ocr-service:
+    build:
+      context: ../MEDISPACE-OCR-Service
+      dockerfile: Dockerfile
+    container_name: medispace-ocr
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../MEDISPACE-OCR-Service/.env
+    volumes:
+      - ocr-paddle-models:/root/.paddleocr
+      - ocr-vietocr-models:/root/.cache/vietocr
+      - ../MEDISPACE-OCR-Service/logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ── Typesense (Search Engine) ─────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:27.1
+    container_name: medispace-typesense
+    ports:
+      - "7700:8108"
+    volumes:
+      - ../typesense-data:/data
+    environment:
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-medispace-ts-secret}
+      TYPESENSE_DATA_DIR: /data
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8108/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  ocr-paddle-models:
+    driver: local
+  ocr-vietocr-models:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  medispace-net:
+    driver: bridge
