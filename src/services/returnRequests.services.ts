@@ -12,6 +12,8 @@ import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { RETURN_REQUESTS_MESSAGES, ORDERS_MESSAGES } from '~/constants/message'
 import loyaltyService from './loyalty.services'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 // Return period in days
 const RETURN_PERIOD_OTC = 7 // 7 days for OTC products
@@ -230,6 +232,28 @@ class ReturnRequestService {
 
     const result = await databaseService.returnRequests.insertOne(returnRequest)
 
+    // Notify all admins about new return request (fire-and-forget)
+    try {
+      const io = getIO()
+      notificationService.notifyNewReturnRequestToAdmin(returnRequest.requestNumber, io).catch(() => {})
+    } catch { /* socket not ready */ }
+
+    // Notify all pharmacists about new return request (fire-and-forget)
+    try {
+      const io = getIO()
+      notificationService.broadcastToRole(
+        'pharmacist',
+        {
+          type: 'system' as any,
+          title: 'Yêu cầu hoàn hàng mới',
+          message: `Yêu cầu hoàn hàng ${returnRequest.requestNumber} vừa được tạo và cần xem xét.`,
+          actionUrl: '/pharmacist/returns',
+          metadata: { requestNumber: returnRequest.requestNumber },
+        },
+        io
+      ).catch(() => {})
+    } catch { /* socket not ready */ }
+
     return {
       ...returnRequest,
       _id: result.insertedId
@@ -380,7 +404,23 @@ class ReturnRequestService {
 
     await databaseService.returnRequests.updateOne({ _id: requestId }, { $set: updateData })
 
-    return await databaseService.returnRequests.findOne({ _id: requestId })
+    const updatedRequest = await databaseService.returnRequests.findOne({ _id: requestId })
+
+    // Notify customer about return request status (fire-and-forget)
+    if (request.userId) {
+      try {
+        const io = getIO()
+        notificationService.notifyReturnRequestStatus(
+          request.userId,
+          requestId,
+          request.requestNumber,
+          payload.status,
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
+    }
+
+    return updatedRequest
   }
 
   /**

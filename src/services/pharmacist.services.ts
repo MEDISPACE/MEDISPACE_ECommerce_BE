@@ -9,6 +9,8 @@ import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
 import prescriptionsService from './prescriptions.services'
 import { hashPassword } from '~/utils/crypto'
 import { ShippingMethod } from '~/constants/enum'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 class PharmacistService {
   // Get dashboard statistics
@@ -466,12 +468,30 @@ class PharmacistService {
     // Insert order
     const result = await databaseService.orders.insertOne(order as any)
 
-    // Update product stock
+    // Update product stock + low-stock alert
+    const LOW_STOCK_THRESHOLD = 30
     for (const item of orderData.items) {
       await databaseService.products.updateOne(
         { _id: new ObjectId(item.productId) },
         { $inc: { stockQuantity: -item.quantity } }
       )
+
+      // Check tồn kho sau khi trừ, cảnh báo nếu ≤ 30 (fire-and-forget)
+      const updatedProduct = await databaseService.products.findOne(
+        { _id: new ObjectId(item.productId) },
+        { projection: { _id: 1, name: 1, stockQuantity: 1 } }
+      )
+      if (updatedProduct && updatedProduct.stockQuantity <= LOW_STOCK_THRESHOLD) {
+        try {
+          const io = getIO()
+          notificationService.notifyLowStock(
+            updatedProduct._id!,
+            updatedProduct.name,
+            updatedProduct.stockQuantity,
+            io
+          ).catch(() => {})
+        } catch { /* socket not ready */ }
+      }
     }
 
     return {
