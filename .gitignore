@@ -8,3 +8,5 @@ vitest.config.ts
 coverage/
 *.test.ts
 *.spec.ts
+
+note.txt
