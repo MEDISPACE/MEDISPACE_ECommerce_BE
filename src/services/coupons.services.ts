@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb'
 import Coupon, { CouponType } from '~/models/schemas/Coupon.schema'
 import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 
@@ -348,6 +349,7 @@ class CouponService {
     })
 
     const result = await databaseService.coupons.insertOne(coupon as any)
+    await cacheService.invalidate('coupons:*')
     return { ...coupon, _id: result.insertedId }
   }
 
@@ -364,6 +366,7 @@ class CouponService {
       { _id: couponId },
       { $set: { ...updateData, updatedAt: new Date() } }
     )
+    await cacheService.invalidate('coupons:*')
 
     return databaseService.coupons.findOne({ _id: couponId })
   }
@@ -373,6 +376,7 @@ class CouponService {
     if (result.deletedCount === 0) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
     }
+    await cacheService.invalidate('coupons:*')
     return { message: 'Đã xóa mã giảm giá.' }
   }
 
@@ -408,20 +412,21 @@ class CouponService {
     return coupon
   }
 
-  // Lấy danh sách public coupon cho user xem
+  // Lấy danh sách public coupon cho user xem — ✅ CACHED
   async getPublicCoupons() {
-    const now = new Date()
-    // Chỉ filter isPublic + isActive ở DB — date check ở code để tránh BSON mismatch
-    const all = await databaseService.coupons.find({
-      isPublic: true,
-      isActive: true
-    }).sort({ createdAt: -1 }).toArray()
+    return cacheService.getOrSet('coupons:public', async () => {
+      const now = new Date()
+      const all = await databaseService.coupons.find({
+        isPublic: true,
+        isActive: true
+      }).sort({ createdAt: -1 }).toArray()
 
-    return all.filter(c => {
-      const start = new Date(c.startDate)
-      const end = new Date(c.endDate)
-      return now >= start && now <= end
-    })
+      return all.filter(c => {
+        const start = new Date(c.startDate)
+        const end = new Date(c.endDate)
+        return now >= start && now <= end
+      })
+    }, 300) // 5 minutes
   }
 
   async toggleCoupon(couponId: ObjectId) {
@@ -433,6 +438,7 @@ class CouponService {
       { _id: couponId },
       { $set: { isActive: !coupon.isActive, updatedAt: new Date() } }
     )
+    await cacheService.invalidate('coupons:*')
     return { isActive: !coupon.isActive }
   }
 }
