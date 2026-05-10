@@ -1,10 +1,13 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import Category from '~/models/schemas/Category.schema'
 import { CreateCategoryReqBody, UpdateCategoryReqBody, GetCategoriesQuery } from '~/models/requests/Category.request'
 import { ErrorWithStatus } from '~/models/Error'
 import { CATEGORIES_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
+
+const CATEGORY_TTL = 600 // 10 minutes
 
 class CategoriesService {
   // Tạo slug từ name
@@ -113,6 +116,7 @@ class CategoriesService {
     })
 
     await databaseService.categories.insertOne(category)
+    await cacheService.invalidate('categories:*')
     return category
   }
 
@@ -166,38 +170,40 @@ class CategoriesService {
     }
   }
 
-  // Lấy category tree (hierarchical)
+  // Lấy category tree (hierarchical) — ✅ CACHED
   async getCategoryTree({ includeInactive = false }: { includeInactive?: boolean } = {}) {
-    const filter: Record<string, any> = {}
-    if (!includeInactive) {
-      filter.isActive = true
-    }
+    const cacheKey = `categories:tree:${includeInactive}`
 
-    const categories = await databaseService.categories.find(filter).sort({ level: 1, sortOrder: 1, name: 1 }).toArray()
-
-    // Build tree structure
-    const categoryMap = new Map()
-    const rootCategories: Array<Category & { children: Array<Category & { children: unknown[] }> }> = []
-
-    // Tạo map và thêm children array
-    categories.forEach((category) => {
-      categoryMap.set(category._id!.toString(), { ...category, children: [] })
-    })
-
-    // Build tree
-    categories.forEach((category) => {
-      const categoryWithChildren = categoryMap.get(category._id!.toString())
-      if (category.parentId) {
-        const parent = categoryMap.get(category.parentId.toString())
-        if (parent) {
-          parent.children.push(categoryWithChildren)
-        }
-      } else {
-        rootCategories.push(categoryWithChildren)
+    return cacheService.getOrSet(cacheKey, async () => {
+      const filter: Record<string, any> = {}
+      if (!includeInactive) {
+        filter.isActive = true
       }
-    })
 
-    return rootCategories
+      const categories = await databaseService.categories.find(filter).sort({ level: 1, sortOrder: 1, name: 1 }).toArray()
+
+      // Build tree structure
+      const categoryMap = new Map()
+      const rootCategories: Array<Category & { children: Array<Category & { children: unknown[] }> }> = []
+
+      categories.forEach((category) => {
+        categoryMap.set(category._id!.toString(), { ...category, children: [] })
+      })
+
+      categories.forEach((category) => {
+        const categoryWithChildren = categoryMap.get(category._id!.toString())
+        if (category.parentId) {
+          const parent = categoryMap.get(category.parentId.toString())
+          if (parent) {
+            parent.children.push(categoryWithChildren)
+          }
+        } else {
+          rootCategories.push(categoryWithChildren)
+        }
+      })
+
+      return rootCategories
+    }, CATEGORY_TTL)
   }
 
   // Lấy chi tiết category
@@ -307,6 +313,7 @@ class CategoriesService {
     }
 
     await databaseService.categories.updateOne({ _id: new ObjectId(categoryId) }, { $set: updateData })
+    await cacheService.invalidate('categories:*')
 
     return await this.getCategoryById(categoryId)
   }
@@ -324,6 +331,7 @@ class CategoriesService {
         }
       }
     )
+    await cacheService.invalidate('categories:*')
 
     return await this.getCategoryById(categoryId)
   }
@@ -353,6 +361,7 @@ class CategoriesService {
     }
 
     await databaseService.categories.deleteOne({ _id: new ObjectId(categoryId) })
+    await cacheService.invalidate('categories:*')
     return { message: CATEGORIES_MESSAGES.DELETE_CATEGORY_SUCCESS }
   }
 }
