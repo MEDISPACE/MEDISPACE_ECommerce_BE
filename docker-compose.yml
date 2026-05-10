@@ -22,9 +22,12 @@ services:
       TYPESENSE_PORT: 8108
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
+      REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads
     depends_on:
+      redis:
+        condition: service_healthy
       typesense:
         condition: service_started
       ocr-service:
@@ -98,6 +101,24 @@ services:
       retries: 3
       start_period: 60s
 
+  # ── Redis (Cache Layer) ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: medispace-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   # ── Typesense (Search Engine) ─────────────────────────────────────────────
   typesense:
     image: typesense/typesense:27.1
@@ -121,6 +142,8 @@ services:
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
+  redis-data:
+    driver: local
   ocr-paddle-models:
     driver: local
   ocr-vietocr-models:
