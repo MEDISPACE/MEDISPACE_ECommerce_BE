@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8002'
 const ML_TIMEOUT_MS = 3000 // 3s timeout, sau do dung fallback
@@ -144,16 +145,19 @@ class RecommendationsService {
    * Xu huong / ban chay — NMF
    */
   async getTrending(categoryId?: string, limit: number = 12) {
-    const query = categoryId ? `?category_id=${categoryId}&limit=${limit}` : `?limit=${limit}`
-    const data = await callML<{ algorithm: string; products: string[] }>(`/recommend/trending${query}`)
+    const cacheKey = `recommendations:trending:${categoryId || 'all'}:${limit}`
+    return cacheService.getOrSet(cacheKey, async () => {
+      const query = categoryId ? `?category_id=${categoryId}&limit=${limit}` : `?limit=${limit}`
+      const data = await callML<{ algorithm: string; products: string[] }>(`/recommend/trending${query}`)
 
-    if (!data || data.products.length === 0) {
-      const fallback = await getFallbackTrending(limit)
-      return { algorithm: 'fallback_rating', products: fallback }
-    }
+      if (!data || data.products.length === 0) {
+        const fallback = await getFallbackTrending(limit)
+        return { algorithm: 'fallback_rating', products: fallback }
+      }
 
-    const enriched = await enrichProductIds(data.products, limit)
-    return { algorithm: data.algorithm, products: enriched }
+      const enriched = await enrichProductIds(data.products, limit)
+      return { algorithm: data.algorithm, products: enriched }
+    }, 300) // 5 minutes
   }
 
   /**

@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import Product from '~/models/schemas/Product.schema'
 import { CreateProductReqBody, UpdateProductReqBody, GetProductsQuery } from '~/models/requests/Product.request'
 import { PRODUCTS_MESSAGES } from '~/constants/message'
@@ -157,6 +158,16 @@ class ProductsService {
     }
 
     return product
+  }
+
+  /**
+   * Invalidate all product-related caches.
+   * Called after product CRUD operations.
+   */
+  private async invalidateProductCache(slug?: string): Promise<void> {
+    const patterns = ['products:*']
+    if (slug) patterns.push(`products:slug:${slug}`)
+    await cacheService.invalidate(...patterns)
   }
 
   // Get products with pagination and filters
@@ -449,61 +460,64 @@ class ProductsService {
   }
 
   // Get product by slug with populated category and brand data
+  // ✅ CACHED: Product detail by slug (expensive 4-way $lookup)
   async getProductBySlug(slug: string) {
-    const products = await databaseService.products
-      .aggregate([
-        { $match: { slug } },
-        {
-          $lookup: {
-            from: 'categories',
-            localField: 'categoryId',
-            foreignField: '_id',
-            as: 'category'
+    return cacheService.getOrSet(`products:slug:${slug}`, async () => {
+      const products = await databaseService.products
+        .aggregate([
+          { $match: { slug } },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'categoryId',
+              foreignField: '_id',
+              as: 'category'
+            }
+          },
+          {
+            $lookup: {
+              from: 'brands',
+              localField: 'brandId',
+              foreignField: '_id',
+              as: 'brand'
+            }
+          },
+          {
+            $lookup: {
+              from: 'productDetails',
+              localField: '_id',
+              foreignField: 'productId',
+              as: 'details'
+            }
+          },
+          {
+            $lookup: {
+              from: 'productMedia',
+              localField: '_id',
+              foreignField: 'productId',
+              as: 'media'
+            }
+          },
+          {
+            $addFields: {
+              category: { $arrayElemAt: ['$category', 0] },
+              brand: { $arrayElemAt: ['$brand', 0] },
+              details: { $arrayElemAt: ['$details', 0] },
+              media: { $arrayElemAt: ['$media', 0] }
+            }
           }
-        },
-        {
-          $lookup: {
-            from: 'brands',
-            localField: 'brandId',
-            foreignField: '_id',
-            as: 'brand'
-          }
-        },
-        {
-          $lookup: {
-            from: 'productDetails',
-            localField: '_id',
-            foreignField: 'productId',
-            as: 'details'
-          }
-        },
-        {
-          $lookup: {
-            from: 'productMedia',
-            localField: '_id',
-            foreignField: 'productId',
-            as: 'media'
-          }
-        },
-        {
-          $addFields: {
-            category: { $arrayElemAt: ['$category', 0] },
-            brand: { $arrayElemAt: ['$brand', 0] },
-            details: { $arrayElemAt: ['$details', 0] },
-            media: { $arrayElemAt: ['$media', 0] }
-          }
-        }
-      ])
-      .toArray()
+        ])
+        .toArray()
 
-    if (!products.length) {
-      throw new ErrorWithStatus({
-        message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
-        status: HTTP_STATUS.NOT_FOUND
-      })
-    }
+      if (!products.length) {
+        throw new ErrorWithStatus({
+          message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
+          status: HTTP_STATUS.NOT_FOUND
+        })
+      }
 
-    return campaignService.enrichProductWithCampaign(products[0])
+      return campaignService.enrichProductWithCampaign(products[0])
+    }, 120) // 2 minutes
   }
 
   // Update product
@@ -576,6 +590,9 @@ class ProductsService {
     // Sync to Typesense (fire-and-forget)
     typesenseService.indexProduct(updated).catch(() => {})
 
+    // Invalidate cache
+    this.invalidateProductCache(product.slug).catch(() => {})
+
     return updated
   }
 
@@ -598,6 +615,9 @@ class ProductsService {
 
     // Sync to Typesense (fire-and-forget)
     typesenseService.indexProduct(updated).catch(() => {})
+
+    // Invalidate cache (fire-and-forget)
+    this.invalidateProductCache().catch(() => {})
 
     return updated
   }
@@ -665,6 +685,9 @@ class ProductsService {
     if (product.brandId) {
       await brandsService.updateProductCount(product.brandId, -1)
     }
+
+    // Invalidate cache
+    await this.invalidateProductCache(product.slug)
 
     return { message: PRODUCTS_MESSAGES.DELETE_PRODUCT_SUCCESS }
   }

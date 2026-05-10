@@ -1,8 +1,16 @@
 import { ObjectId } from 'mongodb'
 import Campaign from '~/models/schemas/Campaign.schema'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
+
+// Cache keys & TTLs
+const CACHE_KEYS = {
+  ACTIVE_CAMPAIGNS: 'campaigns:active',
+  PUBLIC_CAMPAIGNS: 'campaigns:public',
+} as const
+const CAMPAIGN_TTL = 120 // 2 minutes
 
 export interface CampaignPriceResult {
   hasCampaign: boolean
@@ -43,9 +51,8 @@ class CampaignService {
     const categoryIdStr = categoryId.toString()
     const brandIdStr = brandId?.toString()
 
-    const allActive = await databaseService.campaigns.find({
-      ...baseCriteria
-    }).sort({ priority: -1 }).toArray()
+    // ✅ Cache: reuse cached active campaigns instead of querying MongoDB each time
+    const allActive = await this.getActiveCampaignsCached()
 
     const campaigns = allActive.filter(c => {
       // Kiểm tra thời gian hiệu lực (cast sang Date để xử lý cả string)
@@ -215,19 +222,8 @@ class CampaignService {
   async enrichProductsWithCampaigns(products: any[]): Promise<any[]> {
     if (!products.length) return products
 
-    const now = new Date()
-
-    // Load tất cả active campaigns 1 lần — chỉ filter status, date check ở code
-    const allActive = await databaseService.campaigns.find({
-      status: 'active'
-    }).sort({ priority: -1 }).toArray()
-
-    // Lọc date ở code để tránh BSON type mismatch
-    const activeCampaigns = allActive.filter(c => {
-      const start = new Date(c.startDate)
-      const end = new Date(c.endDate)
-      return now >= start && now <= end
-    })
+    // ✅ Cache: load active campaigns from Redis instead of MongoDB
+    const activeCampaigns = await this.getActiveCampaignsCached()
 
     if (!activeCampaigns.length) return products
 
@@ -293,22 +289,61 @@ class CampaignService {
   }
 
   // ============================
+  // CACHED HELPERS
+  // ============================
+
+  /**
+   * Cached list of all active campaigns (sorted by priority).
+   * This is the single source of truth for campaign lookups — used by:
+   * - getActiveCampaignForProduct()
+   * - enrichProductsWithCampaigns()
+   * - getActiveCampaigns() (public API)
+   */
+  private async getActiveCampaignsCached(): Promise<any[]> {
+    return cacheService.getOrSet(CACHE_KEYS.ACTIVE_CAMPAIGNS, async () => {
+      const now = new Date()
+      const allActive = await databaseService.campaigns.find({
+        status: 'active'
+      }).sort({ priority: -1 }).toArray()
+
+      return allActive.filter(c => {
+        const start = new Date(c.startDate)
+        const end = new Date(c.endDate)
+        return now >= start && now <= end
+      })
+    }, CAMPAIGN_TTL)
+  }
+
+  /**
+   * Invalidate all campaign-related caches.
+   * Called after every CRUD operation on campaigns.
+   */
+  private async invalidateCampaignCache(): Promise<void> {
+    await cacheService.invalidate(
+      CACHE_KEYS.ACTIVE_CAMPAIGNS,
+      CACHE_KEYS.PUBLIC_CAMPAIGNS,
+      'products:*' // Products embedding campaign data need refresh too
+    )
+  }
+
+  // ============================
   // PUBLIC APIs
   // ============================
 
   async getActiveCampaigns() {
-    const now = new Date()
-    // Chỉ filter status ở DB, date check ở code (tránh BSON type mismatch)
-    const allActive = await databaseService.campaigns.find({
-      status: 'active',
-      isPublic: true
-    }).sort({ priority: -1 }).toArray()
+    return cacheService.getOrSet(CACHE_KEYS.PUBLIC_CAMPAIGNS, async () => {
+      const now = new Date()
+      const allActive = await databaseService.campaigns.find({
+        status: 'active',
+        isPublic: true
+      }).sort({ priority: -1 }).toArray()
 
-    return allActive.filter(c => {
-      const start = new Date(c.startDate)
-      const end = new Date(c.endDate)
-      return now >= start && now <= end
-    })
+      return allActive.filter(c => {
+        const start = new Date(c.startDate)
+        const end = new Date(c.endDate)
+        return now >= start && now <= end
+      })
+    }, CAMPAIGN_TTL)
   }
 
   async getCampaignBySlug(slug: string) {
@@ -371,6 +406,7 @@ class CampaignService {
     })
 
     const result = await databaseService.campaigns.insertOne(campaign as any)
+    await this.invalidateCampaignCache()
     return { ...campaign, _id: result.insertedId }
   }
 
@@ -419,6 +455,7 @@ class CampaignService {
     }
 
     await databaseService.campaigns.updateOne({ _id: campaignId }, updateOp)
+    await this.invalidateCampaignCache()
 
     return databaseService.campaigns.findOne({ _id: campaignId })
   }
@@ -428,6 +465,7 @@ class CampaignService {
     if (result.deletedCount === 0) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy chiến dịch.', status: HTTP_STATUS.NOT_FOUND })
     }
+    await this.invalidateCampaignCache()
     return { message: 'Đã xóa chiến dịch.' }
   }
 
@@ -472,6 +510,7 @@ class CampaignService {
       { _id: campaignId },
       { $set: { status: newStatus as any, updatedAt: new Date() } }
     )
+    await this.invalidateCampaignCache()
 
     return databaseService.campaigns.findOne({ _id: campaignId })
   }
