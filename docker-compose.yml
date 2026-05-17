@@ -1,8 +1,8 @@
 # =====================================================
-# MEDISPACE - Docker Compose
-# Đặt trong: MEDISPACE_ECommerce_BE/
-# Chạy: docker compose up --build -d
-# Services: backend, frontend, ocr-service, ml-service, typesense
+# MEDISPACE - Docker Compose (PRODUCTION)
+# Dùng để: deploy trên server, dùng image từ DockerHub
+# Chạy: docker compose up -d  (trên server sau khi CI/CD push image)
+# Dev local: dùng docker-compose.dev.yml thay thế
 # =====================================================
 
 services:
