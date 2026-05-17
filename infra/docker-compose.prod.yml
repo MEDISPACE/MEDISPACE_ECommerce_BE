@@ -1,11 +1,11 @@
 # =====================================================
 # MEDISPACE - Docker Compose (Production)
-# Infra repo: image-based deployment via GHCR
+# Image-based deployment via Docker Hub
 # =====================================================
 
 services:
   backend:
-    image: ${BACKEND_IMAGE}
+    image: ${DOCKERHUB_USERNAME}/medispace-be:latest
     container_name: medispace-backend
     ports:
       - "8000:8000"
@@ -33,7 +33,7 @@ services:
       - medispace-net
 
   frontend:
-    image: ${FRONTEND_IMAGE}
+    image: ${DOCKERHUB_USERNAME}/medispace-fe:latest
     container_name: medispace-frontend
     ports:
       - "3000:80"
@@ -44,7 +44,7 @@ services:
       - medispace-net
 
   ocr-service:
-    image: ${OCR_IMAGE}
+    image: ${DOCKERHUB_USERNAME}/medispace-ocr:latest
     container_name: medispace-ocr
     ports:
       - "8001:8001"
@@ -65,7 +65,7 @@ services:
       start_period: 120s
 
   ml-service:
-    image: ${ML_IMAGE}
+    image: ${DOCKERHUB_USERNAME}/medispace-ml:latest
     container_name: medispace-ml
     ports:
       - "8002:8002"
