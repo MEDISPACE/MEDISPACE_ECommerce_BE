@@ -6,7 +6,9 @@ import {
   getForYouController,
   getPostPurchaseController,
   getPharmacistSuggestionsController,
-  getMLStatusController
+  getMLStatusController,
+  getReplenishmentController,
+  trackRecommendationEventController
 } from '~/controllers/recommendations.controllers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
@@ -14,27 +16,25 @@ import { wrapRequestHandler } from '~/utils/handlers'
 const recommendationsRouter = Router()
 
 /**
- * Description: San pham lien quan (TF-IDF)
+ * Description: Sản phẩm liên quan (TF-IDF + MMR diversity)
  * Path: /recommendations/related/:productId
  * Method: GET
- * Params: { productId: string }
- * Query: { limit?: number }
+ * Query: { limit?: number, diverse?: boolean, lambda_mmr?: number }
  * Auth: Public
  */
 recommendationsRouter.get('/related/:productId', wrapRequestHandler(getRelatedController))
 
 /**
- * Description: Thuong mua kem (FP-Growth)
+ * Description: Thường mua kèm (FP-Growth → TF-IDF MMR fallback)
  * Path: /recommendations/bought-together/:productId
  * Method: GET
- * Params: { productId: string }
  * Query: { limit?: number }
  * Auth: Public
  */
 recommendationsRouter.get('/bought-together/:productId', wrapRequestHandler(getBoughtTogetherController))
 
 /**
- * Description: Xu huong / Ban chay (NMF)
+ * Description: Xu hướng / Bán chạy (NMF)
  * Path: /recommendations/trending
  * Method: GET
  * Query: { categoryId?: string, limit?: number }
@@ -43,36 +43,52 @@ recommendationsRouter.get('/bought-together/:productId', wrapRequestHandler(getB
 recommendationsRouter.get('/trending', wrapRequestHandler(getTrendingController))
 
 /**
- * Description: Goi y ca nhan hoa (SVD / NMF fallback)
+ * Description: Gợi ý cá nhân hoá (SVD → NMF fallback)
  * Path: /recommendations/for-you
  * Method: GET
  * Query: { limit?: number }
- * Auth: Required (can userId tu token)
+ * Auth: Required
  */
 recommendationsRouter.get('/for-you', accessTokenValidator, wrapRequestHandler(getForYouController))
 
 /**
- * Description: Goi y sau dat hang (Hybrid)
+ * Description: Gợi ý sau đặt hàng (Hybrid FP-Growth + TF-IDF MMR)
  * Path: /recommendations/post-purchase
  * Method: POST
  * Body: { productIds: string[] }
- * Query: { limit?: number }
- * Auth: Public (FE tu lay productIds tu order)
+ * Auth: Public
  */
 recommendationsRouter.post('/post-purchase', wrapRequestHandler(getPostPurchaseController))
 
 /**
- * Description: Goi y cho Pharmacist dua tren medical context
+ * Description: Gợi ý cho Pharmacist (TF-IDF medical context + chronic disease boost + allergy filter)
  * Path: /recommendations/pharmacist
  * Method: POST
  * Body: { chronicDiseases?, allergies?, currentMedications?, prescriptionProductIds? }
- * Query: { limit?: number }
- * Auth: Required (Pharmacist only)
+ * Auth: Required (Pharmacist)
  */
 recommendationsRouter.post('/pharmacist', accessTokenValidator, wrapRequestHandler(getPharmacistSuggestionsController))
 
 /**
- * Description: Kiem tra ML service status (debug)
+ * Description: Predictive Replenishment — sản phẩm cần mua lại theo chu kỳ
+ * Path: /recommendations/replenishment
+ * Method: GET
+ * Query: { limit?: number }
+ * Auth: Required
+ */
+recommendationsRouter.get('/replenishment', accessTokenValidator, wrapRequestHandler(getReplenishmentController))
+
+/**
+ * Description: Track recommendation click event (analytics, fire-and-forget)
+ * Path: /recommendations/track
+ * Method: POST
+ * Body: { productId, algorithm, section, position }
+ * Auth: Optional (userId từ token nếu có)
+ */
+recommendationsRouter.post('/track', wrapRequestHandler(trackRecommendationEventController))
+
+/**
+ * Description: ML service status (admin debug)
  * Path: /recommendations/ml-status
  * Method: GET
  * Auth: Public
