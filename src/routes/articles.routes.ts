@@ -1,20 +1,20 @@
 import { Router } from 'express'
 import {
-    createArticleController,
-    getArticlesController,
-    getArticleController,
-    updateArticleController,
-    deleteArticleController,
-    incrementViewController,
-    publishArticleController,
-    archiveArticleController,
-    getRelatedArticlesController
+  createArticleController,
+  getArticlesController,
+  getArticleController,
+  updateArticleController,
+  deleteArticleController,
+  incrementViewController,
+  publishArticleController,
+  archiveArticleController,
+  getRelatedArticlesController
 } from '~/controllers/articles.controllers'
 import {
-    createArticleValidator,
-    updateArticleValidator,
-    getArticlesValidator,
-    articleIdValidator
+  createArticleValidator,
+  updateArticleValidator,
+  getArticlesValidator,
+  articleIdValidator
 } from '~/middlewares/articles.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
@@ -63,11 +63,11 @@ articlesRouter.post('/:articleId/view', articleIdValidator, wrapRequestHandler(i
  * Headers: { Authorization: Bearer <access_token> }
  */
 articlesRouter.post(
-    '/',
-    accessTokenValidator,
-    pharmacistOrAdminValidator,
-    createArticleValidator,
-    wrapRequestHandler(createArticleController)
+  '/',
+  accessTokenValidator,
+  pharmacistOrAdminValidator,
+  createArticleValidator,
+  wrapRequestHandler(createArticleController)
 )
 
 /**
@@ -79,12 +79,12 @@ articlesRouter.post(
  * Headers: { Authorization: Bearer <access_token> }
  */
 articlesRouter.patch(
-    '/:articleId',
-    accessTokenValidator,
-    pharmacistOrAdminValidator,
-    articleIdValidator,
-    updateArticleValidator,
-    wrapRequestHandler(updateArticleController)
+  '/:articleId',
+  accessTokenValidator,
+  pharmacistOrAdminValidator,
+  articleIdValidator,
+  updateArticleValidator,
+  wrapRequestHandler(updateArticleController)
 )
 
 /**
@@ -95,11 +95,11 @@ articlesRouter.patch(
  * Headers: { Authorization: Bearer <access_token> }
  */
 articlesRouter.delete(
-    '/:articleId',
-    accessTokenValidator,
-    pharmacistOrAdminValidator,
-    articleIdValidator,
-    wrapRequestHandler(deleteArticleController)
+  '/:articleId',
+  accessTokenValidator,
+  pharmacistOrAdminValidator,
+  articleIdValidator,
+  wrapRequestHandler(deleteArticleController)
 )
 
 /**
@@ -110,11 +110,11 @@ articlesRouter.delete(
  * Headers: { Authorization: Bearer <access_token> }
  */
 articlesRouter.patch(
-    '/:articleId/publish',
-    accessTokenValidator,
-    adminValidator,
-    articleIdValidator,
-    wrapRequestHandler(publishArticleController)
+  '/:articleId/publish',
+  accessTokenValidator,
+  adminValidator,
+  articleIdValidator,
+  wrapRequestHandler(publishArticleController)
 )
 
 /**
@@ -125,11 +125,11 @@ articlesRouter.patch(
  * Headers: { Authorization: Bearer <access_token> }
  */
 articlesRouter.patch(
-    '/:articleId/archive',
-    accessTokenValidator,
-    adminValidator,
-    articleIdValidator,
-    wrapRequestHandler(archiveArticleController)
+  '/:articleId/archive',
+  accessTokenValidator,
+  adminValidator,
+  articleIdValidator,
+  wrapRequestHandler(archiveArticleController)
 )
 
 export default articlesRouter

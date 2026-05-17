@@ -1,9 +1,12 @@
-﻿import databaseService from './database.services'
+import databaseService from './database.services'
+import cacheService from './cache.services'
 import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
 import { hashPassword } from '~/utils/crypto'
 import { UserRole, UserStatus } from '~/constants/enum'
 import { config } from 'dotenv'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 config()
 
@@ -89,7 +92,7 @@ class AdminService {
    * Get dashboard statistics
    */
   async getDashboardStats(): Promise<DashboardStats> {
-    console.log('[Admin Service] Starting getDashboardStats...')
+    return cacheService.getOrSet('admin:dashboard', async () => {
     const startTime = Date.now()
 
     const today = new Date()
@@ -179,8 +182,6 @@ class AdminService {
       const revenueGrowth =
         lastMonthRevenueValue > 0 ? ((monthRevenueValue - lastMonthRevenueValue) / lastMonthRevenueValue) * 100 : 0
 
-      console.log('[Admin Service] Revenue calculations completed')
-
       // Order statistics
       const [totalOrders, pendingOrders, processingOrders, completedOrders, cancelledOrders] = await Promise.all([
         databaseService.orders.countDocuments(),
@@ -189,8 +190,6 @@ class AdminService {
         databaseService.orders.countDocuments({ orderStatus: 'delivered' }),
         databaseService.orders.countDocuments({ orderStatus: 'cancelled' })
       ])
-
-      console.log('[Admin Service] Order statistics completed')
 
       // User statistics
       const [totalUsers, newTodayUsers, customers, pharmacists, admins, verifiedUsers] = await Promise.all([
@@ -201,8 +200,6 @@ class AdminService {
         databaseService.users.countDocuments({ role: 2 }), // Admin
         databaseService.users.countDocuments({ status: 1 }) // Verified
       ])
-
-      console.log('[Admin Service] User statistics completed')
 
       // Product statistics - optimized with aggregation
       const [productStats, totalProducts, activeProducts, outOfStockProducts, lowStockProducts] = await Promise.all([
@@ -236,8 +233,6 @@ class AdminService {
 
       const totalProductValue = productStats[0]?.totalValue || 0
 
-      console.log('[Admin Service] Product statistics completed')
-
       // Prescription statistics
       const [totalPrescriptions, pendingPrescriptions, approvedPrescriptions, rejectedPrescriptions] =
         await Promise.all([
@@ -246,8 +241,6 @@ class AdminService {
           databaseService.prescriptions.countDocuments({ status: 'approved' }),
           databaseService.prescriptions.countDocuments({ status: 'rejected' })
         ])
-
-      console.log('[Admin Service] Prescription statistics completed')
 
       const result = {
         revenue: {
@@ -288,13 +281,13 @@ class AdminService {
       }
 
       const endTime = Date.now()
-      console.log(`[Admin Service] getDashboardStats completed in ${endTime - startTime}ms`)
 
       return result
     } catch (error) {
       console.error('[Admin Service] Error in getDashboardStats:', error)
       throw error
     }
+    }, 60) // Cache for 60 seconds
   }
 
   /**
@@ -738,29 +731,38 @@ class AdminService {
   }
 
   async getOrderStats() {
-    const orders = await databaseService.orders.find({}).toArray()
+    return cacheService.getOrSet('admin:order-stats', async () => {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+      // ✅ FIX: Use aggregation + countDocuments instead of loading ALL orders into RAM
+      const [total, pending, processing, shipped, delivered, cancelled, revenueResult, todayOrders] = await Promise.all([
+        databaseService.orders.countDocuments(),
+        databaseService.orders.countDocuments({ orderStatus: 'pending' }),
+        databaseService.orders.countDocuments({ orderStatus: 'processing' }),
+        databaseService.orders.countDocuments({ orderStatus: 'shipped' }),
+        databaseService.orders.countDocuments({ orderStatus: 'delivered' }),
+        databaseService.orders.countDocuments({ orderStatus: 'cancelled' }),
+        databaseService.orders
+          .aggregate([
+            { $match: { orderStatus: { $ne: 'cancelled' }, paymentStatus: 'paid' } },
+            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+          ])
+          .toArray(),
+        databaseService.orders.countDocuments({ createdAt: { $gte: today } })
+      ])
 
-    const stats = {
-      total: orders.length,
-      pending: orders.filter((o) => o.orderStatus === 'pending').length,
-      processing: orders.filter((o) => o.orderStatus === 'processing').length,
-      shipped: orders.filter((o) => o.orderStatus === 'shipped').length,
-      delivered: orders.filter((o) => o.orderStatus === 'delivered').length,
-      cancelled: orders.filter((o) => o.orderStatus === 'cancelled').length,
-      revenue: orders
-        .filter((o) => o.orderStatus !== 'cancelled' && o.paymentStatus === 'paid')
-        .reduce((acc, curr) => acc + (curr.totalAmount || 0), 0),
-      todayOrders: orders.filter((o) => {
-        const orderDate = new Date(o.createdAt || new Date())
-        orderDate.setHours(0, 0, 0, 0)
-        return orderDate.getTime() === today.getTime()
-      }).length
-    }
-
-    return stats
+      return {
+        total,
+        pending,
+        processing,
+        shipped,
+        delivered,
+        cancelled,
+        revenue: revenueResult[0]?.total || 0,
+        todayOrders
+      }
+    }, 60) // Cache 60 seconds
   }
 
   async getOrderDetails(orderId: string) {
@@ -1054,29 +1056,108 @@ class AdminService {
   /**
    * Get comprehensive reports analytics
    */
-  async getReportsAnalytics(timeRange: string = 'month') {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const dateRanges = this.getDateRanges(timeRange)
+  async getReportsAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
     const [revenueData, ordersData, usersData, productsData] = await Promise.all([
-      this.getRevenueAnalytics(timeRange),
+      this.getRevenueAnalytics(timeRange, customStartDate, customEndDate),
       this.getOrderStats(),
       this.getUserStats(),
-      this.getProductAnalytics(timeRange)
+      this.getProductAnalytics(timeRange, customStartDate, customEndDate)
     ])
+
+    // ---- Calculate REAL orders growth ----
+    const [currentPeriodOrderCount, previousPeriodOrderCount] = await Promise.all([
+      databaseService.orders.countDocuments({
+        createdAt: { $gte: startDate, $lte: endDate }
+      }),
+      databaseService.orders.countDocuments({
+        createdAt: { $gte: previousStartDate, $lte: previousEndDate }
+      })
+    ])
+    const ordersGrowth =
+      previousPeriodOrderCount > 0
+        ? ((currentPeriodOrderCount - previousPeriodOrderCount) / previousPeriodOrderCount) * 100
+        : 0
+
+    // ---- Calculate REAL user metrics ----
+    const [newUsersCount, previousNewUsersCount] = await Promise.all([
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: startDate, $lte: endDate }
+      }),
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: previousStartDate, $lte: previousEndDate }
+      })
+    ])
+    const usersGrowth =
+      previousNewUsersCount > 0 ? ((newUsersCount - previousNewUsersCount) / previousNewUsersCount) * 100 : 0
+
+    // Returning users = unique customers who placed orders in current period AND existed before this period
+    const returningCustomers = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            orderStatus: { $ne: 'cancelled' }
+          }
+        },
+        {
+          $lookup: {
+            from: process.env.USERS_COLLECTION as string,
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user'
+          }
+        },
+        { $unwind: '$user' },
+        {
+          $match: {
+            'user.createdAt': { $lt: startDate } // User registered before this period
+          }
+        },
+        {
+          $group: { _id: '$userId' }
+        }
+      ])
+      .toArray()
+    const returningUsersCount = returningCustomers.length
+
+    // ---- Calculate REAL conversion rate ----
+    // Conversion = (unique customers who completed an order in period / total customers) × 100
+    const uniqueOrderingCustomers = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            orderStatus: { $ne: 'cancelled' }
+          }
+        },
+        { $group: { _id: '$userId' } }
+      ])
+      .toArray()
+    const totalCustomers = usersData.customers
+    const conversionRate = totalCustomers > 0 ? (uniqueOrderingCustomers.length / totalCustomers) * 100 : 0
+
+    // ---- Calculate REAL customer retention ----
+    // Retention = returning customers / (returning + new ordering customers) × 100
+    const newOrderingCustomers = uniqueOrderingCustomers.length - returningUsersCount
+    const customerRetention =
+      uniqueOrderingCustomers.length > 0 ? (returningUsersCount / uniqueOrderingCustomers.length) * 100 : 0
 
     // Calculate metrics
     const avgOrderValue = ordersData.revenue > 0 && ordersData.total > 0 ? ordersData.revenue / ordersData.total : 0
-
-    // Placeholder for conversion rate and retention (would need more complex tracking)
-    const conversionRate = 3.8 // Placeholder
-    const customerRetention = 68.5 // Placeholder
 
     return {
       revenue: revenueData,
       orders: {
         total: ordersData.total,
-        growth: 0, // Calculate from previous period
+        growth: Math.round(ordersGrowth * 100) / 100,
         pending: ordersData.pending,
         processing: ordersData.processing,
         completed: ordersData.delivered,
@@ -1092,9 +1173,9 @@ class AdminService {
       },
       users: {
         total: usersData.total,
-        growth: 0, // Calculate from previous period
-        newUsers: 0, // Would need time-based query
-        returningUsers: 0, // Would need tracking
+        growth: Math.round(usersGrowth * 100) / 100,
+        newUsers: newUsersCount,
+        returningUsers: returningUsersCount,
         customers: usersData.customers,
         pharmacists: usersData.pharmacists,
         admins: usersData.admins,
@@ -1103,8 +1184,8 @@ class AdminService {
       products: productsData,
       metrics: {
         avgOrderValue: Math.round(avgOrderValue),
-        conversionRate,
-        customerRetention
+        conversionRate: Math.round(conversionRate * 100) / 100,
+        customerRetention: Math.round(customerRetention * 100) / 100
       }
     }
   }
@@ -1112,8 +1193,12 @@ class AdminService {
   /**
    * Get revenue analytics with time-based filtering
    */
-  async getRevenueAnalytics(timeRange: string = 'month') {
-    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(timeRange)
+  async getRevenueAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
     // Current period orders
     const currentOrders = await databaseService.orders
@@ -1159,11 +1244,51 @@ class AdminService {
 
     const avgOrderValue = currentOrders.length > 0 ? currentRevenue / currentOrders.length : 0
 
+    // Calculate actual year-to-date revenue
+    const startOfYear = new Date(new Date().getFullYear(), 0, 1)
+    const yearToDateOrders = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startOfYear },
+            paymentStatus: 'paid'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$totalAmount' }
+          }
+        }
+      ])
+      .toArray()
+    const yearRevenue = yearToDateOrders[0]?.total || 0
+
+    // Calculate actual month-to-date revenue
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    const monthToDateOrders = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startOfMonth },
+            paymentStatus: 'paid'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$totalAmount' }
+          }
+        }
+      ])
+      .toArray()
+    const monthRevenue = monthToDateOrders[0]?.total || 0
+
     return {
       total: currentRevenue,
       today: todayRevenue,
-      month: currentRevenue,
-      year: currentRevenue, // Would need year-to-date calculation
+      month: monthRevenue,
+      year: yearRevenue,
       growth: Math.round(growth * 100) / 100,
       monthlyTrends,
       byPaymentMethod,
@@ -1174,21 +1299,44 @@ class AdminService {
   /**
    * Get product analytics
    */
-  async getProductAnalytics(timeRange: string = 'month') {
-    const { startDate, endDate } = this.getDateRanges(timeRange)
+  async getProductAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
-    // Get all products
-    const products = await databaseService.products.find().toArray()
+    // Get all products and categories in parallel
+    const [products, categories] = await Promise.all([
+      databaseService.products.find().toArray(),
+      databaseService.categories.find().toArray()
+    ])
 
-    // Get orders in time range to calculate top products
-    const orders = await databaseService.orders
-      .find({
-        createdAt: { $gte: startDate, $lte: endDate },
-        orderStatus: { $ne: 'cancelled' }
-      })
-      .toArray()
+    // Build category name map for quick lookup
+    const categoryNameMap: Record<string, string> = {}
+    categories.forEach((cat) => {
+      if (cat._id) {
+        categoryNameMap[cat._id.toString()] = cat.name
+      }
+    })
 
-    // Calculate product sales
+    // Get orders in current and previous time range
+    const [orders, previousOrders] = await Promise.all([
+      databaseService.orders
+        .find({
+          createdAt: { $gte: startDate, $lte: endDate },
+          orderStatus: { $ne: 'cancelled' }
+        })
+        .toArray(),
+      databaseService.orders
+        .find({
+          createdAt: { $gte: previousStartDate, $lte: previousEndDate },
+          orderStatus: { $ne: 'cancelled' }
+        })
+        .toArray()
+    ])
+
+    // Calculate product sales for current period
     const productSales: Record<string, { sales: number; revenue: number; product: unknown }> = {}
 
     orders.forEach((order) => {
@@ -1207,22 +1355,41 @@ class AdminService {
       })
     })
 
-    // Get top 10 products
+    // Calculate product sales for previous period (for growth comparison)
+    const prevProductSales: Record<string, { sales: number; revenue: number }> = {}
+    previousOrders.forEach((order) => {
+      order.items.forEach((item: { productId: ObjectId; quantity: number; unitPrice: number }) => {
+        const productId = item.productId.toString()
+        if (!prevProductSales[productId]) {
+          prevProductSales[productId] = { sales: 0, revenue: 0 }
+        }
+        prevProductSales[productId].sales += item.quantity
+        prevProductSales[productId].revenue += item.unitPrice * item.quantity
+      })
+    })
+
+    // Get top 10 products with real category names and growth
     const topProducts = Object.entries(productSales)
-      .map(([id, data]) => ({
-        _id: id,
-        name: (data.product as { name?: string })?.name || 'Unknown',
-        sku: (data.product as { sku?: string })?.sku || '',
-        sales: data.sales,
-        revenue: data.revenue,
-        category: (data.product as { categoryId?: ObjectId })?.categoryId?.toString() || '',
-        categoryName: '', // Would need category lookup
-        growth: 0 // Would need previous period comparison
-      }))
+      .map(([id, data]) => {
+        const categoryId = (data.product as { categoryId?: ObjectId })?.categoryId?.toString() || ''
+        const prevData = prevProductSales[id]
+        const growth =
+          prevData && prevData.revenue > 0 ? ((data.revenue - prevData.revenue) / prevData.revenue) * 100 : 0
+        return {
+          _id: id,
+          name: (data.product as { name?: string })?.name || 'Unknown',
+          sku: (data.product as { sku?: string })?.sku || '',
+          sales: data.sales,
+          revenue: data.revenue,
+          category: categoryId,
+          categoryName: categoryNameMap[categoryId] || 'Chưa phân loại',
+          growth: Math.round(growth * 100) / 100
+        }
+      })
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10)
 
-    // Sales by category
+    // Sales by category with real category names
     const categorySales: Record<string, { count: number; sales: number; revenue: number }> = {}
 
     Object.values(productSales).forEach((data) => {
@@ -1239,7 +1406,7 @@ class AdminService {
 
     const salesByCategory = Object.entries(categorySales).map(([categoryId, data]) => ({
       category: categoryId,
-      categoryName: '', // Would need category lookup
+      categoryName: categoryNameMap[categoryId] || 'Chưa phân loại',
       productCount: data.count,
       totalSales: data.sales,
       totalRevenue: data.revenue,
@@ -1251,6 +1418,19 @@ class AdminService {
     const outOfStockProducts = products.filter((p) => p.stockQuantity === 0).length
     const lowStockProducts = products.filter((p) => p.stockQuantity > 0 && p.stockQuantity < 20).length
 
+    // Product trends — real calculations
+    const newProductsInPeriod = products.filter(
+      (p) => p.createdAt && p.createdAt >= startDate && p.createdAt <= endDate
+    ).length
+    const previousPeriodProducts = products.filter(
+      (p) => p.createdAt && p.createdAt >= previousStartDate && p.createdAt <= previousEndDate
+    ).length
+    const inactiveInPeriod = products.filter(
+      (p) => !p.isActive && p.updatedAt && p.updatedAt >= startDate && p.updatedAt <= endDate
+    ).length
+    const productGrowthRate =
+      previousPeriodProducts > 0 ? ((newProductsInPeriod - previousPeriodProducts) / previousPeriodProducts) * 100 : 0
+
     return {
       topProducts,
       salesByCategory,
@@ -1261,9 +1441,9 @@ class AdminService {
         lowStock: lowStockProducts
       },
       trends: {
-        newProducts: 0, // Would need time-based tracking
-        discontinuedProducts: 0,
-        growthRate: 0
+        newProducts: newProductsInPeriod,
+        discontinuedProducts: inactiveInPeriod,
+        growthRate: Math.round(productGrowthRate * 100) / 100
       }
     }
   }
@@ -1271,8 +1451,12 @@ class AdminService {
   /**
    * Get customer analytics
    */
-  async getCustomerAnalytics(timeRange: string = 'month') {
-    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(timeRange)
+  async getCustomerAnalytics(timeRange: string = 'month', customStartDate?: string, customEndDate?: string) {
+    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(
+      timeRange,
+      customStartDate,
+      customEndDate
+    )
 
     // Total customers
     const totalCustomers = await databaseService.users.countDocuments({ role: UserRole.Customer })
@@ -1289,7 +1473,7 @@ class AdminService {
       createdAt: { $gte: previousStartDate, $lte: previousEndDate }
     })
 
-    // Get customers with orders (returning customers)
+    // Get customers with orders in current period (active/returning)
     const customersWithOrders = await databaseService.orders
       .aggregate([
         {
@@ -1305,29 +1489,114 @@ class AdminService {
       ])
       .toArray()
 
-    const returningCustomers = customersWithOrders.length - newCustomers
+    const returningCustomers = Math.max(0, customersWithOrders.length - newCustomers)
 
-    // Retention rate (simplified)
+    // Retention rate
     const retentionRate = totalCustomers > 0 ? (returningCustomers / totalCustomers) * 100 : 0
 
-    // Customer lifetime value (simplified - average order value * average orders per customer)
+    // Customer lifetime value (average order value × average orders per customer)
     const totalOrders = await databaseService.orders.countDocuments({ orderStatus: { $ne: 'cancelled' } })
-    const totalRevenue = await databaseService.orders
+    const totalRevenueResult = await databaseService.orders
       .aggregate([
         { $match: { paymentStatus: 'paid', orderStatus: { $ne: 'cancelled' } } },
         { $group: { _id: null, total: { $sum: '$totalAmount' } } }
       ])
       .toArray()
 
-    const avgOrderValue = totalOrders > 0 && totalRevenue.length > 0 ? totalRevenue[0].total / totalOrders : 0
+    const avgOrderValue =
+      totalOrders > 0 && totalRevenueResult.length > 0 ? totalRevenueResult[0].total / totalOrders : 0
     const avgOrdersPerCustomer = totalCustomers > 0 ? totalOrders / totalCustomers : 0
     const lifetimeValue = avgOrderValue * avgOrdersPerCustomer
 
-    // Growth calculations
-    const dailyGrowth = 0 // Would need daily tracking
-    const weeklyGrowth = 0 // Would need weekly tracking
+    // ---- REAL daily growth ----
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    yesterday.setHours(0, 0, 0, 0)
+    const dayBefore = new Date(yesterday)
+    dayBefore.setDate(dayBefore.getDate() - 1)
+
+    const [todayNewCount, yesterdayNewCount] = await Promise.all([
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: yesterday }
+      }),
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: dayBefore, $lt: yesterday }
+      })
+    ])
+    const dailyGrowth = yesterdayNewCount > 0 ? ((todayNewCount - yesterdayNewCount) / yesterdayNewCount) * 100 : 0
+
+    // ---- REAL weekly growth ----
+    const oneWeekAgo = new Date()
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+    const twoWeeksAgo = new Date()
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+
+    const [thisWeekCount, lastWeekCount] = await Promise.all([
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: oneWeekAgo }
+      }),
+      databaseService.users.countDocuments({
+        role: UserRole.Customer,
+        createdAt: { $gte: twoWeeksAgo, $lt: oneWeekAgo }
+      })
+    ])
+    const weeklyGrowth = lastWeekCount > 0 ? ((thisWeekCount - lastWeekCount) / lastWeekCount) * 100 : 0
+
+    // Monthly growth
     const monthlyGrowth =
       previousNewCustomers > 0 ? ((newCustomers - previousNewCustomers) / previousNewCustomers) * 100 : 0
+
+    // ---- REAL byLocation from shipping addresses ----
+    const locationData = await databaseService.orders
+      .aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            'shippingAddress.province': { $exists: true, $ne: '' }
+          }
+        },
+        {
+          $group: {
+            _id: '$shippingAddress.province',
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ])
+      .toArray()
+
+    const totalLocationOrders = locationData.reduce((sum, loc) => sum + loc.count, 0)
+    const byLocation = locationData.map((loc) => ({
+      province: loc._id || 'Không xác định',
+      count: loc.count,
+      percentage: totalLocationOrders > 0 ? Math.round((loc.count / totalLocationOrders) * 10000) / 100 : 0
+    }))
+
+    // ---- REAL VIP customers (5+ orders) ----
+    const vipCustomers = await databaseService.orders
+      .aggregate([
+        {
+          $match: { orderStatus: { $ne: 'cancelled' } }
+        },
+        {
+          $group: {
+            _id: '$userId',
+            orderCount: { $sum: 1 }
+          }
+        },
+        {
+          $match: { orderCount: { $gte: 5 } }
+        },
+        {
+          $count: 'total'
+        }
+      ])
+      .toArray()
+    const vipCount = vipCustomers[0]?.total || 0
 
     return {
       total: totalCustomers,
@@ -1335,15 +1604,15 @@ class AdminService {
       returningCustomers,
       retentionRate: Math.round(retentionRate * 100) / 100,
       lifetimeValue: Math.round(lifetimeValue),
-      byLocation: [], // Would need address aggregation
+      byLocation,
       bySegment: {
         active: customersWithOrders.length,
         inactive: totalCustomers - customersWithOrders.length,
-        vip: 0 // Would need VIP tracking
+        vip: vipCount
       },
       growth: {
-        daily: dailyGrowth,
-        weekly: weeklyGrowth,
+        daily: Math.round(dailyGrowth * 100) / 100,
+        weekly: Math.round(weeklyGrowth * 100) / 100,
         monthly: Math.round(monthlyGrowth * 100) / 100
       }
     }
@@ -1382,22 +1651,36 @@ class AdminService {
   /**
    * Helper: Get date ranges based on time range parameter
    */
-  private getDateRanges(timeRange: string) {
+  private getDateRanges(timeRange: string, customStartDate?: string, customEndDate?: string) {
     const now = new Date()
     let startDate: Date
-    const endDate = new Date()
+    let endDate: Date
     let previousStartDate: Date
     let previousEndDate: Date
 
     switch (timeRange) {
+      case 'custom': {
+        // Custom date range from query params
+        startDate = customStartDate ? new Date(customStartDate) : new Date(now.getFullYear(), now.getMonth(), 1)
+        endDate = customEndDate ? new Date(customEndDate) : new Date()
+        // Set end of day for endDate
+        endDate.setHours(23, 59, 59, 999)
+        // Previous period = same duration mirrored before startDate
+        const durationMs = endDate.getTime() - startDate.getTime()
+        previousEndDate = new Date(startDate.getTime() - 1)
+        previousStartDate = new Date(previousEndDate.getTime() - durationMs)
+        break
+      }
       case 'week': {
         startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        endDate = new Date()
         previousStartDate = new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000)
         previousEndDate = new Date(startDate.getTime() - 1)
         break
       }
       case 'month': {
         startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         previousEndDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
         break
@@ -1405,18 +1688,21 @@ class AdminService {
       case 'quarter': {
         const currentQuarter = Math.floor(now.getMonth() / 3)
         startDate = new Date(now.getFullYear(), currentQuarter * 3, 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear(), (currentQuarter - 1) * 3, 1)
         previousEndDate = new Date(now.getFullYear(), currentQuarter * 3, 0, 23, 59, 59)
         break
       }
       case 'year': {
         startDate = new Date(now.getFullYear(), 0, 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear() - 1, 0, 1)
         previousEndDate = new Date(now.getFullYear(), 0, 0, 23, 59, 59)
         break
       }
       default: {
         startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        endDate = new Date()
         previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
         previousEndDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
         break
@@ -1424,6 +1710,280 @@ class AdminService {
     }
 
     return { startDate, endDate, previousStartDate, previousEndDate }
+  }
+
+  // ==================== INVENTORY MANAGEMENT ====================
+
+  /** Ngưỡng cảnh báo sắp hết hàng (đơn vị nhỏ nhất) */
+  static readonly LOW_STOCK_THRESHOLD = 10
+
+  /**
+   * Get inventory statistics
+   */
+  async getInventoryStats() {
+    const LOW_STOCK_THRESHOLD = AdminService.LOW_STOCK_THRESHOLD
+
+    const [total, active, outOfStock, lowStock, totalValueResult] = await Promise.all([
+      databaseService.products.countDocuments(),
+      databaseService.products.countDocuments({ isActive: true, stockQuantity: { $gt: 0 } }),
+      databaseService.products.countDocuments({ stockQuantity: { $lte: 0 } }),
+      databaseService.products.countDocuments({ stockQuantity: { $gt: 0, $lte: LOW_STOCK_THRESHOLD } }),
+      // Fix: dùng giá của đơn vị nhỏ nhất (quantityPerUnit===1) hoặc isDefault để tính giá trị kho chính xác
+      databaseService.products
+        .aggregate([
+          {
+            $project: {
+              value: {
+                $multiply: [
+                  '$stockQuantity',
+                  {
+                    $ifNull: [
+                      // Ưu tiên 1: variant có quantityPerUnit === 1 (đơn vị cơ sở)
+                      {
+                        $let: {
+                          vars: {
+                            baseVariant: {
+                              $first: {
+                                $filter: {
+                                  input: { $ifNull: ['$priceVariants', []] },
+                                  as: 'v',
+                                  cond: { $eq: ['$$v.quantityPerUnit', 1] }
+                                }
+                              }
+                            }
+                          },
+                          in: '$$baseVariant.price'
+                        }
+                      },
+                      // Ưu tiên 2: variant isDefault
+                      {
+                        $let: {
+                          vars: {
+                            defaultVariant: {
+                              $first: {
+                                $filter: {
+                                  input: { $ifNull: ['$priceVariants', []] },
+                                  as: 'v',
+                                  cond: { $eq: ['$$v.isDefault', true] }
+                                }
+                              }
+                            }
+                          },
+                          in: '$$defaultVariant.price'
+                        }
+                      },
+                      // Fallback: variant đầu tiên
+                      { $arrayElemAt: ['$priceVariants.price', 0] },
+                      0
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          { $group: { _id: null, totalValue: { $sum: '$value' } } }
+        ])
+        .toArray()
+    ])
+
+    return {
+      total,
+      active,
+      outOfStock,
+      lowStock,
+      totalValue: totalValueResult[0]?.totalValue || 0,
+      lowStockThreshold: LOW_STOCK_THRESHOLD
+    }
+  }
+
+  /**
+   * Get inventory products with pagination and stock filters
+   */
+  async getInventoryProducts(params: {
+    page?: number
+    limit?: number
+    stockFilter?: string // 'all' | 'inStock' | 'lowStock' | 'outOfStock'
+    search?: string
+    sortBy?: string
+    sortOrder?: 'asc' | 'desc'
+  }) {
+    const LOW_STOCK_THRESHOLD = AdminService.LOW_STOCK_THRESHOLD
+    const page = params.page || 1
+    const limit = params.limit || 20
+    const skip = (page - 1) * limit
+
+    const filter: Record<string, unknown> = {}
+
+    // Stock filter
+    switch (params.stockFilter) {
+      case 'inStock':
+        filter.stockQuantity = { $gt: LOW_STOCK_THRESHOLD }
+        break
+      case 'lowStock':
+        filter.stockQuantity = { $gt: 0, $lte: LOW_STOCK_THRESHOLD }
+        break
+      case 'outOfStock':
+        filter.stockQuantity = { $lte: 0 }
+        break
+      // 'all' or undefined — no filter
+    }
+
+    // Search filter
+    if (params.search) {
+      filter.$or = [
+        { name: { $regex: params.search, $options: 'i' } },
+        { sku: { $regex: params.search, $options: 'i' } },
+        { barcode: { $regex: params.search, $options: 'i' } }
+      ]
+    }
+
+    const sortBy = params.sortBy || 'stockQuantity'
+    const sortOrder = params.sortOrder === 'desc' ? -1 : 1
+
+    const [products, total] = await Promise.all([
+      databaseService.products
+        .aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'categoryId',
+              foreignField: '_id',
+              as: 'category',
+              pipeline: [{ $project: { _id: 1, name: 1 } }]
+            }
+          },
+          {
+            $lookup: {
+              from: 'brands',
+              localField: 'brandId',
+              foreignField: '_id',
+              as: 'brand',
+              pipeline: [{ $project: { _id: 1, name: 1 } }]
+            }
+          },
+          {
+            $addFields: {
+              category: { $arrayElemAt: ['$category', 0] },
+              brand: { $arrayElemAt: ['$brand', 0] }
+            }
+          },
+          {
+            $project: {
+              _id: 1,
+              name: 1,
+              sku: 1,
+              barcode: 1,
+              featuredImage: 1,
+              stockQuantity: 1,
+              status: 1,
+              isActive: 1,
+              priceVariants: 1,
+              category: 1,
+              brand: 1,
+              updatedAt: 1
+            }
+          },
+          { $sort: { [sortBy]: sortOrder } },
+          { $skip: skip },
+          { $limit: limit }
+        ])
+        .toArray(),
+      databaseService.products.countDocuments(filter)
+    ])
+
+    return {
+      products,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    }
+  }
+
+  /**
+   * Update product stock quantity.
+   * Hỗ trợ 2 mode:
+   * - Absolute mode (mặc định): truyền `stockQuantity` trực tiếp
+   * - Unit mode: truyền `unit` + `quantityInput` để hệ thống tự quy đổi
+   *   VD: unit='Hộp', quantityInput=5 → nếu 1 Hộp = 30 Viên → stockQuantity += 5×30
+   *   adjustment='add' | 'subtract' | 'set' (mặc định 'set')
+   */
+  async updateProductStock(
+    productId: string,
+    stockQuantity: number,
+    options?: {
+      unit?: string
+      quantityInput?: number
+      adjustment?: 'add' | 'subtract' | 'set'
+    }
+  ) {
+    // Fetch current product to resolve priceVariants
+    const product = await databaseService.products.findOne({ _id: new ObjectId(productId) })
+    if (!product) {
+      throw new Error('Product not found')
+    }
+
+    let finalStock: number
+
+    if (options?.unit && options?.quantityInput !== undefined) {
+      // Unit mode: tìm quantityPerUnit cho đơn vị được chọn, rồi quy đổi
+      const variant = (product.priceVariants as Array<{ unit: string; quantityPerUnit?: number }> | undefined)
+        ?.find((v) => v.unit === options.unit)
+      const quantityPerUnit = variant?.quantityPerUnit || 1
+      const baseUnitAmount = options.quantityInput * quantityPerUnit
+
+      const adjustment = options.adjustment || 'set'
+      if (adjustment === 'add') {
+        finalStock = (product.stockQuantity || 0) + baseUnitAmount
+      } else if (adjustment === 'subtract') {
+        finalStock = (product.stockQuantity || 0) - baseUnitAmount
+      } else {
+        // 'set' — đặt thẳng giá trị, nhưng đơn vị đang được chọn → vẫn quy đổi
+        finalStock = baseUnitAmount
+      }
+    } else {
+      // Absolute mode: dùng stockQuantity trực tiếp
+      finalStock = stockQuantity
+    }
+
+    if (finalStock < 0) {
+      throw new Error('Stock quantity cannot be negative')
+    }
+
+    const result = await databaseService.products.findOneAndUpdate(
+      { _id: new ObjectId(productId) },
+      {
+        $set: {
+          stockQuantity: finalStock,
+          status: finalStock === 0 ? 'out_of_stock' : 'active',
+          updatedAt: new Date()
+        }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!result) {
+      throw new Error('Product not found')
+    }
+
+    // Low-stock alert: cảnh báo admin nếu tồn kho sau cập nhật ≤ 30 (fire-and-forget)
+    const NOTIFICATION_LOW_STOCK_THRESHOLD = 30
+    if (finalStock <= NOTIFICATION_LOW_STOCK_THRESHOLD) {
+      try {
+        const io = getIO()
+        notificationService.notifyLowStock(
+          result._id!,
+          result.name,
+          finalStock,
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
+    }
+
+    return result
   }
 }
 

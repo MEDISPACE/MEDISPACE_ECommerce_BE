@@ -218,7 +218,7 @@ export const accessTokenValidator = validate(
                 token: access_token,
                 secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
               })
-                ; (req as Request).decoded_authorization = decoded_authorization
+              ;(req as Request).decoded_authorization = decoded_authorization
             } catch {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_ACCESS_TOKEN,
@@ -260,7 +260,7 @@ export const refreshTokenValidator = validate(
                   status: HTTP_STATUS.UNAUTHORIZED
                 })
               }
-              ; (req as Request).decodedRefreshToken = decodedRefreshToken
+              ;(req as Request).decodedRefreshToken = decodedRefreshToken
             } catch (error) {
               if (error instanceof JsonWebTokenError) {
                 throw new ErrorWithStatus({
@@ -310,7 +310,7 @@ export const emailVerifyTokenValidator = validate(
                   status: HTTP_STATUS.UNAUTHORIZED
                 })
               }
-              ; (req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
+              ;(req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
             } catch {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,

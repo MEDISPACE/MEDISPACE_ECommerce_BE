@@ -2,11 +2,11 @@ import { ObjectId } from 'mongodb'
 
 // Price Variant for multi-unit pricing (Viên, Vỉ, Hộp, Tuýp, Chai...)
 export interface PriceVariant {
-  unit: string           // Đơn vị: "Viên", "Vỉ", "Hộp", "Tuýp", "Chai", "Gói", "Túi", "Cái", "Thùng"...
-  price: number          // Giá bán (bắt buộc)
+  unit: string // Đơn vị: "Viên", "Vỉ", "Hộp", "Tuýp", "Chai", "Gói", "Túi", "Cái", "Thùng"...
+  price: number // Giá bán (bắt buộc)
   originalPrice?: number // Giá niêm yết/gốc (trước giảm giá)
-  costPrice?: number     // Giá vốn (nội bộ, chỉ admin/pharmacist thấy)
-  isDefault: boolean     // Đơn vị mặc định hiển thị
+  costPrice?: number // Giá vốn (nội bộ, chỉ admin/pharmacist thấy)
+  isDefault: boolean // Đơn vị mặc định hiển thị
   quantityPerUnit: number // Số lượng đơn vị nhỏ nhất trong 1 đơn vị này (dùng để tính stock)
 }
 

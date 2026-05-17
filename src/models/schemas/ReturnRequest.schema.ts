@@ -1,0 +1,237 @@
+import { ObjectId } from 'mongodb'
+
+// Return reasons - Lý do trả hàng
+export enum ReturnReason {
+  DEFECTIVE = 'defective', // Sản phẩm lỗi/hư hỏng
+  WRONG_ITEM = 'wrong_item', // Giao sai hàng
+  EXPIRED = 'expired', // Hết hạn sử dụng
+  DAMAGED_SHIPPING = 'damaged_shipping', // Hư hại trong vận chuyển
+  WRONG_PRESCRIPTION = 'wrong_prescription', // Không đúng đơn thuốc (Rx)
+  ALLERGIC_REACTION = 'allergic_reaction', // Phản ứng dị ứng
+  CHANGED_MIND = 'changed_mind', // Đổi ý (chỉ OTC, chưa mở seal)
+  QUALITY_ISSUE = 'quality_issue', // Vấn đề chất lượng
+  OTHER = 'other' // Lý do khác
+}
+
+// Return request status
+export enum ReturnStatus {
+  PENDING = 'pending', // Chờ xử lý
+  REVIEWING = 'reviewing', // Đang xem xét (Dược sĩ/Admin review)
+  APPROVED = 'approved', // Đã duyệt, chờ nhận hàng trả
+  REJECTED = 'rejected', // Từ chối
+  AWAITING_RETURN = 'awaiting_return', // Chờ khách gửi hàng trả
+  RECEIVED = 'received', // Đã nhận hàng trả
+  REFUND_PROCESSING = 'refund_processing', // Đang xử lý hoàn tiền
+  COMPLETED = 'completed', // Hoàn tất
+  CANCELLED = 'cancelled' // Khách hủy yêu cầu
+}
+
+// Return type
+export enum ReturnType {
+  REFUND = 'refund', // Hoàn tiền
+  EXCHANGE = 'exchange' // Đổi hàng
+}
+
+// Refund method
+export enum RefundMethod {
+  ORIGINAL = 'original', // Hoàn về phương thức thanh toán ban đầu
+  BANK_TRANSFER = 'bank_transfer', // Chuyển khoản ngân hàng
+  WALLET = 'wallet' // Ví điện tử/Credit trong hệ thống
+}
+
+// Return item interface
+export interface ReturnItem {
+  productId: ObjectId
+  productName: string
+  productImage?: string // Ảnh sản phẩm từ order
+  sku: string
+  unit: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  isPrescriptionProduct: boolean // Thuốc kê đơn?
+  returnReason: ReturnReason
+  reasonDetail?: string
+}
+
+// Return shipping info
+export interface ReturnShippingInfo {
+  trackingNumber?: string
+  carrier?: string
+  shippedAt?: Date
+  receivedAt?: Date
+  condition?: 'good' | 'damaged' | 'opened' | 'unusable'
+  conditionNotes?: string
+}
+
+// Bank info for refund
+export interface BankInfo {
+  bankName: string
+  accountNumber: string
+  accountHolder: string
+  branch?: string
+}
+
+// Return Request Type
+export interface ReturnRequestType {
+  _id?: ObjectId
+  requestNumber: string // RET-timestamp-random
+  orderId: ObjectId // Order liên quan
+  orderNumber: string // Order number để dễ tra cứu
+  userId: ObjectId // Khách hàng
+
+  // Chi tiết sản phẩm trả
+  items: ReturnItem[]
+
+  // Lý do chính
+  reason: ReturnReason
+  reasonDetail: string // Mô tả chi tiết
+  evidence: string[] // URLs hình ảnh/video chứng minh
+
+  // Loại yêu cầu
+  type: ReturnType
+  refundMethod?: RefundMethod
+
+  // Thông tin ngân hàng (nếu hoàn tiền qua bank)
+  bankInfo?: BankInfo
+
+  // Số tiền
+  requestedAmount: number // Tổng tiền khách yêu cầu hoàn
+  approvedAmount?: number // Số tiền được duyệt
+  refundedAmount?: number // Số tiền đã hoàn thực tế
+
+  // Trạng thái
+  status: ReturnStatus
+
+  // Thông tin xử lý
+  reviewedBy?: ObjectId // Pharmacist/Admin xử lý
+  reviewedAt?: Date
+  reviewNotes?: string // Ghi chú nội bộ
+  rejectionReason?: string // Lý do từ chối (nếu reject)
+
+  // Thông tin hoàn tiền
+  refundTransactionId?: string // Mã giao dịch hoàn tiền
+  refundedAt?: Date
+  refundNotes?: string
+
+  // Thông tin nhận hàng trả
+  returnShippingInfo?: ReturnShippingInfo
+
+  // Thời hạn
+  returnDeadline?: Date // Hạn cuối gửi hàng trả
+
+  // Timestamps
+  createdAt?: Date
+  updatedAt?: Date
+}
+
+export default class ReturnRequest {
+  _id?: ObjectId
+  requestNumber: string
+  orderId: ObjectId
+  orderNumber: string
+  userId: ObjectId
+
+  items: ReturnItem[]
+
+  reason: ReturnReason
+  reasonDetail: string
+  evidence: string[]
+
+  type: ReturnType
+  refundMethod?: RefundMethod
+  bankInfo?: BankInfo
+
+  requestedAmount: number
+  approvedAmount?: number
+  refundedAmount?: number
+
+  status: ReturnStatus
+
+  reviewedBy?: ObjectId
+  reviewedAt?: Date
+  reviewNotes?: string
+  rejectionReason?: string
+
+  refundTransactionId?: string
+  refundedAt?: Date
+  refundNotes?: string
+
+  returnShippingInfo?: ReturnShippingInfo
+
+  returnDeadline?: Date
+
+  createdAt?: Date
+  updatedAt?: Date
+
+  constructor(request: ReturnRequestType) {
+    const now = new Date()
+
+    this._id = request._id
+    this.requestNumber = request.requestNumber
+    this.orderId = request.orderId
+    this.orderNumber = request.orderNumber
+    this.userId = request.userId
+
+    this.items = request.items
+    this.reason = request.reason
+    this.reasonDetail = request.reasonDetail
+    this.evidence = request.evidence || []
+
+    this.type = request.type || ReturnType.REFUND
+    this.refundMethod = request.refundMethod
+    this.bankInfo = request.bankInfo
+
+    this.requestedAmount = request.requestedAmount
+    this.approvedAmount = request.approvedAmount
+    this.refundedAmount = request.refundedAmount
+
+    this.status = request.status || ReturnStatus.PENDING
+
+    this.reviewedBy = request.reviewedBy
+    this.reviewedAt = request.reviewedAt
+    this.reviewNotes = request.reviewNotes
+    this.rejectionReason = request.rejectionReason
+
+    this.refundTransactionId = request.refundTransactionId
+    this.refundedAt = request.refundedAt
+    this.refundNotes = request.refundNotes
+
+    this.returnShippingInfo = request.returnShippingInfo
+
+    // Hạn gửi hàng trả: 7 ngày sau khi được duyệt
+    this.returnDeadline = request.returnDeadline
+
+    this.createdAt = request.createdAt || now
+    this.updatedAt = request.updatedAt || now
+  }
+
+  // Generate unique request number
+  static generateRequestNumber(): string {
+    const timestamp = Date.now()
+    const random = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, '0')
+    return `RET-${timestamp}-${random}`
+  }
+
+  // Check if request can be cancelled
+  canBeCancelled(): boolean {
+    return [ReturnStatus.PENDING, ReturnStatus.REVIEWING].includes(this.status as ReturnStatus)
+  }
+
+  // Check if request is editable
+  isEditable(): boolean {
+    return this.status === ReturnStatus.PENDING
+  }
+
+  // Check if refund can be processed
+  canProcessRefund(): boolean {
+    return this.status === ReturnStatus.RECEIVED && typeof this.approvedAmount === 'number' && this.approvedAmount > 0
+  }
+
+  // Calculate if contains prescription products
+  hasPrescriptionProducts(): boolean {
+    return this.items.some((item) => item.isPrescriptionProduct)
+  }
+}

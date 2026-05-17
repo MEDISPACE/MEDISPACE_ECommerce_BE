@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb'
 import Cart, { CartItem } from '~/models/schemas/Cart.schema'
 import databaseService from './database.services'
 import productsService from './products.services'
+import campaignsService from './campaigns.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { generateSessionId } from '~/utils/crypto'
@@ -96,7 +97,74 @@ class CartService {
       return { cart: newCart, sessionId: newCart.sessionId }
     }
 
-    return { cart, sessionId: cart.sessionId }
+    // Refresh campaign prices mỗi lần getCart — đảm bảo giá hiển thị luôn khớp campaign hiện tại
+    const refreshed = await this.refreshCampaignPrices(cart)
+    return { cart: refreshed, sessionId: cart.sessionId }
+  }
+
+  /**
+   * Refresh campaign prices cho tất cả items trong cart.
+   * Gọi mỗi khi getCart để đảm bảo giá items luôn phản ánh campaign đang active.
+   * Nếu price thay đổi thì persist lại vào DB.
+   */
+  private async refreshCampaignPrices(cart: any) {
+    if (!cart.items || cart.items.length === 0) return cart
+
+    let hasChanges = false
+
+    for (const item of cart.items) {
+      try {
+        const product = await productsService.getProductById(item.productId.toString())
+        if (!product) continue
+
+        const selectedVariant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+        const originalPrice = selectedVariant?.price || product.price || 0
+
+        const campaign = await campaignsService.getActiveCampaignForProduct(
+          product._id,
+          product.categoryId,
+          product.brandId,
+          product.requiresPrescription
+        )
+
+        const newUnitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        const newCampaignId = campaign?._id
+
+        // Chỉ cập nhật nếu giá thay đổi (campaign bật/tắt/hết hạn)
+        if (item.unitPrice !== newUnitPrice || item.originalUnitPrice !== originalPrice) {
+          item.unitPrice = newUnitPrice
+          item.originalUnitPrice = originalPrice
+          item.totalPrice = newUnitPrice * item.quantity
+          item.campaignId = newCampaignId
+          hasChanges = true
+        }
+      } catch {
+        // Nếu lỗi fetch product, giữ nguyên giá cũ
+      }
+    }
+
+    if (!hasChanges) return cart
+
+    // Tính lại subtotal và totalAmount
+    const newSubtotal = cart.items.reduce((sum: number, item: any) => sum + item.totalPrice, 0)
+    const couponDiscount = (cart.appliedCoupons || [])
+      .filter((c: any) => c.type !== 'free_shipping')
+      .reduce((sum: number, c: any) => sum + (c.discountAmount || 0), 0)
+    const newTotal = Math.max(0, newSubtotal - couponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0))
+
+    await databaseService.carts.updateOne(
+      { _id: cart._id },
+      {
+        $set: {
+          items: cart.items,
+          subtotal: newSubtotal,
+          totalAmount: newTotal,
+          updatedAt: new Date()
+        }
+      }
+    )
+
+    return { ...cart, items: cart.items, subtotal: newSubtotal, totalAmount: newTotal }
   }
 
   // Legacy method for backward compatibility
@@ -106,7 +174,14 @@ class CartService {
   }
 
   // Add item to cart
-  async addItemToCart(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string, requestedUnit?: string, requestedPrice?: number) {
+  async addItemToCart(
+    productId: ObjectId,
+    quantity: number,
+    userId?: ObjectId,
+    sessionId?: string,
+    requestedUnit?: string,
+    requestedPrice?: number
+  ) {
     // Verify product exists and get details
     const product = await productsService.getProductById(productId.toString())
     if (!product) {
@@ -134,27 +209,26 @@ class CartService {
     // Convert cart to Cart instance for methods
     const cartInstance = new Cart(cart)
 
-    // Use requested unit/price if provided, otherwise use default variant
-    let unitPrice: number
-    let unit: string
+    // Determine unit
+    let unit: string = requestedUnit || product.priceVariants?.find((v: any) => v.isDefault)?.unit || product.priceVariants?.[0]?.unit || 'Sản phẩm'
 
-    if (requestedUnit && requestedPrice) {
-      // Use the unit and price passed from frontend (selected by user)
-      unit = requestedUnit
-      unitPrice = requestedPrice
-    } else if (requestedUnit) {
-      // Find the price for the requested unit from product variants
-      const variant = product.priceVariants?.find((v: any) => v.unit === requestedUnit)
-      unit = requestedUnit
-      unitPrice = variant?.price || product.priceVariants?.[0]?.price || 0
-    } else {
-      // Fall back to default variant
-      const defaultVariant = product.priceVariants?.find((v: any) => v.isDefault) || product.priceVariants?.[0]
-      unitPrice = defaultVariant?.price || product.price || 0
-      unit = defaultVariant?.unit || 'Sản phẩm'
-    }
+    // Determine original price based on unit
+    const selectedVariant = product.priceVariants?.find((v: any) => v.unit === unit)
+    const originalUnitPrice = selectedVariant?.price || product.priceVariants?.[0]?.price || product.price || 0
 
-    // Add item with correct parameters, including priceVariants for unit selector
+    // Fetch active campaign for the product
+    const campaign = await campaignsService.getActiveCampaignForProduct(
+      product._id,
+      product.categoryId,
+      product.brandId,
+      product.requiresPrescription
+    )
+
+    // Calculate actual sale price using shared helper
+    const unitPrice = campaignsService.applyDiscountToPrice(originalUnitPrice, campaign)
+    const campaignId = campaign?._id
+
+    // Add item — ignoring requestedPrice from FE (price is authoritative from backend)
     cartInstance.addItem(
       productId,
       product.name,
@@ -162,9 +236,11 @@ class CartService {
       unit,
       quantity,
       unitPrice,
+      originalUnitPrice,
       product.requiresPrescription || false,
       product.featuredImage,
-      product.priceVariants
+      product.priceVariants,
+      campaignId
     )
 
     // Update cart in database using _id
@@ -188,7 +264,13 @@ class CartService {
   }
 
   // Update item quantity
-  async updateItemQuantity(productId: ObjectId, quantity: number, userId?: ObjectId, sessionId?: string, unit?: string) {
+  async updateItemQuantity(
+    productId: ObjectId,
+    quantity: number,
+    userId?: ObjectId,
+    sessionId?: string,
+    unit?: string
+  ) {
     if (quantity < 1 || quantity > 10) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
@@ -297,9 +379,23 @@ class CartService {
       })
     }
 
+    // Calculate original price
+    const originalUnitPrice = variant.price || product.price || 0
+
+    // Fetch campaign and apply with shared helper
+    const campaign = await campaignsService.getActiveCampaignForProduct(
+      product._id,
+      product.categoryId,
+      product.brandId,
+      product.requiresPrescription
+    )
+
+    const unitPrice = campaignsService.applyDiscountToPrice(originalUnitPrice, campaign)
+    const campaignId = campaign?._id
+
     // Convert to Cart instance and update
     const cartInstance = new Cart(cart)
-    cartInstance.updateItemUnit(productId, unit, variant.price, currentUnit)
+    cartInstance.updateItemUnit(productId, unit, unitPrice, originalUnitPrice, currentUnit, campaignId)
 
     // Update in database
     await databaseService.carts.updateOne(
@@ -369,6 +465,9 @@ class CartService {
           subtotal: cartInstance.subtotal,
           totalAmount: cartInstance.totalAmount,
           requiresPrescription: cartInstance.requiresPrescription,
+          appliedCoupons: [],   // Xóa coupons khi clear cart
+          discountAmount: 0,
+          loyaltyDiscount: 0,
           updatedAt: new Date(),
           lastActivityAt: new Date()
         }
@@ -416,12 +515,12 @@ class CartService {
           ...item,
           product: product
             ? {
-              _id: product._id,
-              name: product.name,
-              sku: product.sku,
-              featuredImage: product.featuredImage,
-              requiresPrescription: product.requiresPrescription
-            }
+                _id: product._id,
+                name: product.name,
+                sku: product.sku,
+                featuredImage: product.featuredImage,
+                requiresPrescription: product.requiresPrescription
+              }
             : null
         }
       })

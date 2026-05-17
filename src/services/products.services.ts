@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import Product from '~/models/schemas/Product.schema'
 import { CreateProductReqBody, UpdateProductReqBody, GetProductsQuery } from '~/models/requests/Product.request'
 import { PRODUCTS_MESSAGES } from '~/constants/message'
@@ -7,6 +8,12 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 import brandsService from './brands.services'
 import categoriesService from './categories.services'
+import typesenseService from './typesense.services'
+import campaignService from './campaigns.services'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
+
+const LOW_STOCK_THRESHOLD = 30
 
 class ProductsService {
   // Generate slug from name
@@ -131,6 +138,14 @@ class ProductsService {
 
     await databaseService.products.insertOne(product)
 
+    // Sync to Typesense (fire-and-forget)
+    typesenseService
+      .indexProduct({
+        ...product,
+        category: { name: (await categoriesService.getCategoryById(payload.categoryId.toString())).name }
+      })
+      .catch(() => {})
+
     // Update category product count
     await databaseService.categories.updateOne(
       { _id: new ObjectId(payload.categoryId) },
@@ -145,13 +160,22 @@ class ProductsService {
     return product
   }
 
+  /**
+   * Invalidate all product-related caches.
+   * Called after product CRUD operations.
+   */
+  private async invalidateProductCache(slug?: string): Promise<void> {
+    const patterns = ['products:*']
+    if (slug) patterns.push(`products:slug:${slug}`)
+    await cacheService.invalidate(...patterns)
+  }
+
   // Get products with pagination and filters
   async getProducts(query: GetProductsQuery) {
     const page = parseInt(query.page || '1')
-    const limit = parseInt(query.limit || '1000') // Default 1000 for good performance
+    const limit = parseInt(query.limit || '20') // Default 20 for pagination
     const skip = (page - 1) * limit
 
-    console.log(`[Products Service] getProducts - page: ${page}, limit: ${limit}`)
     const startTime = Date.now()
 
     // Build filter
@@ -213,13 +237,8 @@ class ProductsService {
       filter.requiresPrescription = query.requiresPrescription === 'true'
     }
 
-    if (query.search) {
-      filter.$or = [
-        { name: { $regex: query.search, $options: 'i' } },
-        { shortDescription: { $regex: query.search, $options: 'i' } },
-        { sku: { $regex: query.search, $options: 'i' } }
-      ]
-    }
+    // Enhanced search - will be applied in aggregation pipeline for category/brand
+    const searchQuery = query.search
 
     if (query.minStock || query.maxStock) {
       const stockFilter: Record<string, number> = {}
@@ -237,13 +256,91 @@ class ProductsService {
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
     const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder }
 
-    // For large queries (limit > 500), skip expensive lookups for better performance
-    const shouldPopulate = limit <= 500
-    console.log(`[Products Service] shouldPopulate: ${shouldPopulate} (limit: ${limit})`)
+    // Optimize query - always use efficient aggregation with minimal fields
 
-    // Get products with pagination
+    // Get products with pagination - optimized with only needed fields
     const [products, totalCount] = await Promise.all([
-      shouldPopulate
+      databaseService.products
+        .aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'categoryId',
+              foreignField: '_id',
+              as: 'category',
+              pipeline: [
+                { $project: { _id: 1, name: 1, slug: 1 } } // Only needed fields
+              ]
+            }
+          },
+          {
+            $lookup: {
+              from: 'brands',
+              localField: 'brandId',
+              foreignField: '_id',
+              as: 'brand',
+              pipeline: [
+                { $project: { _id: 1, name: 1, slug: 1, logo: 1 } } // Only needed fields
+              ]
+            }
+          },
+          {
+            $addFields: {
+              category: { $arrayElemAt: ['$category', 0] },
+              brand: { $arrayElemAt: ['$brand', 0] }
+            }
+          },
+          // Enhanced search filter after lookup
+          ...(searchQuery
+            ? [
+                {
+                  $match: {
+                    $or: [
+                      { name: { $regex: searchQuery, $options: 'i' } },
+                      { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                      { longDescription: { $regex: searchQuery, $options: 'i' } },
+                      { sku: { $regex: searchQuery, $options: 'i' } },
+                      { ingredients: { $regex: searchQuery, $options: 'i' } },
+                      { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                      { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                    ]
+                  }
+                }
+              ]
+            : []),
+          {
+            $project: {
+              // Only select fields needed for product listing
+              _id: 1,
+              name: 1,
+              slug: 1,
+              sku: 1,
+              shortDescription: 1,
+              categoryId: 1,
+              brandId: 1,
+              priceVariants: 1,
+              stockQuantity: 1,
+              status: 1,
+              isActive: 1,
+              requiresPrescription: 1,
+              featuredImage: 1,
+              images: 1,
+              rating: 1,
+              reviewCount: 1,
+              createdAt: 1,
+              category: 1,
+              brand: 1,
+              packaging: 1
+            }
+          },
+          { $sort: sort },
+          { $skip: skip },
+          { $limit: limit }
+        ])
+        .toArray(),
+      // Count with search filter
+      searchQuery
         ? databaseService.products
             .aggregate([
               { $match: filter },
@@ -252,7 +349,8 @@ class ProductsService {
                   from: 'categories',
                   localField: 'categoryId',
                   foreignField: '_id',
-                  as: 'category'
+                  as: 'category',
+                  pipeline: [{ $project: { name: 1 } }]
                 }
               },
               {
@@ -260,7 +358,8 @@ class ProductsService {
                   from: 'brands',
                   localField: 'brandId',
                   foreignField: '_id',
-                  as: 'brand'
+                  as: 'brand',
+                  pipeline: [{ $project: { name: 1 } }]
                 }
               },
               {
@@ -269,22 +368,30 @@ class ProductsService {
                   brand: { $arrayElemAt: ['$brand', 0] }
                 }
               },
-              { $sort: sort },
-              { $skip: skip },
-              { $limit: limit }
+              {
+                $match: {
+                  $or: [
+                    { name: { $regex: searchQuery, $options: 'i' } },
+                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                    { longDescription: { $regex: searchQuery, $options: 'i' } },
+                    { sku: { $regex: searchQuery, $options: 'i' } },
+                    { ingredients: { $regex: searchQuery, $options: 'i' } },
+                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                  ]
+                }
+              },
+              { $count: 'total' }
             ])
             .toArray()
-        : databaseService.products.find(filter).sort(sort).skip(skip).limit(limit).toArray(),
-      databaseService.products.countDocuments(filter)
+            .then((result) => result[0]?.total || 0)
+        : databaseService.products.countDocuments(filter)
     ])
 
     const endTime = Date.now()
-    console.log(
-      `[Products Service] Returning ${products.length} products, total in DB: ${totalCount}, took ${endTime - startTime}ms`
-    )
 
     return {
-      products,
+      products: await campaignService.enrichProductsWithCampaigns(products),
       pagination: {
         page,
         limit,
@@ -349,65 +456,68 @@ class ProductsService {
       })
     }
 
-    return products[0]
+    return campaignService.enrichProductWithCampaign(products[0])
   }
 
   // Get product by slug with populated category and brand data
+  // ✅ CACHED: Product detail by slug (expensive 4-way $lookup)
   async getProductBySlug(slug: string) {
-    const products = await databaseService.products
-      .aggregate([
-        { $match: { slug } },
-        {
-          $lookup: {
-            from: 'categories',
-            localField: 'categoryId',
-            foreignField: '_id',
-            as: 'category'
+    return cacheService.getOrSet(`products:slug:${slug}`, async () => {
+      const products = await databaseService.products
+        .aggregate([
+          { $match: { slug } },
+          {
+            $lookup: {
+              from: 'categories',
+              localField: 'categoryId',
+              foreignField: '_id',
+              as: 'category'
+            }
+          },
+          {
+            $lookup: {
+              from: 'brands',
+              localField: 'brandId',
+              foreignField: '_id',
+              as: 'brand'
+            }
+          },
+          {
+            $lookup: {
+              from: 'productDetails',
+              localField: '_id',
+              foreignField: 'productId',
+              as: 'details'
+            }
+          },
+          {
+            $lookup: {
+              from: 'productMedia',
+              localField: '_id',
+              foreignField: 'productId',
+              as: 'media'
+            }
+          },
+          {
+            $addFields: {
+              category: { $arrayElemAt: ['$category', 0] },
+              brand: { $arrayElemAt: ['$brand', 0] },
+              details: { $arrayElemAt: ['$details', 0] },
+              media: { $arrayElemAt: ['$media', 0] }
+            }
           }
-        },
-        {
-          $lookup: {
-            from: 'brands',
-            localField: 'brandId',
-            foreignField: '_id',
-            as: 'brand'
-          }
-        },
-        {
-          $lookup: {
-            from: 'productDetails',
-            localField: '_id',
-            foreignField: 'productId',
-            as: 'details'
-          }
-        },
-        {
-          $lookup: {
-            from: 'productMedia',
-            localField: '_id',
-            foreignField: 'productId',
-            as: 'media'
-          }
-        },
-        {
-          $addFields: {
-            category: { $arrayElemAt: ['$category', 0] },
-            brand: { $arrayElemAt: ['$brand', 0] },
-            details: { $arrayElemAt: ['$details', 0] },
-            media: { $arrayElemAt: ['$media', 0] }
-          }
-        }
-      ])
-      .toArray()
+        ])
+        .toArray()
 
-    if (!products.length) {
-      throw new ErrorWithStatus({
-        message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
-        status: HTTP_STATUS.NOT_FOUND
-      })
-    }
+      if (!products.length) {
+        throw new ErrorWithStatus({
+          message: PRODUCTS_MESSAGES.PRODUCT_NOT_FOUND,
+          status: HTTP_STATUS.NOT_FOUND
+        })
+      }
 
-    return products[0]
+      return campaignService.enrichProductWithCampaign(products[0])
+    }, 120) // 2 minutes
   }
 
   // Update product
@@ -475,7 +585,15 @@ class ProductsService {
       await brandsService.updateProductCount(new ObjectId(payload.brandId), 1)
     }
 
-    return await this.getProductById(productId)
+    const updated = await this.getProductById(productId)
+
+    // Sync to Typesense (fire-and-forget)
+    typesenseService.indexProduct(updated).catch(() => {})
+
+    // Invalidate cache
+    this.invalidateProductCache(product.slug).catch(() => {})
+
+    return updated
   }
 
   // Toggle product status
@@ -493,7 +611,15 @@ class ProductsService {
       }
     )
 
-    return await this.getProductById(productId)
+    const updated = await this.getProductById(productId)
+
+    // Sync to Typesense (fire-and-forget)
+    typesenseService.indexProduct(updated).catch(() => {})
+
+    // Invalidate cache (fire-and-forget)
+    this.invalidateProductCache().catch(() => {})
+
+    return updated
   }
 
   // Update stock quantity
@@ -519,7 +645,25 @@ class ProductsService {
       }
     )
 
-    return await this.getProductById(productId)
+    const updated = await this.getProductById(productId)
+
+    // Sync to Typesense (fire-and-forget) — cập nhật inStock & stockQuantity
+    typesenseService.indexProduct(updated).catch(() => {})
+
+    // Low-stock alert: cảnh báo admin nếu tồn kho sau khi cập nhật ≤ 30 (fire-and-forget)
+    if (quantity <= LOW_STOCK_THRESHOLD) {
+      try {
+        const io = getIO()
+        notificationService.notifyLowStock(
+          new ObjectId(productId),
+          (updated as unknown as { name: string }).name,
+          quantity,
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
+    }
+
+    return updated
   }
 
   // Delete product
@@ -527,6 +671,9 @@ class ProductsService {
     const product = await this.getProductById(productId)
 
     await databaseService.products.deleteOne({ _id: new ObjectId(productId) })
+
+    // Remove from Typesense (fire-and-forget) — tránh ghost product
+    typesenseService.removeProduct(productId).catch(() => {})
 
     // Update category product count
     await databaseService.categories.updateOne(
@@ -538,6 +685,9 @@ class ProductsService {
     if (product.brandId) {
       await brandsService.updateProductCount(product.brandId, -1)
     }
+
+    // Invalidate cache
+    await this.invalidateProductCache(product.slug)
 
     return { message: PRODUCTS_MESSAGES.DELETE_PRODUCT_SUCCESS }
   }

@@ -5,7 +5,8 @@ import {
   getPrescriptionByIdController,
   getPendingPrescriptionsController,
   verifyPrescriptionController,
-  getPrescriptionStatsController
+  getPrescriptionStatsController,
+  scanPrescriptionController
 } from '~/controllers/prescriptions.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
@@ -59,6 +60,15 @@ prescriptionsRouter.get(
   authenticatePharmacist,
   wrapRequestHandler(getPendingPrescriptionsController)
 )
+
+/**
+ * Description: Scan prescription image via OCR Service
+ * Path: /prescriptions/scan
+ * Method: POST
+ * Body: { imageUrl: string }
+ * Headers: { Authorization: Bearer <access_token> }
+ */
+prescriptionsRouter.post('/scan', accessTokenValidator, wrapRequestHandler(scanPrescriptionController))
 
 /**
  * Description: Get prescription by ID

@@ -1,0 +1,122 @@
+name: Deploy
+
+on:
+  # Auto-trigger từ BE, FE, Python repos sau khi build-push thành công
+  repository_dispatch:
+    types: [deploy]
+
+  # Manual: deploy lại hoặc rollback
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action'
+        required: true
+        default: deploy
+        type: choice
+        options: [deploy, rollback]
+      service:
+        description: 'Service (empty = all)'
+        required: false
+        default: ''
+        type: choice
+        options: ['', backend, frontend, ocr-service, ml-service]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'repository_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Determine service
+        id: svc
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "service=${{ github.event.client_payload.service }}" >> $GITHUB_OUTPUT
+          else
+            echo "service=${{ github.event.inputs.service }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy
+        run: |
+          SERVICE="${{ steps.svc.outputs.service }}"
+          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "📥 Pulling latest code..."
+            git pull origin develop
+
+            echo "🔑 Login Docker Hub..."
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+            if [ -n "${SERVICE}" ]; then
+              echo "🔄 Pulling ${SERVICE}..."
+              docker compose pull ${SERVICE}
+              echo "🚀 Restarting ${SERVICE}..."
+              docker compose up -d ${SERVICE}
+            else
+              echo "🔄 Pulling all..."
+              docker compose pull
+              echo "🚀 Starting all..."
+              docker compose up -d
+            fi
+
+            echo "⏳ Waiting 10s..."
+            sleep 10
+
+            echo "🏥 Status:"
+            docker compose ps
+
+            echo "🧹 Cleaning up dangling images..."
+            docker image prune -f
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
+
+  rollback:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.action == 'rollback'
+
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Rollback
+        run: |
+          SERVICE="${{ github.event.inputs.service }}"
+          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            if [ -n "${SERVICE}" ]; then
+              echo "⏪ Rollback ${SERVICE}..."
+              docker compose stop ${SERVICE}
+              docker compose up -d ${SERVICE}
+            else
+              echo "⏪ Full rollback..."
+              docker compose down && docker compose up -d
+            fi
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/id_rsa

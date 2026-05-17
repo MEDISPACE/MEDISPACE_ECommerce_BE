@@ -1,28 +1,36 @@
-﻿
 import { Router } from 'express'
 import {
-    getDashboardStatsController,
-    getRecentActivitiesController,
-    getUserStatsController,
-    getAllUsersController,
-    createUserController,
-    updateUserController,
-    deleteUserController,
-    resetUserPasswordController,
-    verifyUserEmailController,
-    getOrderStatsController,
-    getAllOrdersController,
-    getOrderDetailsController,
-    updateOrderStatusController,
-    getAllPrescriptionsController,
-    getPrescriptionStatsController,
-    updatePrescriptionStatusController,
-    bulkUpdatePrescriptionsController,
-    getPharmacistStatsController,
-    getReportsAnalyticsController,
-    getRevenueAnalyticsController,
-    getProductAnalyticsController,
-    getCustomerAnalyticsController
+  getDashboardStatsController,
+  getRecentActivitiesController,
+  getUserStatsController,
+  getAllUsersController,
+  createUserController,
+  updateUserController,
+  deleteUserController,
+  resetUserPasswordController,
+  verifyUserEmailController,
+  getOrderStatsController,
+  getAllOrdersController,
+  getOrderDetailsController,
+  updateOrderStatusController,
+  getAllPrescriptionsController,
+  getPrescriptionStatsController,
+  updatePrescriptionStatusController,
+  bulkUpdatePrescriptionsController,
+  getPharmacistStatsController,
+  getReportsAnalyticsController,
+  exportReportsAnalyticsController,
+  getRevenueAnalyticsController,
+  getProductAnalyticsController,
+  getCustomerAnalyticsController,
+  getChatStatsController,
+  adminGetConversationsController,
+  adminGetConversationMessagesController,
+  adminCloseConversationController,
+  adminTransferConversationController,
+  getInventoryStatsController,
+  getInventoryProductsController,
+  updateProductStockController
 } from '~/controllers/admin.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -39,11 +47,11 @@ const adminRouter = Router()
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/dashboard/stats',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getDashboardStatsController)
+  '/dashboard/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getDashboardStatsController)
 )
 
 /**
@@ -54,11 +62,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/dashboard/recent-activities',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getRecentActivitiesController)
+  '/dashboard/recent-activities',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getRecentActivitiesController)
 )
 
 // ==================== USER MANAGEMENT ====================
@@ -70,11 +78,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/users/stats',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getUserStatsController)
+  '/users/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getUserStatsController)
 )
 
 /**
@@ -84,11 +92,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/users/pharmacists/stats',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getPharmacistStatsController)
+  '/users/pharmacists/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getPharmacistStatsController)
 )
 
 /**
@@ -99,11 +107,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/users',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getAllUsersController)
+  '/users',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getAllUsersController)
 )
 
 /**
@@ -114,11 +122,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.post(
-    '/users',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(createUserController)
+  '/users',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(createUserController)
 )
 
 /**
@@ -129,11 +137,11 @@ adminRouter.post(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.patch(
-    '/users/:userId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(updateUserController)
+  '/users/:userId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(updateUserController)
 )
 
 /**
@@ -143,11 +151,11 @@ adminRouter.patch(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.delete(
-    '/users/:userId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(deleteUserController)
+  '/users/:userId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(deleteUserController)
 )
 
 /**
@@ -157,11 +165,11 @@ adminRouter.delete(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.patch(
-    '/users/:userId/reset-password',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(resetUserPasswordController)
+  '/users/:userId/reset-password',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(resetUserPasswordController)
 )
 
 /**
@@ -171,11 +179,11 @@ adminRouter.patch(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.patch(
-    '/users/:userId/verify-email',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(verifyUserEmailController)
+  '/users/:userId/verify-email',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(verifyUserEmailController)
 )
 
 // ==================== ORDER MANAGEMENT ====================
@@ -186,11 +194,11 @@ adminRouter.patch(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/orders/stats',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getOrderStatsController)
+  '/orders/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getOrderStatsController)
 )
 /**
  * Description: Get all orders with filters
@@ -200,11 +208,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/orders',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getAllOrdersController)
+  '/orders',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getAllOrdersController)
 )
 /**
  * Description: Get order details
@@ -213,11 +221,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/orders/:orderId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getOrderDetailsController)
+  '/orders/:orderId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getOrderDetailsController)
 )
 /**
  * Description: Update order status
@@ -227,14 +235,59 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.patch(
-    '/orders/:orderId/status',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(updateOrderStatusController)
+  '/orders/:orderId/status',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(updateOrderStatusController)
 )
 
-export default adminRouter
+// ==================== CHAT MANAGEMENT ====================
+
+// GET /admin/chats/stats
+adminRouter.get(
+  '/chats/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getChatStatsController)
+)
+
+// GET /admin/chats/conversations
+adminRouter.get(
+  '/chats/conversations',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(adminGetConversationsController)
+)
+
+// GET /admin/chats/conversations/:conversationId/messages
+adminRouter.get(
+  '/chats/conversations/:conversationId/messages',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(adminGetConversationMessagesController)
+)
+
+// PATCH /admin/chats/conversations/:conversationId/close
+adminRouter.patch(
+  '/chats/conversations/:conversationId/close',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(adminCloseConversationController)
+)
+
+// PATCH /admin/chats/conversations/:conversationId/transfer
+adminRouter.patch(
+  '/chats/conversations/:conversationId/transfer',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(adminTransferConversationController)
+)
 
 // ==================== PRESCRIPTION MANAGEMENT ====================
 
@@ -245,11 +298,11 @@ export default adminRouter
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/prescriptions/stats',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getPrescriptionStatsController)
+  '/prescriptions/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getPrescriptionStatsController)
 )
 
 /**
@@ -260,11 +313,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/prescriptions',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getAllPrescriptionsController)
+  '/prescriptions',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getAllPrescriptionsController)
 )
 
 /**
@@ -275,11 +328,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.patch(
-    '/prescriptions/:prescriptionId/status',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(updatePrescriptionStatusController)
+  '/prescriptions/:prescriptionId/status',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(updatePrescriptionStatusController)
 )
 
 /**
@@ -290,11 +343,11 @@ adminRouter.patch(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.patch(
-    '/prescriptions/bulk-update',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(bulkUpdatePrescriptionsController)
+  '/prescriptions/bulk-update',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(bulkUpdatePrescriptionsController)
 )
 
 // ==================== REPORTS & ANALYTICS ====================
@@ -307,11 +360,26 @@ adminRouter.patch(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/reports/analytics',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getReportsAnalyticsController)
+  '/reports/analytics',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getReportsAnalyticsController)
+)
+
+/**
+ * Description: Export reports analytics
+ * Path: /admin/reports/export
+ * Method: GET
+ * Query: { timeRange?: 'week' | 'month' | 'quarter' | 'year' | 'custom', format: 'excel' | 'pdf' }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+  '/reports/export',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(exportReportsAnalyticsController)
 )
 
 /**
@@ -322,11 +390,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/reports/revenue',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getRevenueAnalyticsController)
+  '/reports/revenue',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getRevenueAnalyticsController)
 )
 
 /**
@@ -337,11 +405,11 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/reports/products',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getProductAnalyticsController)
+  '/reports/products',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getProductAnalyticsController)
 )
 
 /**
@@ -352,9 +420,57 @@ adminRouter.get(
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.get(
-    '/reports/customers',
-    accessTokenValidator,
-    verifiedUserValidator,
-    adminRequired,
-    wrapRequestHandler(getCustomerAnalyticsController)
+  '/reports/customers',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getCustomerAnalyticsController)
 )
+
+// ==================== INVENTORY MANAGEMENT ====================
+
+/**
+ * Description: Get inventory statistics
+ * Path: /admin/inventory/stats
+ * Method: GET
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+  '/inventory/stats',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getInventoryStatsController)
+)
+
+/**
+ * Description: Get inventory products
+ * Path: /admin/inventory/products
+ * Method: GET
+ * Query: { page, limit, stockFilter, search, sortBy, sortOrder }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.get(
+  '/inventory/products',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getInventoryProductsController)
+)
+
+/**
+ * Description: Update product stock
+ * Path: /admin/inventory/:productId/stock
+ * Method: PATCH
+ * Body: { stockQuantity: number }
+ * Headers: { Authorization: Bearer <access_token> } (Admin)
+ */
+adminRouter.patch(
+  '/inventory/:productId/stock',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(updateProductStockController)
+)
+
+export default adminRouter

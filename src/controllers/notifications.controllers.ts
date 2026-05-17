@@ -1,58 +1,72 @@
 import { Request, Response } from 'express'
 import { ParamsDictionary } from 'express-serve-static-core'
+import { ObjectId } from 'mongodb'
 import { TokenPayload } from '~/models/requests/User.request'
 import HTTP_STATUS from '~/constants/httpStatus'
+import notificationService from '~/services/notifications.services'
 
-// Get user's notifications
+// GET /notifications?page=1&limit=20&filter=all
 export const getNotificationsController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
+  const page = parseInt(req.query.page as string) || 1
+  const limit = parseInt(req.query.limit as string) || 20
+  const filter = (req.query.filter as string) || 'all'
 
-  // For now, return mock notifications
-  // In a real implementation, you would fetch from database
-  const mockNotifications = [
-    {
-      id: '1',
-      userId,
-      type: 'order' as const,
-      title: 'Đơn hàng đã được giao',
-      message: 'Đơn hàng #12345 của bạn đã được giao thành công. Cảm ơn bạn đã mua sắm!',
-      isRead: false,
-      actionUrl: '/account/orders/12345',
-      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // 2 hours ago
-    },
-    {
-      id: '2',
-      userId,
-      type: 'prescription' as const,
-      title: 'Đơn thuốc đã sẵn sàng',
-      message: 'Đơn thuốc của bạn đã được chuẩn bị xong. Vui lòng đến quầy để nhận.',
-      isRead: true,
-      actionUrl: '/prescription/123',
-      createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() // 1 day ago
-    },
-    {
-      id: '3',
-      userId,
-      type: 'promotion' as const,
-      title: 'Giảm giá 20% cho lần mua tiếp theo',
-      message: 'Cảm ơn bạn đã tin tưởng MediSpace. Nhận ưu đãi 20% cho đơn hàng tiếp theo!',
-      isRead: false,
-      actionUrl: '/products',
-      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() // 3 days ago
-    },
-    {
-      id: '4',
-      userId,
-      type: 'reminder' as const,
-      title: 'Nhắc nhở uống thuốc',
-      message: 'Đã đến giờ uống thuốc Amoxicillin. Uống 2 viên sau bữa ăn.',
-      isRead: false,
-      createdAt: new Date().toISOString()
-    }
-  ]
+  const result = await notificationService.getByUserId(
+    new ObjectId(userId),
+    page,
+    limit,
+    filter as 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder'
+  )
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Get notifications successfully',
-    result: mockNotifications
+    result: result.notifications,
+    pagination: result.pagination,
+  })
+}
+
+// GET /notifications/unread-count
+export const getUnreadCountController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const count = await notificationService.getUnreadCount(new ObjectId(userId))
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get unread count successfully',
+    result: { count },
+  })
+}
+
+// PATCH /notifications/read-all
+export const markAllAsReadController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  await notificationService.markAllAsRead(new ObjectId(userId))
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'All notifications marked as read',
+  })
+}
+
+// PATCH /notifications/:id/read
+export const markAsReadController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const notificationId = new ObjectId(req.params.id)
+
+  await notificationService.markAsRead(notificationId, new ObjectId(userId))
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Notification marked as read',
+  })
+}
+
+// DELETE /notifications/:id
+export const deleteNotificationController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const notificationId = new ObjectId(req.params.id)
+
+  await notificationService.deleteNotification(notificationId, new ObjectId(userId))
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Notification deleted',
   })
 }

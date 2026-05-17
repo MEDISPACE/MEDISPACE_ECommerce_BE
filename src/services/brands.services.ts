@@ -1,10 +1,13 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import Brand from '~/models/schemas/Brand.schema'
 import { CreateBrandReqBody, UpdateBrandReqBody, GetBrandsQuery } from '~/models/requests/Product.request'
 import { BRANDS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
+
+const BRAND_TTL = 600 // 10 minutes
 
 class BrandsService {
   // Generate slug from name
@@ -58,6 +61,7 @@ class BrandsService {
     })
 
     await databaseService.brands.insertOne(brand)
+    await cacheService.invalidate('brands:*')
     return brand
   }
 
@@ -140,6 +144,7 @@ class BrandsService {
     }
 
     await databaseService.brands.updateOne({ _id: new ObjectId(brandId) }, { $set: updateData })
+    await cacheService.invalidate('brands:*')
 
     return await this.getBrandById(brandId)
   }
@@ -157,6 +162,7 @@ class BrandsService {
         }
       }
     )
+    await cacheService.invalidate('brands:*')
 
     return await this.getBrandById(brandId)
   }
@@ -174,6 +180,7 @@ class BrandsService {
     }
 
     await databaseService.brands.deleteOne({ _id: new ObjectId(brandId) })
+    await cacheService.invalidate('brands:*')
     return { message: BRANDS_MESSAGES.DELETE_BRAND_SUCCESS }
   }
 

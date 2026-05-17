@@ -2,7 +2,7 @@ import { Router } from 'express'
 import {
   getDashboardStatsController,
   getRecentActivitiesController,
-  getPatientByPhoneController,
+  searchPatientsController,
   getPatientHistoryController,
   getPharmacistProfileController,
   getMedicalInfoController,
@@ -60,7 +60,7 @@ pharmacistRouter.get('/dashboard/recent-activities', wrapRequestHandler(getRecen
  * Query: { phone: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/search', wrapRequestHandler(getPatientByPhoneController))
+pharmacistRouter.get('/patients/search', wrapRequestHandler(searchPatientsController))
 
 /**
  * Description: Get patient history (prescriptions & orders)

@@ -38,13 +38,16 @@ export enum PaymentMethod {
   COD = 'cod',
   BankTransfer = 'bank_transfer',
   VNPay = 'vnpay',
-  PayOS = 'payos'
+  PayOS = 'payos',
+  Cash = 'cash',
+  CreditCard_POS = 'credit_card_pos'
 }
 
 export enum ShippingMethod {
   Standard = 'standard',
   Fast = 'fast',
-  Express = 'express'
+  Express = 'express',
+  InStore = 'instore'
 }
 
 export enum ReviewStatus {
@@ -52,3 +55,17 @@ export enum ReviewStatus {
   Approved = 'approved',
   Rejected = 'rejected'
 }
+
+// Order Status
+export enum OrderStatus {
+  Pending = 'pending',
+  Confirmed = 'confirmed',
+  Processing = 'processing',
+  Shipped = 'shipped',
+  Delivered = 'delivered',
+  Cancelled = 'cancelled',
+  Returned = 'returned'
+}
+
+// Re-export Return Request enums from schema for centralized access
+export { ReturnReason, ReturnStatus, ReturnType, RefundMethod } from '~/models/schemas/ReturnRequest.schema'

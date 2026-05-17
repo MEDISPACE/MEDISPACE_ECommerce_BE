@@ -23,6 +23,7 @@ interface UserType {
 
   lisenseNumber?: string
   isOnline?: boolean
+  onlineCount?: number
 
   emailVerifyToken?: string
   forgotPasswordToken?: string
@@ -52,6 +53,7 @@ export default class User {
 
   lisenseNumber?: string
   isOnline?: boolean
+  onlineCount?: number
 
   emailVerifyToken?: string
   forgotPasswordToken?: string
@@ -79,6 +81,7 @@ export default class User {
     this.medicalProfile = user.medicalProfile || {}
     this.lisenseNumber = user.lisenseNumber || ''
     this.isOnline = user.isOnline || false
+    this.onlineCount = user.onlineCount || 0
 
     this.emailVerifyToken = user.emailVerifyToken || ''
     this.forgotPasswordToken = user.forgotPasswordToken || ''
