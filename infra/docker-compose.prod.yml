@@ -1,0 +1,131 @@
+# =====================================================
+# MEDISPACE - Docker Compose (Production)
+# Infra repo: image-based deployment via GHCR
+# =====================================================
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE}
+    container_name: medispace-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: 8108
+      OCR_SERVICE_URL: http://ocr-service:8001
+      ML_SERVICE_URL: http://ml-service:8002
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+      typesense:
+        condition: service_started
+      ocr-service:
+        condition: service_started
+      ml-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - medispace-net
+
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    container_name: medispace-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - medispace-net
+
+  ocr-service:
+    image: ${OCR_IMAGE}
+    container_name: medispace-ocr
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ocr-paddle-models:/root/.paddleocr
+      - ocr-vietocr-models:/root/.cache/vietocr
+      - ./logs/ocr:/app/logs
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  ml-service:
+    image: ${ML_IMAGE}
+    container_name: medispace-ml
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    container_name: medispace-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  typesense:
+    image: typesense/typesense:27.1
+    container_name: medispace-typesense
+    ports:
+      - "7700:8108"
+    volumes:
+      - ./typesense-data:/data
+    environment:
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY}
+      TYPESENSE_DATA_DIR: /data
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8108/health | grep -q ok || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  redis-data:
+    driver: local
+  ocr-paddle-models:
+    driver: local
+  ocr-vietocr-models:
+    driver: local
+
+networks:
+  medispace-net:
+    driver: bridge
