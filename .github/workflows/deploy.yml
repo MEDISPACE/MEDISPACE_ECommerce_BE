@@ -79,6 +79,9 @@ jobs:
 
             echo "🏥 Status:"
             docker compose ps
+
+            echo "🧹 Cleaning up dangling images..."
+            docker image prune -f
           EOF
 
       - name: Cleanup SSH
