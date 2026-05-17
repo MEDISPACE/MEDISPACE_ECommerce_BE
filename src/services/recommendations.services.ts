@@ -332,6 +332,27 @@ class RecommendationsService {
   }
 
   /**
+   * GET /recommendations/replenishment
+   * Predictive Replenishment — sản phẩm cần mua lại theo chu kỳ
+   */
+  async getReplenishment(userId: string, limit: number = 5) {
+    if (!isValidObjectId(userId)) {
+      return { algorithm: 'fallback_invalid_user', products: [] }
+    }
+
+    const data = await callML<{ algorithm: string; products: string[] }>(
+      `/recommend/replenishment/${userId}?limit=${limit}`
+    )
+
+    if (!data || data.products.length === 0) {
+      return { algorithm: 'fallback_empty', products: [] }
+    }
+
+    const enriched = await enrichProductIds(data.products, limit)
+    return { algorithm: data.algorithm, products: enriched }
+  }
+
+  /**
    * GET /recommendations/ml-status
    * Kiểm tra ML service status (admin/debug)
    */
