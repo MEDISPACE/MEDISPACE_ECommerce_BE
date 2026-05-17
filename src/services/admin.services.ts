@@ -1,4 +1,5 @@
 import databaseService from './database.services'
+import cacheService from './cache.services'
 import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
 import { hashPassword } from '~/utils/crypto'
@@ -91,6 +92,7 @@ class AdminService {
    * Get dashboard statistics
    */
   async getDashboardStats(): Promise<DashboardStats> {
+    return cacheService.getOrSet('admin:dashboard', async () => {
     const startTime = Date.now()
 
     const today = new Date()
@@ -285,6 +287,7 @@ class AdminService {
       console.error('[Admin Service] Error in getDashboardStats:', error)
       throw error
     }
+    }, 60) // Cache for 60 seconds
   }
 
   /**
@@ -728,29 +731,38 @@ class AdminService {
   }
 
   async getOrderStats() {
-    const orders = await databaseService.orders.find({}).toArray()
+    return cacheService.getOrSet('admin:order-stats', async () => {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+      // ✅ FIX: Use aggregation + countDocuments instead of loading ALL orders into RAM
+      const [total, pending, processing, shipped, delivered, cancelled, revenueResult, todayOrders] = await Promise.all([
+        databaseService.orders.countDocuments(),
+        databaseService.orders.countDocuments({ orderStatus: 'pending' }),
+        databaseService.orders.countDocuments({ orderStatus: 'processing' }),
+        databaseService.orders.countDocuments({ orderStatus: 'shipped' }),
+        databaseService.orders.countDocuments({ orderStatus: 'delivered' }),
+        databaseService.orders.countDocuments({ orderStatus: 'cancelled' }),
+        databaseService.orders
+          .aggregate([
+            { $match: { orderStatus: { $ne: 'cancelled' }, paymentStatus: 'paid' } },
+            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+          ])
+          .toArray(),
+        databaseService.orders.countDocuments({ createdAt: { $gte: today } })
+      ])
 
-    const stats = {
-      total: orders.length,
-      pending: orders.filter((o) => o.orderStatus === 'pending').length,
-      processing: orders.filter((o) => o.orderStatus === 'processing').length,
-      shipped: orders.filter((o) => o.orderStatus === 'shipped').length,
-      delivered: orders.filter((o) => o.orderStatus === 'delivered').length,
-      cancelled: orders.filter((o) => o.orderStatus === 'cancelled').length,
-      revenue: orders
-        .filter((o) => o.orderStatus !== 'cancelled' && o.paymentStatus === 'paid')
-        .reduce((acc, curr) => acc + (curr.totalAmount || 0), 0),
-      todayOrders: orders.filter((o) => {
-        const orderDate = new Date(o.createdAt || new Date())
-        orderDate.setHours(0, 0, 0, 0)
-        return orderDate.getTime() === today.getTime()
-      }).length
-    }
-
-    return stats
+      return {
+        total,
+        pending,
+        processing,
+        shipped,
+        delivered,
+        cancelled,
+        revenue: revenueResult[0]?.total || 0,
+        todayOrders
+      }
+    }, 60) // Cache 60 seconds
   }
 
   async getOrderDetails(orderId: string) {
