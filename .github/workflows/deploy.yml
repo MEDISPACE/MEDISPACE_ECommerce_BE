@@ -55,7 +55,7 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
 
             echo "📥 Pulling latest code..."
-            git pull origin develop
+            git pull origin main
 
             echo "🔑 Login Docker Hub..."
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
