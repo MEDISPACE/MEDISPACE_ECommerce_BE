@@ -85,6 +85,15 @@ app.use('/campaigns', campaignsRouter)
 app.use('/loyalty', loyaltyRouter)
 app.use('/recommendations', recommendationsRouter)
 
+// ─── Internal endpoints (ML Service → BE webhook) ─────────────────────────────
+// Called by ML service after retraining to invalidate stale Redis recommendation cache
+import cacheService from './services/cache.services'
+app.post('/internal/flush-recommendation-cache', async (_req, res) => {
+  await cacheService.invalidate('recommendations:*')
+  console.log('[BE] Recommendation cache flushed by ML service webhook.')
+  res.json({ message: 'cache flushed' })
+})
+
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
 
