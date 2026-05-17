@@ -1,0 +1,124 @@
+# =====================================================
+# MEDISPACE - Docker Compose (DEV / Local)
+# Dùng để: phát triển local, không cần DockerHub
+# Chạy: docker compose -f docker-compose.dev.yml up --build -d
+#
+# Kiến trúc dev:
+#   - Backend, ML, OCR, Redis, Typesense → Docker containers
+#   - Frontend → chạy local: cd MEDISPACE_ECommerce_FE && npm run dev
+#   - Không có image: tag (không cần đăng nhập DockerHub)
+#   - Mount source code để hot-reload (backend, ml-service)
+# =====================================================
+
+services:
+
+  # ── Backend (Node.js / Express / TypeScript) ──────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medispace-backend-dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: 8108
+      OCR_SERVICE_URL: http://ocr-service:8001
+      ML_SERVICE_URL: http://ml-service:8002
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./uploads:/app/uploads
+      - ./src:/app/src        # Hot-reload: mount source để ts-node-dev pick up
+    depends_on:
+      - redis
+      - typesense
+      - ml-service
+    restart: unless-stopped
+    networks:
+      - medispace-dev-net
+
+
+  # ── ML Recommendation Service (Python / FastAPI) ─────────────────────────
+  ml-service:
+    build:
+      context: ../MEDISPACE_Python_Services/MEDISPACE_ML_Service
+      dockerfile: Dockerfile
+    container_name: medispace-ml-dev
+    ports:
+      - "8002:8002"
+    env_file:
+      - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/.env
+    environment:
+      BE_SERVICE_URLS: http://backend:8000   # Dev chỉ cần gọi internal
+    volumes:
+      - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/src:/app/src      # Hot-reload src
+      - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/tests:/app/tests  # Sync test files
+      - ml-dev-models:/app/models                                            # Persist trained models
+    restart: unless-stopped
+    networks:
+      - medispace-dev-net
+
+  # ── OCR Service (Python / FastAPI) ───────────────────────────────────────
+  ocr-service:
+    build:
+      context: ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service
+      dockerfile: Dockerfile
+    container_name: medispace-ocr-dev
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service/.env
+    volumes:
+      - ocr-dev-paddle-models:/root/.paddleocr
+      - ocr-dev-vietocr-models:/root/.cache/vietocr
+    restart: unless-stopped
+    networks:
+      - medispace-dev-net
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: medispace-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-dev-data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    networks:
+      - medispace-dev-net
+
+  # ── Typesense ─────────────────────────────────────────────────────────────
+  typesense:
+    image: typesense/typesense:27.1
+    container_name: medispace-typesense-dev
+    ports:
+      - "7700:8108"
+    volumes:
+      - ../typesense-data-dev:/data
+    environment:
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-medispace-ts-secret}
+      TYPESENSE_DATA_DIR: /data
+    restart: unless-stopped
+    networks:
+      - medispace-dev-net
+
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  redis-dev-data:
+    driver: local
+  ml-dev-models:
+    driver: local
+  ocr-dev-paddle-models:
+    driver: local
+  ocr-dev-vietocr-models:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  medispace-dev-net:
+    driver: bridge
