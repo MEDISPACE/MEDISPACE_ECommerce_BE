@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 20.x
           cache: npm
-      - run: npm ci
+      - run: npm install
       - run: npm run lint || true   # warn only — pre-existing issues
       - run: npx tsc --noEmit || true   # warn only
 
