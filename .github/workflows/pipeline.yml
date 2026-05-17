@@ -61,7 +61,7 @@ jobs:
       - name: Trigger deploy
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.DEPLOY_PAT }}
           repository: ${{ github.repository }}
           event-type: deploy
           client-payload: '{"service": "backend", "image_tag": "${{ github.sha }}"}'
