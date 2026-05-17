@@ -39,7 +39,9 @@ class CleanupService {
   // Cancels orders with pending payment status older than ABANDONED_ORDER_TIMEOUT_HOURS
   // Only affects online payment methods (VNPay, PayOS), NOT COD
   startAbandonedOrderCleanup() {
-    console.log(`[CleanupService] Abandoned order cleanup scheduled. Orders older than ${ABANDONED_ORDER_TIMEOUT_HOURS} hours with pending payment will be cancelled.`)
+    console.log(
+      `[CleanupService] Abandoned order cleanup scheduled. Orders older than ${ABANDONED_ORDER_TIMEOUT_HOURS} hours with pending payment will be cancelled.`
+    )
 
     cron.schedule('0 * * * *', async () => {
       try {
@@ -59,12 +61,14 @@ class CleanupService {
     cutoffTime.setHours(cutoffTime.getHours() - ABANDONED_ORDER_TIMEOUT_HOURS)
 
     // Find orders that need to be cancelled
-    const ordersToCancel = await databaseService.orders.find({
-      paymentStatus: 'pending',
-      paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
-      orderStatus: { $nin: ['cancelled', 'delivered'] },
-      createdAt: { $lt: cutoffTime }
-    }).toArray()
+    const ordersToCancel = await databaseService.orders
+      .find({
+        paymentStatus: 'pending',
+        paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
+        orderStatus: { $nin: ['cancelled', 'delivered'] },
+        createdAt: { $lt: cutoffTime }
+      })
+      .toArray()
 
     // Restore stock for each order before cancelling
     for (const order of ordersToCancel) {
@@ -74,10 +78,7 @@ class CleanupService {
           const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
           const quantityPerUnit = variant?.quantityPerUnit || 1
           const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne(
-            { _id: item.productId },
-            { $inc: { stockQuantity: stockToRestore } }
-          )
+          await databaseService.products.updateOne({ _id: item.productId }, { $inc: { stockQuantity: stockToRestore } })
         }
       }
     }
@@ -162,11 +163,14 @@ class CleanupService {
     this.startCartCleanup()
     this.startAbandonedOrderCleanup()
     this.startExpiredPrescriptionCleanup()
+    this.startStaleConversationReassign() // Fix: was defined but never called
   }
 
   // Cleanup expired prescriptions - runs daily at midnight
   startExpiredPrescriptionCleanup() {
-    console.log('[CleanupService] Expired prescription cleanup scheduled. Prescriptions past validUntil will be marked as expired.')
+    console.log(
+      '[CleanupService] Expired prescription cleanup scheduled. Prescriptions past validUntil will be marked as expired.'
+    )
 
     // Run daily at 00:30
     cron.schedule('30 0 * * *', async () => {
@@ -219,6 +223,68 @@ class CleanupService {
       pendingExpiration: expiredCount,
       totalPending
     }
+  }
+  /**
+   * Option B – Auto-reassign stale conversations (runs every 5 minutes)
+   *
+   * Conversation bị coi là "stale" khi:
+   * - Đã được assign cho dược sĩ (pharmacistId tồn tại)
+   * - Dược sĩ đó hiện đang offline (isOnline = false)
+   * - lastMessageAt > STALE_TIMEOUT_MINUTES phút trước mà chưa có reply từ dược sĩ
+   */
+  startStaleConversationReassign() {
+    const STALE_TIMEOUT_MINUTES = 5
+
+    console.log(`[CleanupService] Stale conversation reassign scheduled every ${STALE_TIMEOUT_MINUTES} minutes.`)
+
+    cron.schedule('*/5 * * * *', async () => {
+      try {
+        const result = await this.reassignStaleConversations(STALE_TIMEOUT_MINUTES)
+        if (result.reassignedCount > 0) {
+          console.log(`[CleanupService] Re-queued ${result.reassignedCount} stale conversations back to pending.`)
+        }
+      } catch (error) {
+        console.error('[CleanupService] Error reassigning stale conversations:', error)
+      }
+    })
+  }
+
+  async reassignStaleConversations(timeoutMinutes = 5): Promise<{ reassignedCount: number }> {
+    const cutoffTime = new Date()
+    cutoffTime.setMinutes(cutoffTime.getMinutes() - timeoutMinutes)
+
+    // Lấy tất cả conversation đã assign, còn active, lastMessage từ khách hàng > timeout
+    const staleConversations = await databaseService.conversations
+      .find({
+        pharmacistId: { $exists: true },
+        status: 'active',
+        lastMessageAt: { $lt: cutoffTime }
+      })
+      .toArray()
+
+    if (staleConversations.length === 0) return { reassignedCount: 0 }
+
+    let reassignedCount = 0
+
+    for (const conv of staleConversations) {
+      const pharmacist = await databaseService.users.findOne({
+        _id: conv.pharmacistId
+      })
+
+      // Chỉ re-queue nếu dược sĩ đang offline
+      if (pharmacist && !pharmacist.isOnline) {
+        await databaseService.conversations.updateOne(
+          { _id: conv._id },
+          {
+            $unset: { pharmacistId: '' },
+            $set: { updatedAt: new Date() }
+          }
+        )
+        reassignedCount++
+      }
+    }
+
+    return { reassignedCount }
   }
 }
 

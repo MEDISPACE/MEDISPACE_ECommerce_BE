@@ -1,15 +1,17 @@
 import { Router } from 'express'
 import {
-    getConversationsController,
-    getOrCreateConversationController,
-    sendMessageController,
-    getMessagesController,
-    markAsReadController,
-    getConversationController,
-    getAvailablePharmacistController,
-    deleteConversationController
+  getConversationsController,
+  getOrCreateConversationController,
+  sendMessageController,
+  getMessagesController,
+  markAsReadController,
+  getConversationController,
+  getAvailablePharmacistController,
+  deleteConversationController,
+  assignConversationController
 } from '~/controllers/chats.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
+import { sendMessageValidator, rateLimitMessageValidator } from '~/middlewares/chats.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const chatsRouter = Router()
@@ -18,71 +20,94 @@ const chatsRouter = Router()
  * Get available pharmacist
  * Path: /available-pharmacist
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
  */
 chatsRouter.get(
-    '/available-pharmacist',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getAvailablePharmacistController)
+  '/available-pharmacist',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getAvailablePharmacistController)
 )
 
 /**
  * Get all conversations for current user
  * Path: /conversations
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
- * Query: { page?: number, limit?: number, status?: 'active' | 'closed' }
+ * Query: { page?, limit?, status? }
  */
 chatsRouter.get(
-    '/conversations',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getConversationsController)
+  '/conversations',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getConversationsController)
 )
 
 /**
- * Get or create conversation with a pharmacist (Customer only)
+ * Get or create conversation (Customer only – shared inbox)
  * Path: /conversations
  * Method: POST
- * Header: { Authorization: Bearer <access_token> }
- * Body: { pharmacistId: string }
  */
 chatsRouter.post(
-    '/conversations',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getOrCreateConversationController)
+  '/conversations',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getOrCreateConversationController)
 )
 
 /**
  * Get conversation by ID
  * Path: /conversations/:conversationId
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
  */
 chatsRouter.get(
-    '/conversations/:conversationId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(getConversationController)
+  '/conversations/:conversationId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getConversationController)
 )
 
 /**
- * Send a message
+ * (3.5) Pharmacist manually claims a conversation
+ * Path: /conversations/:conversationId/assign
+ * Method: POST
+ */
+chatsRouter.post(
+  '/conversations/:conversationId/assign',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(assignConversationController)
+)
+
+/**
+ * Delete conversation
+ * Path: /conversations/:conversationId
+ * Method: DELETE
+ */
+chatsRouter.delete(
+  '/conversations/:conversationId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(deleteConversationController)
+)
+
+/**
+ * Send a message – with validation (3.7) and rate limit (3.7)
  * Path: /messages
  * Method: POST
- * Header: { Authorization: Bearer <access_token> }
- * Body: { conversationId?: string, pharmacistId?: string, content: string, type?: 'text' | 'image', imageUrl?: string }
  */
-chatsRouter.post('/messages', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(sendMessageController))
+chatsRouter.post(
+  '/messages',
+  accessTokenValidator,
+  verifiedUserValidator,
+  rateLimitMessageValidator,
+  sendMessageValidator,
+  wrapRequestHandler(sendMessageController)
+)
 
 /**
  * Get messages for a conversation
  * Path: /messages
  * Method: GET
- * Header: { Authorization: Bearer <access_token> }
- * Query: { conversationId: string, page?: number, limit?: number }
+ * Query: { conversationId, page?, limit? }
  */
 chatsRouter.get('/messages', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(getMessagesController))
 
@@ -90,22 +115,12 @@ chatsRouter.get('/messages', accessTokenValidator, verifiedUserValidator, wrapRe
  * Mark messages as read
  * Path: /messages/read
  * Method: POST
- * Header: { Authorization: Bearer <access_token> }
- * Body: { conversationId: string }
  */
-chatsRouter.post('/messages/read', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(markAsReadController))
-
-/**
- * Delete conversation
- * Path: /conversations/:conversationId
- * Method: DELETE
- * Header: { Authorization: Bearer <access_token> }
- */
-chatsRouter.delete(
-    '/conversations/:conversationId',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(deleteConversationController)
+chatsRouter.post(
+  '/messages/read',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(markAsReadController)
 )
 
 export default chatsRouter

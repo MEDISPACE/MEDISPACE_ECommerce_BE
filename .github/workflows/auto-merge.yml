@@ -1,0 +1,39 @@
+name: Auto Merge develop → main
+
+on:
+  workflow_run:
+    workflows: ["Backend Pipeline"]   # tên trong pipeline.yml
+    branches: [develop]
+    types: [completed]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    # Chỉ merge khi pipeline thành công
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.DEPLOY_PAT }}
+
+      - name: Merge develop → main
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout main
+          git pull origin main
+
+          echo "🔀 Merging develop into main..."
+          git merge origin/develop --no-ff -m "chore: auto-merge develop → main [skip ci]"
+
+          git push origin main
+          echo "✅ Merged successfully"

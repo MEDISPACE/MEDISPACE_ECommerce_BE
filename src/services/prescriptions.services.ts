@@ -8,6 +8,8 @@ import {
 import { PRESCRIPTIONS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 class PrescriptionsService {
   // Generate unique prescription number
@@ -46,6 +48,23 @@ class PrescriptionsService {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await databaseService.prescriptions.insertOne(prescriptionData as any)
+
+    // Notify all pharmacists: new prescription needs review (fire-and-forget)
+    try {
+      const io = getIO()
+      notificationService.broadcastToRole(
+        'pharmacist',
+        {
+          type: 'prescription' as any,
+          title: 'Đơn thuốc mới cần duyệt',
+          message: `Đơn thuốc ${prescriptionNumber} vừa được tải lên, cần dược sĩ xem xét và xác nhận.`,
+          actionUrl: '/pharmacist/prescriptions',
+          metadata: { prescriptionNumber },
+        },
+        io
+      ).catch(() => {})
+    } catch { /* socket not ready */ }
+
     return {
       _id: result.insertedId,
       prescriptionNumber
@@ -60,8 +79,6 @@ class PrescriptionsService {
       const limit = Number(query.limit) || 10
       const { status, sort = 'newest', customerId } = query
 
-
-
       const filter: Record<string, string | ObjectId> = {}
       if (status) filter.status = status
       if (customerId) {
@@ -74,8 +91,6 @@ class PrescriptionsService {
         }
         filter.customerId = new ObjectId(customerId)
       }
-
-
 
       const sortOption: Record<string, 1 | -1> = sort === 'newest' ? { createdAt: -1 } : { createdAt: 1 }
 
@@ -96,7 +111,6 @@ class PrescriptionsService {
         }
       }
     } catch (error) {
-
       throw error
     }
   }
@@ -211,6 +225,21 @@ class PrescriptionsService {
 
     // Return the updated prescription with all fields including pharmacistNotes
     const updatedPrescription = await this.getPrescriptionById(prescriptionId)
+
+    // Notify customer about prescription status (fire-and-forget)
+    const customerId = prescription.customerId
+    if (customerId) {
+      try {
+        const io = getIO()
+        notificationService.notifyPrescriptionStatus(
+          customerId,
+          new ObjectId(prescriptionId),
+          status as 'verified' | 'rejected',
+          io
+        ).catch(() => {})
+      } catch { /* socket not ready */ }
+    }
+
     return updatedPrescription
   }
 

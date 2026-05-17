@@ -1,10 +1,10 @@
-import databaseService from './services/database.services'
-import Category from './models/schemas/Category.schema'
-import Brand from './models/schemas/Brand.schema'
-import Product from './models/schemas/Product.schema'
-import ProductMedia from './models/schemas/ProductMedia.schema'
-import { ObjectId } from 'mongodb'
-import { seedBlogData } from './services/seed.blog'
+// import databaseService from './services/database.services'
+// import Category from './models/schemas/Category.schema'
+// import Brand from './models/schemas/Brand.schema'
+// import Product from './models/schemas/Product.schema'
+// import ProductMedia from './models/schemas/ProductMedia.schema'
+// import { ObjectId } from 'mongodb'
+// import { seedBlogData } from './services/seed.blog'
 
 // Seed categories - Phân cấp theo Long Châu
 const categoriesData = [

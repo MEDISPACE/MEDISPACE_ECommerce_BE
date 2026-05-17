@@ -4,7 +4,6 @@ import { ErrorWithStatus } from '~/models/Error'
 import { omit } from 'lodash'
 
 export const defaultErrorHandler = (err: Error, req: Request, res: Response, _next: NextFunction) => {
-
   // Kiểm tra nếu là ErrorWithStatus (cả class và object thường)
   if (err instanceof ErrorWithStatus) {
     return res.status(err.status).json(omit(err, ['status']))

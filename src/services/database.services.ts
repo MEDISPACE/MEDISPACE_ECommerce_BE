@@ -17,6 +17,13 @@ import Conversation from '~/models/schemas/Conversation.schema'
 import Message from '~/models/schemas/Message.schema'
 import Article from '~/models/schemas/Article.schema'
 import HealthCategory from '~/models/schemas/HealthCategory.schema'
+import ReturnRequest from '~/models/schemas/ReturnRequest.schema'
+import Coupon from '~/models/schemas/Coupon.schema'
+import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
+import Campaign from '~/models/schemas/Campaign.schema'
+import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
+import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
+import Notification from '~/models/schemas/Notification.schema'
 
 config()
 
@@ -33,10 +40,84 @@ class DatabaseService {
     try {
       await this.client.connect()
       await this.db.command({ ping: 1 })
+      // Create indexes for better performance
+      await this.createIndexes()
     } catch (error) {
-      // Reference error silently to satisfy linters, then exit
-      void error
+      console.error('❌ MongoDB connection failed:', error)
       process.exit(1)
+    }
+  }
+
+  async createIndexes() {
+    // Helper function to safely create index
+    const safeCreateIndex = async (collection: any, indexSpec: any, options?: any) => {
+      try {
+        await collection.createIndex(indexSpec, { background: true, ...options })
+      } catch (error: any) {
+        // Ignore duplicate key errors (index already exists or duplicate data)
+        if (error.code !== 11000 && error.code !== 85) {
+          // Silent - index already exists or duplicate data
+        }
+      }
+    }
+
+    try {
+      // Products collection indexes
+      await safeCreateIndex(this.products, { categoryId: 1, isActive: 1, createdAt: -1 })
+      await safeCreateIndex(this.products, { categoryId: 1 })
+      await safeCreateIndex(this.products, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.products, { sku: 1 }, { unique: true })
+      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text' })
+
+      // Categories collection indexes
+      await safeCreateIndex(this.categories, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.categories, { path: 1 })
+      await safeCreateIndex(this.categories, { parentId: 1 })
+
+      // Brands collection indexes
+      await safeCreateIndex(this.brands, { slug: 1 }, { unique: true })
+
+      // Reviews collection indexes
+      await safeCreateIndex(this.reviews, { productId: 1, createdAt: -1 })
+
+      // Return Requests collection indexes
+      await safeCreateIndex(this.returnRequests, { userId: 1, createdAt: -1 })
+      await safeCreateIndex(this.returnRequests, { orderId: 1 })
+      await safeCreateIndex(this.returnRequests, { status: 1 })
+      await safeCreateIndex(this.returnRequests, { requestNumber: 1 }, { unique: true })
+
+      // Coupons collection indexes
+      await safeCreateIndex(this.coupons, { code: 1 }, { unique: true })
+      await safeCreateIndex(this.coupons, { isActive: 1, startDate: 1, endDate: 1 })
+      await safeCreateIndex(this.coupons, { isPublic: 1, isActive: 1 })
+
+      // CouponRedemptions collection indexes
+      await safeCreateIndex(this.couponRedemptions, { couponId: 1, userId: 1 })
+      await safeCreateIndex(this.couponRedemptions, { orderId: 1 })
+      await safeCreateIndex(this.couponRedemptions, { userId: 1, createdAt: -1 })
+
+      // Campaigns collection indexes
+      await safeCreateIndex(this.campaigns, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.campaigns, { status: 1, startDate: 1, endDate: 1 })
+      await safeCreateIndex(this.campaigns, { status: 1, isPublic: 1, priority: -1 })
+
+      // LoyaltyAccounts collection indexes
+      await safeCreateIndex(this.loyaltyAccounts, { userId: 1 }, { unique: true })
+      await safeCreateIndex(this.loyaltyAccounts, { tier: 1 })
+
+      // LoyaltyTransactions collection indexes
+      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, createdAt: -1 })
+      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, type: 1 })
+      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, orderId: 1, type: 1 })
+      await safeCreateIndex(this.loyaltyTransactions, { type: 1, isExpired: 1, expiresAt: 1 })
+
+      // Notifications collection indexes
+      await safeCreateIndex(this.notifications, { userId: 1, isRead: 1, createdAt: -1 })
+      await safeCreateIndex(this.notifications, { userId: 1, targetRole: 1, createdAt: -1 })
+      await safeCreateIndex(this.notifications, { targetRole: 1, createdAt: -1 })
+
+    } catch (error) {
+      // Silent - indexes may already exist
     }
   }
   get users(): Collection<User> {
@@ -89,6 +170,27 @@ class DatabaseService {
   }
   get healthCategories(): Collection<HealthCategory> {
     return this.db.collection(process.env.DB_HEALTH_CATEGORIES_COLLECTION as string)
+  }
+  get returnRequests(): Collection<ReturnRequest> {
+    return this.db.collection('return_requests')
+  }
+  get coupons(): Collection<Coupon> {
+    return this.db.collection(process.env.DB_COUPONS_COLLECTION as string)
+  }
+  get couponRedemptions(): Collection<CouponRedemption> {
+    return this.db.collection(process.env.DB_COUPON_REDEMPTIONS_COLLECTION as string)
+  }
+  get campaigns(): Collection<Campaign> {
+    return this.db.collection(process.env.DB_CAMPAIGNS_COLLECTION as string)
+  }
+  get loyaltyAccounts(): Collection<LoyaltyAccount> {
+    return this.db.collection(process.env.DB_LOYALTY_ACCOUNTS_COLLECTION as string)
+  }
+  get loyaltyTransactions(): Collection<LoyaltyTransaction> {
+    return this.db.collection(process.env.DB_LOYALTY_TRANSACTIONS_COLLECTION as string)
+  }
+  get notifications(): Collection<Notification> {
+    return this.db.collection('notifications')
   }
 }
 

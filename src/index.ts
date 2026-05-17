@@ -23,6 +23,13 @@ import chatsRouter from './routes/chats.routes'
 import articlesRouter from './routes/articles.routes'
 import healthCategoriesRouter from './routes/healthCategories.routes'
 import ghnRouter from './routes/ghn.routes'
+import returnRequestsRouter from './routes/returnRequests.routes'
+import searchRouter from './routes/search.routes'
+import couponsRouter from './routes/coupons.routes'
+import campaignsRouter from './routes/campaigns.routes'
+import loyaltyRouter from './routes/loyalty.routes'
+import recommendationsRouter from './routes/recommendations.routes'
+import typesenseService from './services/typesense.services'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
 import { initFolder } from './utils/file'
@@ -34,16 +41,19 @@ const app = express()
 databaseService.connect()
 cleanupService.startCartCleanup()
 cleanupService.startAbandonedOrderCleanup() // Cleanup abandoned orders every hour
+cleanupService.startStaleConversationReassign() // Re-queue stale chat conversations every 5 minutes
 initFolder() // Tạo thư mục temp cho upload
+typesenseService.initCollections() // Initialize Typesense search index
 
 // Parse cookies
 app.use(cookieParser())
 
 // CORS configuration - Allow frontend to connect
+const allowedOrigins = process.env.FRONTEND_URLS?.split(',').map((url) => url.trim()) || []
 app.use(
   cors({
-    origin: process.env.FRONTEND_URLS, // Frontend URL from env
-    credentials: true, // Allow cookies/auth headers
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
   })
@@ -68,11 +78,15 @@ app.use('/chats', chatsRouter)
 app.use('/articles', articlesRouter)
 app.use('/health-categories', healthCategoriesRouter)
 app.use('/ghn', ghnRouter)
-
+app.use('/returns', returnRequestsRouter)
+app.use('/search', searchRouter)
+app.use('/coupons', couponsRouter)
+app.use('/campaigns', campaignsRouter)
+app.use('/loyalty', loyaltyRouter)
+app.use('/recommendations', recommendationsRouter)
 
 // Register central error handler so validation and other errors return JSON
 app.use(defaultErrorHandler)
-
 
 // Create HTTP server for Socket.IO
 import { createServer } from 'http'
@@ -88,4 +102,3 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server is running on port ${port}`)
   console.log(`Socket.IO is ready for chat connections`)
 })
-

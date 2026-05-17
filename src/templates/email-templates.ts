@@ -101,19 +101,21 @@ export const getOrderConfirmationContent = (order: any) => {
         </tr>
         <tr>
           <td style="padding: 5px 0;"><strong>Trạng thái thanh toán:</strong></td>
-          <td style="text-align: right;">${order.paymentStatus === 'paid'
-      ? '<span style="color: green;">Đã thanh toán</span>'
-      : '<span style="color: orange;">Chưa thanh toán</span>'
-    }</td>
+          <td style="text-align: right;">${
+            order.paymentStatus === 'paid'
+              ? '<span style="color: green;">Đã thanh toán</span>'
+              : '<span style="color: orange;">Chưa thanh toán</span>'
+          }</td>
         </tr>
         <tr>
           <td style="padding: 5px 0;"><strong>Phương thức thanh toán:</strong></td>
-          <td style="text-align: right;">${order.paymentMethod === 'cod'
-      ? 'Thanh toán khi nhận hàng (COD)'
-      : order.paymentMethod === 'bank_transfer'
-        ? 'Chuyển khoản ngân hàng'
-        : order.paymentMethod
-    }</td>
+          <td style="text-align: right;">${
+            order.paymentMethod === 'cod'
+              ? 'Thanh toán khi nhận hàng (COD)'
+              : order.paymentMethod === 'bank_transfer'
+                ? 'Chuyển khoản ngân hàng'
+                : order.paymentMethod
+          }</td>
         </tr>
       </table>
     </div>
@@ -140,20 +142,21 @@ export const getOrderConfirmationContent = (order: any) => {
           <td colspan="3" style="padding: 5px 10px; text-align: right;">Phí vận chuyển:</td>
           <td style="padding: 5px 10px; text-align: right;">${formatCurrency(order.shippingFee)}</td>
         </tr>
-        ${order.discountAmount > 0
-      ? `
+        ${
+          order.discountAmount > 0
+            ? `
         <tr>
           <td colspan="3" style="padding: 5px 10px; text-align: right; color: green;">Giảm giá:</td>
           <td style="padding: 5px 10px; text-align: right; color: green;">-${formatCurrency(order.discountAmount)}</td>
         </tr>
         `
-      : ''
-    }
+            : ''
+        }
         <tr>
           <td colspan="3" style="padding: 10px; text-align: right; font-size: 16px; border-top: 1px solid #ddd;"><strong>Tổng cộng:</strong></td>
           <td style="padding: 10px; text-align: right; font-size: 16px; font-weight: bold; color: #007bff; border-top: 1px solid #ddd;">${formatCurrency(
-      order.totalAmount
-    )}</td>
+            order.totalAmount
+          )}</td>
         </tr>
       </tfoot>
     </table>

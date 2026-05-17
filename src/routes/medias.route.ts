@@ -7,10 +7,10 @@ import { wrapRequestHandler } from '~/utils/handlers'
 const mediasRouter = Router()
 
 mediasRouter.post(
-    '/upload-image',
-    accessTokenValidator,
-    verifiedUserValidator,
-    wrapRequestHandler(uploadImageController)
+  '/upload-image',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(uploadImageController)
 )
 
 // TODO: Uncomment khi cần upload video
