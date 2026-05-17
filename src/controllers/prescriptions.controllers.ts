@@ -177,9 +177,43 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
       }
     )
 
+    const ocrData = ocrResponse.data
+
+    // Map OCR medications to actual products in Database
+    if (ocrData && Array.isArray(ocrData.medications)) {
+      const enrichedMedications = await Promise.all(
+        ocrData.medications.map(async (med: any) => {
+          if (!med.productName) return med
+
+          try {
+            // Create a regex to match the product name
+            // Escape special characters and create a case-insensitive, partial match regex
+            const searchPattern = med.productName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const product = await databaseService.products.findOne({
+              name: { $regex: new RegExp(searchPattern, 'i') },
+              isActive: true
+            })
+
+            if (product) {
+              return {
+                ...med,
+                productId: product._id,
+                matchedName: product.name,
+                image: product.featuredImage || (product.images && product.images.length > 0 ? product.images[0] : null)
+              }
+            }
+          } catch (e) {
+            console.error(`[OCR Map Product] Error mapping ${med.productName}:`, e)
+          }
+          return med
+        })
+      )
+      ocrData.medications = enrichedMedications
+    }
+
     return res.status(HTTP_STATUS.OK).json({
       message: 'Prescription scanned successfully',
-      result: ocrResponse.data
+      result: ocrData
     })
   } catch (error: any) {
     console.error('[scanPrescription] Error:', error?.message || error)
