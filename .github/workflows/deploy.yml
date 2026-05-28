@@ -47,17 +47,15 @@ jobs:
             echo "service=${{ github.event.inputs.service }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Upload docker-compose.prod.yml
-        run: |
-          scp -i ~/.ssh/id_rsa infra/docker-compose.prod.yml \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/docker-compose.yml
-
       - name: Deploy
         run: |
           SERVICE="${{ steps.svc.outputs.service }}"
           ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "📥 Pulling latest code..."
+            git pull origin main
 
             echo "🔑 Login Docker Hub..."
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -81,7 +79,7 @@ jobs:
             docker compose ps
 
             echo "🧹 Cleaning up dangling images..."
-            docker image prune -f
+            docker image prune -f || true
           EOF
 
       - name: Cleanup SSH
