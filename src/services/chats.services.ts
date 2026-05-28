@@ -6,24 +6,39 @@ import { SendMessageReqBody } from '~/models/requests/Chat.request'
 
 class ChatsService {
   // Get or create conversation for customer (shared inbox - no specific pharmacist)
-  async getOrCreateConversation(customerId: string) {
+  async getOrCreateConversation(customerId: string, type: 'ai' | 'pharmacist' = 'ai') {
     const customerObjectId = new ObjectId(customerId)
 
-    // Chỉ tìm conversation đang active — không dùng lại conversation đã đóng
-    let conversation = await databaseService.conversations.findOne({
+    // Chỉ tìm conversation đang active — hỗ trợ migrate cuộc trò chuyện cũ chưa có type
+    const query: Record<string, any> = {
       customerId: customerObjectId,
       status: 'active'
-    })
+    }
+    if (type === 'ai') {
+      query.$or = [{ type: 'ai' }, { type: { $exists: false } }]
+    } else {
+      query.type = type
+    }
+
+    let conversation = await databaseService.conversations.findOne(query)
 
     // Không có active conversation → tạo mới
     if (!conversation) {
       const newConversation = new Conversation({
         customerId: customerObjectId,
-        status: 'active'
+        status: 'active',
+        type: type
       })
 
       const result = await databaseService.conversations.insertOne(newConversation)
       conversation = { ...newConversation, _id: result.insertedId }
+    } else if (conversation.type === undefined) {
+      // Tự động bổ sung type: 'ai' cho conversation cũ nếu tìm thấy
+      await databaseService.conversations.updateOne(
+        { _id: conversation._id },
+        { $set: { type: 'ai', updatedAt: new Date() } }
+      )
+      conversation.type = 'ai'
     }
 
     return conversation
@@ -35,14 +50,22 @@ class ChatsService {
     role: 'customer' | 'pharmacist',
     page = 1,
     limit = 20,
-    status?: 'active' | 'closed'
+    status?: 'active' | 'closed',
+    type?: 'ai' | 'pharmacist'
   ) {
     const userObjectId = new ObjectId(userId)
     const skip = (page - 1) * limit
 
     // Shared inbox: pharmacists see ALL conversations, customers see only their own
-    const query: Record<string, unknown> = role === 'customer' ? { customerId: userObjectId } : {}
+    const query: Record<string, any> = role === 'customer' ? { customerId: userObjectId } : {}
     if (status) query.status = status
+    if (type) {
+      if (type === 'ai') {
+        query.$or = [{ type: 'ai' }, { type: { $exists: false } }]
+      } else {
+        query.type = type
+      }
+    }
 
     const [conversations, total] = await Promise.all([
       databaseService.conversations
@@ -87,6 +110,7 @@ class ChatsService {
               lastMessageAt: 1,
               unreadCount: 1,
               status: 1,
+              type: 1,
               createdAt: 1,
               updatedAt: 1,
               'customer._id': 1,
@@ -168,6 +192,55 @@ class ChatsService {
         },
         $inc: {
           [updateField]: 1
+        }
+      }
+    )
+
+    return {
+      ...message,
+      _id: result.insertedId
+    }
+  }
+
+  // Gửi tin nhắn từ AI (Trợ lý Ảo)
+  async sendAIMessage(
+    conversationId: string,
+    content: string,
+    classification?: 'emergency' | 'prescription_request' | 'general',
+    type: MessageType = MessageType.Text,
+    productRef?: any,
+    suggestedProducts?: any[],
+    suggestedQuestions?: string[]
+  ) {
+    const AI_SENDER_ID = new ObjectId('000000000000000000000001') // Fake ID cho AI
+    const convId = new ObjectId(conversationId)
+    
+    const message = new Message({
+      conversationId: convId,
+      senderId: AI_SENDER_ID,
+      senderRole: 'pharmacist', // Đóng vai dược sĩ để FE render bên trái
+      content,
+      type,
+      productRef,
+      suggestedProducts,
+      suggestedQuestions,
+      isRead: false,
+      isAI: true,
+      aiClassification: classification
+    })
+
+    const result = await databaseService.messages.insertOne(message)
+
+    await databaseService.conversations.updateOne(
+      { _id: convId },
+      {
+        $set: {
+          lastMessage: type === MessageType.Product ? `[Sản phẩm] ${productRef?.name || ''}` : content,
+          lastMessageAt: new Date(),
+          updatedAt: new Date()
+        },
+        $inc: {
+          'unreadCount.customer': 1
         }
       }
     )
@@ -270,6 +343,7 @@ class ChatsService {
             lastMessageAt: 1,
             unreadCount: 1,
             status: 1,
+            type: 1,
             createdAt: 1,
             updatedAt: 1,
             'customer._id': 1,
@@ -527,6 +601,7 @@ class ChatsService {
           customerId: 1,
           pharmacistId: 1,
           status: 1,
+          type: 1,
           lastMessage: 1,
           lastMessageAt: 1,
           unreadCount: 1,
@@ -590,6 +665,23 @@ class ChatsService {
     )
     if (!result) throw new Error('Conversation not found')
     return result
+  }
+
+  // Save user feedback for a message (AI response rating)
+  async saveMessageFeedback(messageId: string, userId: string, feedback: 'up' | 'down') {
+    const msg = await databaseService.messages.findOne({ _id: new ObjectId(messageId) })
+    if (!msg) throw new Error('Message not found')
+
+    // Optional: check if user is the conversation owner
+    const conv = await databaseService.conversations.findOne({ _id: msg.conversationId })
+    if (!conv || conv.customerId.toString() !== userId) {
+      throw new Error('Access denied')
+    }
+
+    await databaseService.messages.updateOne(
+      { _id: new ObjectId(messageId) },
+      { $set: { feedback, updatedAt: new Date() } }
+    )
   }
 }
 
