@@ -11,6 +11,7 @@ interface ConversationType {
     pharmacist: number
   }
   status?: 'active' | 'closed'
+  type?: 'ai' | 'pharmacist'
   createdAt?: Date
   updatedAt?: Date
   lastRepliedBy?: ObjectId
@@ -27,6 +28,7 @@ export default class Conversation {
     pharmacist: number
   }
   status: 'active' | 'closed'
+  type: 'ai' | 'pharmacist'
   createdAt: Date
   updatedAt: Date
   lastRepliedBy?: ObjectId // Track which pharmacist replied last
@@ -39,6 +41,7 @@ export default class Conversation {
     this.lastMessageAt = conversation.lastMessageAt || new Date()
     this.unreadCount = conversation.unreadCount || { customer: 0, pharmacist: 0 }
     this.status = conversation.status || 'active'
+    this.type = conversation.type || 'ai'
     this.createdAt = conversation.createdAt || new Date()
     this.updatedAt = conversation.updatedAt || new Date()
     this.lastRepliedBy = conversation.lastRepliedBy

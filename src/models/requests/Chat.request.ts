@@ -31,4 +31,5 @@ export interface GetConversationsReqQuery {
   page?: string
   limit?: string
   status?: 'active' | 'closed'
+  type?: 'ai' | 'pharmacist'
 }

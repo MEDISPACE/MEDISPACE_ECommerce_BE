@@ -3,7 +3,8 @@ import { ObjectId } from 'mongodb'
 export enum MessageType {
   Text = 'text',
   Image = 'image',
-  Product = 'product' // Dược sĩ gửi product card
+  Product = 'product', // Dược sĩ gửi product card
+  System = 'system' // Tin nhắn hệ thống trung gian
 }
 
 export interface ProductRef {
@@ -25,7 +26,12 @@ interface MessageSchemaType {
   type: MessageType
   imageUrl?: string
   productRef?: ProductRef // chỉ có khi type === 'product'
+  suggestedProducts?: ProductRef[] // sản phẩm được gợi ý bởi AI
+  suggestedQuestions?: string[] // câu hỏi được gợi ý bởi AI
+  feedback?: 'up' | 'down' // phản hồi từ khách hàng
   isRead: boolean
+  isAI?: boolean
+  aiClassification?: 'emergency' | 'prescription_request' | 'general'
   createdAt?: Date
   updatedAt?: Date
 }
@@ -39,7 +45,12 @@ export default class Message {
   type: MessageType
   imageUrl?: string
   productRef?: ProductRef
+  suggestedProducts?: ProductRef[]
+  suggestedQuestions?: string[]
+  feedback?: 'up' | 'down'
   isRead: boolean
+  isAI?: boolean
+  aiClassification?: 'emergency' | 'prescription_request' | 'general'
   createdAt?: Date
   updatedAt?: Date
 
@@ -53,7 +64,12 @@ export default class Message {
     this.type = message.type || MessageType.Text
     this.imageUrl = message.imageUrl
     this.productRef = message.productRef
+    this.suggestedProducts = message.suggestedProducts
+    this.suggestedQuestions = message.suggestedQuestions
+    this.feedback = message.feedback
     this.isRead = message.isRead || false
+    this.isAI = message.isAI
+    this.aiClassification = message.aiClassification
     this.createdAt = message.createdAt || date
     this.updatedAt = message.updatedAt || date
   }
