@@ -1,14 +1,15 @@
 # =====================================================
-# MEDISPACE - Docker Compose
-# Đặt trong: MEDISPACE_ECommerce_BE/
-# Chạy: docker compose up --build -d
-# Services: backend, frontend, ocr-service, ml-service, typesense
+# MEDISPACE - Docker Compose (PRODUCTION)
+# Dùng để: deploy trên server, dùng image từ DockerHub
+# Chạy: docker compose up -d  (trên server sau khi CI/CD push image)
+# Dev local: dùng docker-compose.dev.yml thay thế
 # =====================================================
 
 services:
 
   # ── Backend (Node.js / Express / TypeScript) ──────────────────────────────
   backend:
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-be:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -41,6 +42,7 @@ services:
 
   # ── Frontend (React / Vite → Nginx) ──────────────────────────────────────
   frontend:
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-fe:latest
     build:
       context: ../MEDISPACE_ECommerce_FE
       dockerfile: Dockerfile
@@ -58,8 +60,8 @@ services:
       - medispace-net
 
   # ── OCR Service (Python / FastAPI / PaddleOCR + VietOCR) ─────────────────
-  # Đã chuyển sang repo mới: MEDISPACE_Python_Services/MEDISPACE_OCR_Service
   ocr-service:
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-ocr:latest
     build:
       context: ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service
       dockerfile: Dockerfile
@@ -104,6 +106,7 @@ services:
 
   # ── ML Recommendation Service (Python / FastAPI / scikit-learn) ──────────
   ml-service:
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-ml:latest
     build:
       context: ../MEDISPACE_Python_Services/MEDISPACE_ML_Service
       dockerfile: Dockerfile

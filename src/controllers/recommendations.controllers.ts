@@ -1,5 +1,7 @@
 import { Request, Response } from 'express'
+import { ObjectId } from 'mongodb'
 import recommendationsService from '~/services/recommendations.services'
+import databaseService from '~/services/database.services'
 
 /**
  * GET /recommendations/related/:productId
@@ -82,4 +84,52 @@ export const getPharmacistSuggestionsController = async (req: Request, res: Resp
 export const getMLStatusController = async (req: Request, res: Response) => {
   const status = await recommendationsService.getMLStatus()
   return res.json({ message: 'ML service status', data: status })
+}
+
+/**
+ * GET /recommendations/replenishment
+ * Gợi ý mua lại theo chu kỳ — Predictive Replenishment (requires auth)
+ */
+export const getReplenishmentController = async (req: Request, res: Response) => {
+  const userId = req.decoded_authorization?.userId as string
+  const limit = Number(req.query.limit) || 5
+  const result = await recommendationsService.getReplenishment(userId, limit)
+  return res.json({ message: 'Get replenishment recommendations success', data: result })
+}
+
+/**
+ * POST /recommendations/track
+ * Ghi nhận sự kiện click vào một recommendation (analytics).
+ * Fire-and-forget — FE không cần đợi response.
+ * Body: { productId, algorithm, section, position }
+ */
+export const trackRecommendationEventController = async (req: Request, res: Response) => {
+  const { productId, algorithm, section, position } = req.body as {
+    productId: string
+    algorithm: string
+    section: string   // 'trending' | 'related' | 'bought-together' | 'for-you' | 'post-purchase' | 'replenishment'
+    position: number  // index trong carousel (0-based)
+  }
+  const userId = req.decoded_authorization?.userId
+
+  // Validate productId
+  if (!productId) {
+    return res.status(400).json({ message: 'productId is required' })
+  }
+
+  try {
+    await databaseService.db.collection('recommendationEvents').insertOne({
+      userId: userId ? new ObjectId(userId as string) : null,
+      productId: new ObjectId(productId),
+      algorithm: algorithm || 'unknown',
+      section: section || 'unknown',
+      position: typeof position === 'number' ? position : -1,
+      eventType: 'click',
+      timestamp: new Date()
+    })
+  } catch {
+    // Graceful — tracking failure không được ảnh hưởng UX
+  }
+
+  return res.json({ message: 'tracked' })
 }
