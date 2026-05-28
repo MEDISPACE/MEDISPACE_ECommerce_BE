@@ -23,6 +23,7 @@ services:
       TYPESENSE_PORT: 8108
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
+      CHAT_AI_URL: http://chat-ai-service:8003
       REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads
@@ -82,6 +83,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  # ── Chat AI Service (Python / FastAPI / Gemma) ──────────────────────────
+  chat-ai-service:
+    build:
+      context: ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service
+      dockerfile: Dockerfile
+    container_name: medispace-chat-ai
+    ports:
+      - "8003:8003"
+    env_file:
+      - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/.env
+    restart: unless-stopped
+    networks:
+      - medispace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # ── ML Recommendation Service (Python / FastAPI / scikit-learn) ──────────
   ml-service:
