@@ -20,13 +20,15 @@ export const getConversationsController = async (
   const page = parseInt(req.query.page || '1')
   const limit = parseInt(req.query.limit || '20')
   const status = req.query.status as 'active' | 'closed' | undefined
+  const type = req.query.type as 'ai' | 'pharmacist' | undefined
 
   const result = await chatsService.getConversations(
     userId,
     role === 1 ? 'pharmacist' : 'customer',
     page,
     limit,
-    status
+    status,
+    type
   )
 
   return res.json({
@@ -38,6 +40,7 @@ export const getConversationsController = async (
 // Get or create conversation (Customer only - shared inbox)
 export const getOrCreateConversationController = async (req: Request, res: Response) => {
   const { userId, role } = req.decoded_authorization as TokenPayload
+  const { type = 'ai' } = req.body
 
   if (role !== 0) {
     return res.status(HTTP_STATUS.FORBIDDEN).json({
@@ -45,7 +48,7 @@ export const getOrCreateConversationController = async (req: Request, res: Respo
     })
   }
 
-  const conversation = await chatsService.getOrCreateConversation(userId)
+  const conversation = await chatsService.getOrCreateConversation(userId, type)
 
   return res.json({
     message: CHATS_MESSAGES.CREATE_CONVERSATION_SUCCESS,
@@ -179,3 +182,23 @@ export const deleteConversationController = async (req: Request, res: Response) 
     message: CHATS_MESSAGES.DELETE_CONVERSATION_SUCCESS
   })
 }
+
+// Save user feedback for a message
+export const saveMessageFeedbackController = async (req: Request, res: Response) => {
+  const { messageId } = req.params
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { feedback } = req.body
+
+  if (!feedback || !['up', 'down'].includes(feedback)) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      message: 'Feedback phải là "up" hoặc "down"'
+    })
+  }
+
+  await chatsService.saveMessageFeedback(messageId, userId, feedback)
+
+  return res.json({
+    message: 'Lưu feedback tin nhắn thành công'
+  })
+}
+

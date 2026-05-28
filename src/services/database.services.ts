@@ -42,6 +42,8 @@ class DatabaseService {
       await this.db.command({ ping: 1 })
       // Create indexes for better performance
       await this.createIndexes()
+      // Reset online status on server startup to handle crashes/restarts
+      await this.users.updateMany({}, { $set: { isOnline: false, onlineCount: 0 } })
     } catch (error) {
       console.error('❌ MongoDB connection failed:', error)
       process.exit(1)
