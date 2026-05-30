@@ -9,9 +9,10 @@ export const suggestController = async (req: Request, res: Response) => {
   const q = (req.query.q as string) || ''
 
   if (!q || q.trim().length < 2) {
-    return res.json({ hits: [] })
+    return res.json({ products: [], brands: [], categories: [] })
   }
 
+  // Returns { products, brands, categories } — each with .hits[]
   const result = await typesenseService.suggest(q.trim())
   return res.json(result)
 }
