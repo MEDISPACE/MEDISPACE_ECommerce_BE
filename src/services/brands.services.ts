@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
 import cacheService from './cache.services'
+import typesenseService from './typesense.services'
 import Brand from '~/models/schemas/Brand.schema'
 import { CreateBrandReqBody, UpdateBrandReqBody, GetBrandsQuery } from '~/models/requests/Product.request'
 import { BRANDS_MESSAGES } from '~/constants/message'
@@ -62,6 +63,8 @@ class BrandsService {
 
     await databaseService.brands.insertOne(brand)
     await cacheService.invalidate('brands:*')
+    // Sync to Typesense
+    typesenseService.indexBrand(brand).catch(() => {})
     return brand
   }
 
@@ -146,7 +149,10 @@ class BrandsService {
     await databaseService.brands.updateOne({ _id: new ObjectId(brandId) }, { $set: updateData })
     await cacheService.invalidate('brands:*')
 
-    return await this.getBrandById(brandId)
+    const updated = await this.getBrandById(brandId)
+    // Sync to Typesense
+    typesenseService.indexBrand(updated).catch(() => {})
+    return updated
   }
 
   // Toggle brand status
@@ -164,7 +170,10 @@ class BrandsService {
     )
     await cacheService.invalidate('brands:*')
 
-    return await this.getBrandById(brandId)
+    const updated = await this.getBrandById(brandId)
+    // Sync to Typesense
+    typesenseService.indexBrand(updated).catch(() => {})
+    return updated
   }
 
   // Delete brand
@@ -181,6 +190,8 @@ class BrandsService {
 
     await databaseService.brands.deleteOne({ _id: new ObjectId(brandId) })
     await cacheService.invalidate('brands:*')
+    // Sync to Typesense
+    typesenseService.removeBrand(brandId).catch(() => {})
     return { message: BRANDS_MESSAGES.DELETE_BRAND_SUCCESS }
   }
 
