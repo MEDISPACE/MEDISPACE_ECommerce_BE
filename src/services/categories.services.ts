@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
 import cacheService from './cache.services'
+import typesenseService from './typesense.services'
 import Category from '~/models/schemas/Category.schema'
 import { CreateCategoryReqBody, UpdateCategoryReqBody, GetCategoriesQuery } from '~/models/requests/Category.request'
 import { ErrorWithStatus } from '~/models/Error'
@@ -117,6 +118,8 @@ class CategoriesService {
 
     await databaseService.categories.insertOne(category)
     await cacheService.invalidate('categories:*')
+    // Sync to Typesense
+    typesenseService.indexCategory(category).catch(() => {})
     return category
   }
 
@@ -315,7 +318,10 @@ class CategoriesService {
     await databaseService.categories.updateOne({ _id: new ObjectId(categoryId) }, { $set: updateData })
     await cacheService.invalidate('categories:*')
 
-    return await this.getCategoryById(categoryId)
+    const updated = await this.getCategoryById(categoryId)
+    // Sync to Typesense
+    typesenseService.indexCategory(updated).catch(() => {})
+    return updated
   }
 
   // Toggle active status
@@ -333,7 +339,10 @@ class CategoriesService {
     )
     await cacheService.invalidate('categories:*')
 
-    return await this.getCategoryById(categoryId)
+    const updated = await this.getCategoryById(categoryId)
+    // Sync to Typesense
+    typesenseService.indexCategory(updated).catch(() => {})
+    return updated
   }
 
   // Xóa category
@@ -362,6 +371,8 @@ class CategoriesService {
 
     await databaseService.categories.deleteOne({ _id: new ObjectId(categoryId) })
     await cacheService.invalidate('categories:*')
+    // Sync to Typesense
+    typesenseService.removeCategory(categoryId).catch(() => {})
     return { message: CATEGORIES_MESSAGES.DELETE_CATEGORY_SUCCESS }
   }
 }
