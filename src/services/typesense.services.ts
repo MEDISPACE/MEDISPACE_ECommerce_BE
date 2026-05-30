@@ -23,6 +23,7 @@ const PRODUCTS_COLLECTION = 'products'
 const ARTICLES_COLLECTION = 'articles'
 const BRANDS_COLLECTION = 'brands'
 const CATEGORIES_COLLECTION = 'categories'
+const QUERY_SUGGESTIONS_COLLECTION = 'query_suggestions'
 
 const productSchema = {
   name: PRODUCTS_COLLECTION,
@@ -96,6 +97,19 @@ const categorySchema = {
     { name: 'name', type: 'string' as const },
     { name: 'slug', type: 'string' as const }
   ]
+}
+
+// Schema cho query_suggestions — lưu các từ khóa gợi ý hoàn thành câu query
+const querySuggestionsSchema = {
+  name: QUERY_SUGGESTIONS_COLLECTION,
+  fields: [
+    { name: 'q', type: 'string' as const },              // từ khóa hiển thị (VD: "Paracetamol")
+    { name: 'normalized', type: 'string' as const },     // lowercase để dedup
+    { name: 'type', type: 'string' as const, facet: true }, // ingredient|brand|category|product
+    { name: 'count', type: 'int32' as const }             // số sản phẩm liên quan — dùng để rank
+  ],
+  default_sorting_field: 'count',
+  token_separators: ['-', '/', ' ']
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -188,6 +202,17 @@ function toCategoryDocument(category: any): Record<string, unknown> {
   }
 }
 
+function toQuerySuggestionDocument(item: { q: string; type: string; count: number }): Record<string, unknown> {
+  const normalized = item.q.toLowerCase().trim()
+  return {
+    id: `${item.type}-${normalized.replace(/[^a-z0-9]/g, '-')}`,
+    q: item.q.trim(),
+    normalized,
+    type: item.type,
+    count: item.count || 1
+  }
+}
+
 // ─── Service Class ───────────────────────────────────────────────────────────
 
 class TypesenseService {
@@ -198,7 +223,8 @@ class TypesenseService {
       { name: PRODUCTS_COLLECTION, schema: productSchema },
       { name: ARTICLES_COLLECTION, schema: articleSchema },
       { name: BRANDS_COLLECTION, schema: brandSchema },
-      { name: CATEGORIES_COLLECTION, schema: categorySchema }
+      { name: CATEGORIES_COLLECTION, schema: categorySchema },
+      { name: QUERY_SUGGESTIONS_COLLECTION, schema: querySuggestionsSchema }
     ]
 
     for (const { name, schema } of collections) {
@@ -351,6 +377,37 @@ class TypesenseService {
     }
   }
 
+  async bulkIndexQuerySuggestions(items: { q: string; type: string; count: number }[]): Promise<void> {
+    if (!this.isAvailable || !items.length) return
+    try {
+      const docs = items.map(toQuerySuggestionDocument)
+      const result = await client.collections(QUERY_SUGGESTIONS_COLLECTION).documents().import(docs, { action: 'upsert' })
+      const failed = result.filter((r: any) => !r.success).length
+      console.log(`[Typesense] Bulk indexed ${docs.length - failed}/${docs.length} query suggestions.`)
+    } catch (err) {
+      console.error('[Typesense] bulkIndexQuerySuggestions error:', (err as Error)?.message)
+    }
+  }
+
+  async suggestQueries(q: string): Promise<string[]> {
+    if (!this.isAvailable || !q || q.trim().length < 2) return []
+    try {
+      const result = await client.collections(QUERY_SUGGESTIONS_COLLECTION).documents().search({
+        q: q.trim(),
+        query_by: 'q',
+        prefix: true,
+        num_typos: 1,
+        per_page: 6,
+        sort_by: '_text_match:desc,count:desc',
+        include_fields: 'q,type,count'
+      })
+      return (result.hits || []).map((h: any) => h.document.q as string)
+    } catch (err) {
+      console.error('[Typesense] suggestQueries error:', (err as Error)?.message)
+      return []
+    }
+  }
+
   async suggest(q: string): Promise<any> {
     if (!this.isAvailable) return { products: [], brands: [], categories: [] }
     try {
@@ -412,8 +469,8 @@ class TypesenseService {
 
       // Merge products: name-matches first, then ingredient-matches, deduped by mongoId
       const seen = new Set<string>()
-      const nameHits = results.results[0].hits || []
-      const ingredientHits = results.results[1].hits || []
+      const nameHits = (results.results[0] as any).hits || []
+      const ingredientHits = (results.results[1] as any).hits || []
 
       const productHits: any[] = []
       for (const hit of nameHits) {
@@ -442,8 +499,8 @@ class TypesenseService {
 
       return {
         products: productHits,
-        brands: results.results[2].hits || [],
-        categories: results.results[3].hits || []
+        brands: (results.results[2] as any).hits || [],
+        categories: (results.results[3] as any).hits || []
       }
     } catch (err) {
       console.error('[Typesense] suggest error:', (err as Error)?.message)
