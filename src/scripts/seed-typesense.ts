@@ -119,8 +119,28 @@ async function seed() {
   console.log(`[Seed] Found ${articles.length} articles. Indexing...`)
   await typesenseService.bulkIndexArticles(articles)
 
+  // ── Seed Brands ─────────────────────────────────────────────────────────────
+  console.log('[Seed] Fetching brands from MongoDB...')
+  const brands = await db
+    .collection(process.env.DB_BRANDS_COLLECTION || 'brands')
+    .find({})
+    .toArray()
+
+  console.log(`[Seed] Found ${brands.length} brands. Indexing...`)
+  await typesenseService.bulkIndexBrands(brands)
+
+  // ── Seed Categories ──────────────────────────────────────────────────────────
+  console.log('[Seed] Fetching categories from MongoDB...')
+  const categories = await db
+    .collection(process.env.DB_CATEGORIES_COLLECTION || 'categories')
+    .find({})
+    .toArray()
+
+  console.log(`[Seed] Found ${categories.length} categories. Indexing...`)
+  await typesenseService.bulkIndexCategories(categories)
+
   await mongoClient.close()
-  console.log('[Seed] ✅ Done! Typesense is now synced with MongoDB.')
+  console.log('[Seed] ✅ Done! Typesense is now synced with MongoDB (products, articles, brands, categories).')
   process.exit(0)
 }
 
