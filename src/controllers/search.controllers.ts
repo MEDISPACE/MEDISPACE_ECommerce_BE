@@ -9,12 +9,16 @@ export const suggestController = async (req: Request, res: Response) => {
   const q = (req.query.q as string) || ''
 
   if (!q || q.trim().length < 2) {
-    return res.json({ products: [], brands: [], categories: [] })
+    return res.json({ products: [], brands: [], categories: [], querySuggestions: [] })
   }
 
-  // Returns { products, brands, categories } — each with .hits[]
-  const result = await typesenseService.suggest(q.trim())
-  return res.json(result)
+  // Chạy song song: product/brand/category results + query text completions
+  const [result, querySuggestions] = await Promise.all([
+    typesenseService.suggest(q.trim()),
+    typesenseService.suggestQueries(q.trim())
+  ])
+
+  return res.json({ ...result, querySuggestions })
 }
 
 // ─── GET /search/products?q=&page=&limit=&... ─────────────────────────────────
