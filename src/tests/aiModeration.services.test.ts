@@ -43,6 +43,7 @@ describe('AiModerationService', () => {
     delete process.env.AI_MODERATION_BASE_URL
     delete process.env.AI_MODERATION_MODEL
     delete process.env.AI_MODERATION_API_KEY
+    delete process.env.AI_MODERATION_MOCK
   })
 
   it('does not enqueue automatic jobs when AI moderation is disabled', async () => {
@@ -56,6 +57,36 @@ describe('AiModerationService', () => {
 
   it('redacts direct contact identifiers before sending text to the LLM', () => {
     expect(redactText('Email me at test@example.com or 0912345678')).toBe('Email me at [email] or [phone]')
+    expect(redactText('Call 090 123 4567 or +84.901.234.567')).toBe('Call [phone] or [phone]')
+  })
+
+  it('returns deterministic results in mock mode without calling the LLM', async () => {
+    process.env.AI_MODERATION_MOCK = 'true'
+
+    const result = await aiModerationService.reviewText('[ai-hide] unsafe advice')
+
+    expect(result).toMatchObject({
+      severity: 'high',
+      categories: ['medical_harm'],
+      confidence: 0.95,
+      shouldHide: true,
+      suggestedAction: 'hide'
+    })
+    expect(axios.post).not.toHaveBeenCalled()
+  })
+
+  it('queues forced manual reviews without conflicting attempts updates', async () => {
+    process.env.AI_MODERATION_MOCK = 'true'
+    const message = { _id: new ObjectId(), roomId: new ObjectId(), senderId: new ObjectId(), content: 'hello' }
+    const processSpy = vi.spyOn(aiModerationService, 'processPendingJobs').mockResolvedValueOnce({ processed: 0 })
+    mockCommunityMessages.findOne.mockResolvedValueOnce(message)
+
+    await aiModerationService.enqueueManualReview(message._id)
+
+    const update = mockModerationAiJobs.updateOne.mock.calls[0]?.[1]
+    expect(update.$setOnInsert.attempts).toBeUndefined()
+    expect(update.$set.attempts).toBe(0)
+    processSpy.mockRestore()
   })
 
   it('auto-hides high-confidence harmful AI results and queues a finding', async () => {

@@ -36,6 +36,7 @@ type RuleModerationResult = {
 type AiModerationConfig = {
   autoEnabled: boolean
   configured: boolean
+  mockEnabled: boolean
   baseUrl: string
   model: string
   apiKey?: string
@@ -50,7 +51,7 @@ type AiJobStatus = 'pending' | 'running' | 'failed' | 'succeeded'
 
 const PROMPT_VERSION = 'community-moderation-v1'
 const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
-const PHONE_REGEX = /\b(\+84|0)(\d{9})\b/g
+const PHONE_REGEX = /(?<!\w)(?:\+84|0)(?:[\s.-]?\d){9,10}\b/g
 const CATEGORY_VALUES: AiModerationCategory[] = [
   'pii',
   'spam',
@@ -74,6 +75,51 @@ function escapeRegex(input: string) {
 
 function redactText(text: string) {
   return text.replace(EMAIL_REGEX, '[email]').replace(PHONE_REGEX, '[phone]')
+}
+
+function safeErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/(api[_-]?key=)[^&\s]+/gi, '$1[redacted]')
+    .slice(0, 500)
+}
+
+function mockReview(content: string): AiModerationResult {
+  const lower = content.toLowerCase()
+  if (lower.includes('[ai-hide]') || lower.includes('ai_e2e_hide')) {
+    return {
+      severity: 'high',
+      categories: ['medical_harm'],
+      confidence: 0.95,
+      shouldHide: true,
+      requiresHumanReview: true,
+      reason: 'Mock AI hide result for e2e moderation',
+      suggestedAction: 'hide'
+    }
+  }
+
+  if (lower.includes('[ai-review]') || lower.includes('ai_e2e_review')) {
+    return {
+      severity: 'medium',
+      categories: ['other'],
+      confidence: 0.82,
+      shouldHide: false,
+      requiresHumanReview: true,
+      reason: 'Mock AI review result for e2e moderation',
+      suggestedAction: 'review'
+    }
+  }
+
+  return {
+    severity: 'low',
+    categories: [],
+    confidence: 0.05,
+    shouldHide: false,
+    requiresHumanReview: false,
+    reason: 'Mock AI safe result for e2e moderation',
+    suggestedAction: 'none'
+  }
 }
 
 function pickJson(raw: string) {
@@ -150,12 +196,15 @@ class AiModerationService {
   getConfig(): AiModerationConfig {
     const baseUrl = (process.env.AI_MODERATION_BASE_URL || process.env.CUSTOM_LLM_BASE_URL || '').replace(/\/$/, '')
     const apiKey = process.env.AI_MODERATION_API_KEY || process.env.CUSTOM_LLM_API_KEY
-    const model = process.env.AI_MODERATION_MODEL || process.env.CUSTOM_LLM_MODEL || 'gemma-4-e4b-it.gguf'
+    const mockEnabled = process.env.AI_MODERATION_MOCK === 'true'
+    const model =
+      process.env.AI_MODERATION_MODEL || process.env.CUSTOM_LLM_MODEL || (mockEnabled ? 'mock-ai-moderation' : 'gemma-4-e4b-it.gguf')
     const autoEnabled = process.env.AI_MODERATION_ENABLED === 'true'
 
     return {
       autoEnabled,
-      configured: Boolean(baseUrl && model),
+      configured: mockEnabled || Boolean(baseUrl && model),
+      mockEnabled,
       baseUrl,
       model,
       apiKey,
@@ -172,17 +221,19 @@ class AiModerationService {
     if ((!config.autoEnabled && !params.force) || !config.configured || !params.message?._id) return null
 
     const now = new Date()
+    const setOnInsert: Record<string, unknown> = {
+      messageId: params.message._id,
+      roomId: params.message.roomId,
+      senderId: params.message.senderId,
+      promptVersion: PROMPT_VERSION,
+      createdAt: now
+    }
+    if (!params.force) setOnInsert.attempts = 0
+
     await databaseService.moderationAiJobs.updateOne(
       { messageId: params.message._id, promptVersion: PROMPT_VERSION },
       {
-        $setOnInsert: {
-          messageId: params.message._id,
-          roomId: params.message.roomId,
-          senderId: params.message.senderId,
-          promptVersion: PROMPT_VERSION,
-          createdAt: now,
-          attempts: 0
-        },
+        $setOnInsert: setOnInsert,
         $set: {
           status: 'pending',
           ruleResult: params.ruleResult,
@@ -413,7 +464,7 @@ class AiModerationService {
         {
           $set: {
             status: 'failed',
-            lastError: String(error?.message || error).slice(0, 500),
+            lastError: safeErrorMessage(error),
             lockedUntil: null,
             updatedAt: new Date()
           }
@@ -426,6 +477,7 @@ class AiModerationService {
   async reviewText(content: string, context?: { roomId?: string; ruleResult?: RuleModerationResult }) {
     const config = this.getConfig()
     if (!config.configured) throw new Error('AI moderation is not configured')
+    if (config.mockEnabled) return mockReview(content)
 
     const response = await axios.post(
       `${config.baseUrl}/chat/completions`,
