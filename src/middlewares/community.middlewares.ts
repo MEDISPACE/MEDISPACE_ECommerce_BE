@@ -56,6 +56,24 @@ export const appealIdValidator = validate(
   )
 )
 
+export const aiJobIdValidator = validate(
+  checkSchema(
+    {
+      jobId: {
+        in: ['params'],
+        notEmpty: { errorMessage: 'jobId là bắt buộc' },
+        custom: {
+          options: (value) => {
+            if (!ObjectId.isValid(value)) throw new Error('jobId không hợp lệ')
+            return true
+          }
+        }
+      }
+    },
+    ['params']
+  )
+)
+
 export const userIdParamValidator = validate(
   checkSchema(
     {

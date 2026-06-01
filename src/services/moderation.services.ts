@@ -20,6 +20,12 @@ type ModerationActionType =
 type FindingStatus = 'open' | 'resolved'
 type AppealType = 'ban' | 'mute' | 'message'
 type AppealStatus = 'open' | 'approved' | 'rejected'
+type ModerationTrigger = 'auto' | 'user_report' | 'ai'
+type ModerationSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+function escapeRegex(input: string) {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 class ModerationService {
   private emitRoom(event: string, roomId: ObjectId, payload: unknown) {
@@ -38,34 +44,63 @@ class ModerationService {
     }
   }
 
-  async getQueue(params: { page: number; limit: number }) {
+  async getQueue(params: {
+    page: number
+    limit: number
+    severity?: ModerationSeverity
+    trigger?: ModerationTrigger
+    search?: string
+  }) {
     const skip = (params.page - 1) * params.limit
+    const match: any = { status: 'open' as FindingStatus }
+    if (params.severity) match.severity = params.severity
+    if (params.trigger) match.trigger = params.trigger
 
-    const [items, total] = await Promise.all([
-      databaseService.moderationFindings
-        .aggregate([
-          { $match: { status: 'open' as FindingStatus } },
+    const pipeline: any[] = [
+      { $match: match },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+          localField: 'messageId',
+          foreignField: '_id',
+          as: 'message'
+        }
+      },
+      { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
+          localField: 'roomId',
+          foreignField: '_id',
+          as: 'room'
+        }
+      },
+      { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } }
+    ]
+
+    const search = params.search?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      pipeline.push({
+        $match: {
+          $or: [
+            { 'room.name': regex },
+            { 'room.slug': regex },
+            { 'room.diseaseKey': regex },
+            { 'message.content': regex },
+            { categories: regex },
+            { reasons: regex }
+          ]
+        }
+      })
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
           { $sort: { createdAt: -1 } },
           { $skip: skip },
           { $limit: params.limit },
-          {
-            $lookup: {
-              from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
-              localField: 'messageId',
-              foreignField: '_id',
-              as: 'message'
-            }
-          },
-          { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } },
-          {
-            $lookup: {
-              from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
-              localField: 'roomId',
-              foreignField: '_id',
-              as: 'room'
-            }
-          },
-          { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } },
           {
             $project: {
               roomId: 1,
@@ -85,10 +120,14 @@ class ModerationService {
               updatedAt: 1
             }
           }
-        ])
-        .toArray(),
-      databaseService.moderationFindings.countDocuments({ status: 'open' as FindingStatus })
-    ])
+        ],
+        total: [{ $count: 'count' }]
+      }
+    })
+
+    const [result] = await databaseService.moderationFindings.aggregate(pipeline).toArray()
+    const items = result?.items || []
+    const total = result?.total?.[0]?.count || 0
 
     return { items, page: params.page, limit: params.limit, total }
   }
@@ -246,13 +285,27 @@ class ModerationService {
     return { message: updatedMessage }
   }
 
-  async getActions(params: { page: number; limit: number; roomId?: ObjectId; messageId?: ObjectId; targetUserId?: ObjectId; action?: string }) {
+  async getActions(params: {
+    page: number
+    limit: number
+    roomId?: ObjectId
+    messageId?: ObjectId
+    targetUserId?: ObjectId
+    action?: string
+    dateFrom?: Date
+    dateTo?: Date
+  }) {
     const skip = (params.page - 1) * params.limit
     const query: any = {}
     if (params.roomId) query.roomId = params.roomId
     if (params.messageId) query.messageId = params.messageId
     if (params.targetUserId) query.targetUserId = params.targetUserId
     if (params.action) query.action = params.action
+    if (params.dateFrom || params.dateTo) {
+      query.createdAt = {}
+      if (params.dateFrom) query.createdAt.$gte = params.dateFrom
+      if (params.dateTo) query.createdAt.$lte = params.dateTo
+    }
 
     const [items, total] = await Promise.all([
       databaseService.moderationActions
@@ -364,45 +417,78 @@ class ModerationService {
     return storedAppeal
   }
 
-  async getAppeals(params: { page: number; limit: number; status?: AppealStatus }) {
+  async getAppeals(params: {
+    page: number
+    limit: number
+    status?: AppealStatus
+    type?: AppealType
+    roomId?: ObjectId
+    userId?: ObjectId
+    search?: string
+  }) {
     const skip = (params.page - 1) * params.limit
     const query: any = {}
     if (params.status) query.status = params.status
+    if (params.type) query.type = params.type
+    if (params.roomId) query.roomId = params.roomId
+    if (params.userId) query.userId = params.userId
 
-    const [items, total] = await Promise.all([
-      databaseService.moderationAppeals
-        .aggregate([
-          { $match: query },
+    const pipeline: any[] = [
+      { $match: query },
+      {
+        $lookup: {
+          from: process.env.USERS_COLLECTION || 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
+          localField: 'roomId',
+          foreignField: '_id',
+          as: 'room'
+        }
+      },
+      { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+          localField: 'messageId',
+          foreignField: '_id',
+          as: 'message'
+        }
+      },
+      { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } }
+    ]
+
+    const search = params.search?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      pipeline.push({
+        $match: {
+          $or: [
+            { reason: regex },
+            { decisionNotes: regex },
+            { 'user.email': regex },
+            { 'user.firstName': regex },
+            { 'user.lastName': regex },
+            { 'room.name': regex },
+            { 'room.slug': regex },
+            { 'message.content': regex }
+          ]
+        }
+      })
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
           { $sort: { createdAt: -1 } },
           { $skip: skip },
           { $limit: params.limit },
-          {
-            $lookup: {
-              from: process.env.USERS_COLLECTION || 'users',
-              localField: 'userId',
-              foreignField: '_id',
-              as: 'user'
-            }
-          },
-          { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-          {
-            $lookup: {
-              from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
-              localField: 'roomId',
-              foreignField: '_id',
-              as: 'room'
-            }
-          },
-          { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } },
-          {
-            $lookup: {
-              from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
-              localField: 'messageId',
-              foreignField: '_id',
-              as: 'message'
-            }
-          },
-          { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } },
           {
             $project: {
               roomId: 1,
@@ -421,10 +507,14 @@ class ModerationService {
               message: { _id: 1, content: 1, status: 1, createdAt: 1 }
             }
           }
-        ])
-        .toArray(),
-      databaseService.moderationAppeals.countDocuments(query)
-    ])
+        ],
+        total: [{ $count: 'count' }]
+      }
+    })
+
+    const [result] = await databaseService.moderationAppeals.aggregate(pipeline).toArray()
+    const items = result?.items || []
+    const total = result?.total?.[0]?.count || 0
 
     return { items, page: params.page, limit: params.limit, total }
   }
