@@ -116,6 +116,29 @@ class DatabaseService {
       await safeCreateIndex(this.notifications, { userId: 1, targetRole: 1, createdAt: -1 })
       await safeCreateIndex(this.notifications, { targetRole: 1, createdAt: -1 })
 
+      // Community & Moderation indexes (MVP)
+      await safeCreateIndex(this.communityRooms, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.communityRooms, { visibility: 1, status: 1, createdAt: -1 })
+
+      await safeCreateIndex(this.communityRoomMembers, { roomId: 1, userId: 1 }, { unique: true })
+      await safeCreateIndex(this.communityRoomMembers, { roomId: 1, status: 1, updatedAt: -1 })
+      await safeCreateIndex(this.communityRoomMembers, { userId: 1, status: 1, updatedAt: -1 })
+
+      await safeCreateIndex(this.communityMessages, { roomId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityMessages, { senderId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityMessages, { status: 1, createdAt: -1 })
+
+      await safeCreateIndex(this.moderationFindings, { status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationFindings, { roomId: 1, status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationFindings, { messageId: 1 }, { unique: true })
+
+      await safeCreateIndex(this.moderationReports, { messageId: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationActions, { messageId: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationAppeals, { status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationAppeals, { roomId: 1, userId: 1, status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationAiJobs, { status: 1, lockedUntil: 1, createdAt: 1 })
+      await safeCreateIndex(this.moderationAiJobs, { messageId: 1, promptVersion: 1 }, { unique: true })
+
     } catch (error) {
       // Silent - indexes may already exist
     }
@@ -191,6 +214,39 @@ class DatabaseService {
   }
   get notifications(): Collection<Notification> {
     return this.db.collection('notifications')
+  }
+
+  // ── Community / Moderation (MVP) ───────────────────────────────────────────
+  get communityRooms(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms')
+  }
+
+  get communityRoomMembers(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_ROOM_MEMBERS_COLLECTION || 'communityRoomMembers')
+  }
+
+  get communityMessages(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages')
+  }
+
+  get moderationFindings(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_FINDINGS_COLLECTION || 'moderationFindings')
+  }
+
+  get moderationReports(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_REPORTS_COLLECTION || 'moderationReports')
+  }
+
+  get moderationActions(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_ACTIONS_COLLECTION || 'moderationActions')
+  }
+
+  get moderationAppeals(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_APPEALS_COLLECTION || 'moderationAppeals')
+  }
+
+  get moderationAiJobs(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_AI_JOBS_COLLECTION || 'moderationAiJobs')
   }
 }
 
