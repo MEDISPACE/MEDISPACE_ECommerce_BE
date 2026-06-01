@@ -37,6 +37,10 @@ function slugify(input: string): string {
   return base || `room-${Date.now()}`
 }
 
+function escapeRegex(input: string) {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function emitCommunity(event: string, roomId: ObjectId | string, payload: unknown) {
   try {
     getIO().to(`community:room:${roomId.toString()}`).emit(event, payload)
@@ -217,11 +221,16 @@ class CommunityService {
     return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId)).toArray()
   }
 
-  async listAdminRooms(filters?: { visibility?: RoomVisibility; status?: RoomStatus; diseaseKey?: string }) {
+  async listAdminRooms(filters?: { visibility?: RoomVisibility; status?: RoomStatus; diseaseKey?: string; search?: string }) {
     const query: any = {}
     if (filters?.visibility) query.visibility = filters.visibility
     if (filters?.status) query.status = filters.status
     if (filters?.diseaseKey) query.diseaseKey = filters.diseaseKey
+    const search = filters?.search?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      query.$or = [{ name: regex }, { slug: regex }, { diseaseKey: regex }]
+    }
     return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query)).toArray()
   }
 

@@ -8,8 +8,18 @@ export const getModerationQueueController = async (req: Request, res: Response, 
   try {
     const page = Number((req.query as any).page || 1)
     const limit = Number((req.query as any).limit || 20)
+    const { severity, trigger, search } = req.query as Record<string, string | undefined>
 
-    const result = await moderationService.getQueue({ page, limit })
+    const result = await moderationService.getQueue({
+      page,
+      limit,
+      severity:
+        severity === 'low' || severity === 'medium' || severity === 'high' || severity === 'critical'
+          ? severity
+          : undefined,
+      trigger: trigger === 'auto' || trigger === 'user_report' || trigger === 'ai' ? trigger : undefined,
+      search
+    })
 
     return res.status(200).json({ message: 'OK', data: result })
   } catch (error) {
@@ -21,7 +31,7 @@ export const getModerationActionsController = async (req: Request, res: Response
   try {
     const page = Number((req.query as any).page || 1)
     const limit = Number((req.query as any).limit || 20)
-    const { roomId, messageId, targetUserId, action } = req.query as Record<string, string | undefined>
+    const { roomId, messageId, targetUserId, action, dateFrom, dateTo } = req.query as Record<string, string | undefined>
 
     const result = await moderationService.getActions({
       page,
@@ -29,7 +39,9 @@ export const getModerationActionsController = async (req: Request, res: Response
       roomId: roomId && ObjectId.isValid(roomId) ? new ObjectId(roomId) : undefined,
       messageId: messageId && ObjectId.isValid(messageId) ? new ObjectId(messageId) : undefined,
       targetUserId: targetUserId && ObjectId.isValid(targetUserId) ? new ObjectId(targetUserId) : undefined,
-      action
+      action,
+      dateFrom: dateFrom ? new Date(dateFrom) : undefined,
+      dateTo: dateTo ? new Date(dateTo) : undefined
     })
 
     return res.status(200).json({ message: 'OK', data: result })
@@ -42,12 +54,16 @@ export const getModerationAppealsController = async (req: Request, res: Response
   try {
     const page = Number((req.query as any).page || 1)
     const limit = Number((req.query as any).limit || 20)
-    const { status } = req.query as { status?: any }
+    const { status, type, roomId, userId, search } = req.query as Record<string, string | undefined>
 
     const result = await moderationService.getAppeals({
       page,
       limit,
-      status: status === 'open' || status === 'approved' || status === 'rejected' ? status : undefined
+      status: status === 'open' || status === 'approved' || status === 'rejected' ? status : undefined,
+      type: type === 'ban' || type === 'mute' || type === 'message' ? type : undefined,
+      roomId: roomId && ObjectId.isValid(roomId) ? new ObjectId(roomId) : undefined,
+      userId: userId && ObjectId.isValid(userId) ? new ObjectId(userId) : undefined,
+      search
     })
 
     return res.status(200).json({ message: 'OK', data: result })
@@ -102,6 +118,39 @@ export const rerunAiModerationController = async (req: Request, res: Response, n
     const result = await aiModerationService.enqueueManualReview(new ObjectId(messageId))
 
     return res.status(202).json({ message: 'Đã đưa tin nhắn vào hàng chờ AI moderation', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getAiModerationJobsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Number((req.query as any).page || 1)
+    const limit = Number((req.query as any).limit || 20)
+    const { status, roomId, messageId, search } = req.query as Record<string, string | undefined>
+
+    const result = await aiModerationService.getJobs({
+      page,
+      limit,
+      status:
+        status === 'pending' || status === 'running' || status === 'failed' || status === 'succeeded'
+          ? status
+          : undefined,
+      roomId: roomId && ObjectId.isValid(roomId) ? new ObjectId(roomId) : undefined,
+      messageId: messageId && ObjectId.isValid(messageId) ? new ObjectId(messageId) : undefined,
+      search
+    })
+
+    return res.status(200).json({ message: 'OK', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const retryAiModerationJobController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await aiModerationService.retryJob(new ObjectId(req.params.jobId))
+    return res.status(202).json({ message: 'Đã đưa AI job vào hàng chờ chạy lại', data: result })
   } catch (error) {
     next(error)
   }

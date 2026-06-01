@@ -46,6 +46,8 @@ type AiModerationConfig = {
   reviewConfidence: number
 }
 
+type AiJobStatus = 'pending' | 'running' | 'failed' | 'succeeded'
+
 const PROMPT_VERSION = 'community-moderation-v1'
 const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
 const PHONE_REGEX = /\b(\+84|0)(\d{9})\b/g
@@ -64,6 +66,10 @@ const SEVERITY_VALUES: AiModerationSeverity[] = ['low', 'medium', 'high', 'criti
 function asNumber(value: string | undefined, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function escapeRegex(input: string) {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function redactText(text: string) {
@@ -209,6 +215,121 @@ class AiModerationService {
     const queued = await this.enqueueMessageReview({ message, ruleResult: message.moderated, force: true })
     this.processPendingJobs(1).catch(() => {})
     return queued
+  }
+
+  async getJobs(params: {
+    page: number
+    limit: number
+    status?: AiJobStatus
+    roomId?: ObjectId
+    messageId?: ObjectId
+    search?: string
+  }) {
+    const skip = (params.page - 1) * params.limit
+    const match: any = {}
+    if (params.status) match.status = params.status
+    if (params.roomId) match.roomId = params.roomId
+    if (params.messageId) match.messageId = params.messageId
+
+    const pipeline: any[] = [
+      { $match: match },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
+          localField: 'roomId',
+          foreignField: '_id',
+          as: 'room'
+        }
+      },
+      { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+          localField: 'messageId',
+          foreignField: '_id',
+          as: 'message'
+        }
+      },
+      { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } }
+    ]
+
+    const search = params.search?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      pipeline.push({
+        $match: {
+          $or: [{ 'room.name': regex }, { 'room.slug': regex }, { 'message.content': regex }, { lastError: regex }]
+        }
+      })
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
+          { $sort: { updatedAt: -1, createdAt: -1 } },
+          { $skip: skip },
+          { $limit: params.limit },
+          {
+            $project: {
+              roomId: 1,
+              messageId: 1,
+              senderId: 1,
+              promptVersion: 1,
+              status: 1,
+              attempts: 1,
+              lastError: 1,
+              lockedUntil: 1,
+              latencyMs: 1,
+              aiResult: 1,
+              applied: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              room: { _id: 1, name: 1, slug: 1, visibility: 1, diseaseKey: 1 },
+              message: { _id: 1, content: 1, status: 1, createdAt: 1 }
+            }
+          }
+        ],
+        total: [{ $count: 'count' }]
+      }
+    })
+
+    const [result] = await databaseService.moderationAiJobs.aggregate(pipeline).toArray()
+    return {
+      items: result?.items || [],
+      page: params.page,
+      limit: params.limit,
+      total: result?.total?.[0]?.count || 0
+    }
+  }
+
+  async retryJob(jobId: ObjectId) {
+    const config = this.getConfig()
+    if (!config.configured) {
+      throw new ErrorWithStatus({
+        message: 'AI moderation chưa được cấu hình.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const job = await databaseService.moderationAiJobs.findOne({ _id: jobId })
+    if (!job) {
+      throw new ErrorWithStatus({ message: 'Không tìm thấy AI moderation job.', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    await databaseService.moderationAiJobs.updateOne(
+      { _id: jobId },
+      {
+        $set: {
+          status: 'pending',
+          attempts: 0,
+          lockedUntil: null,
+          lastError: null,
+          updatedAt: new Date()
+        }
+      }
+    )
+    this.processPendingJobs(1).catch(() => {})
+    return { jobId, status: 'pending' }
   }
 
   startWorker() {

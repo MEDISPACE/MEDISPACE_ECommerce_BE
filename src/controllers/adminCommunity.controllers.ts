@@ -5,11 +5,17 @@ import communityService from '~/services/community.services'
 
 export const listAdminRoomsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { visibility, status, diseaseKey } = req.query as { visibility?: any; status?: any; diseaseKey?: any }
+    const { visibility, status, diseaseKey, search } = req.query as {
+      visibility?: any
+      status?: any
+      diseaseKey?: any
+      search?: any
+    }
     const rooms = await communityService.listAdminRooms({
       visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
       status: status === 'active' || status === 'archived' ? status : undefined,
-      diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined
+      diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined,
+      search: typeof search === 'string' ? search : undefined
     })
     return res.status(200).json({ message: 'OK', data: rooms })
   } catch (error) {
