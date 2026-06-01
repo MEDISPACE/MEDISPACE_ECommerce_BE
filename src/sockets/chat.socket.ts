@@ -23,9 +23,14 @@ export const getIO = (): SocketIOServer => {
 }
 
 export const initChatSocket = (httpServer: HTTPServer) => {
+  const allowedOrigins = (process.env.FRONTEND_URLS || '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean)
+
   _io = new SocketIOServer(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URLS,
+      origin: allowedOrigins.length > 0 ? allowedOrigins : true,
       credentials: true,
       methods: ['GET', 'POST']
     }
@@ -105,6 +110,34 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     // Leave conversation room
     socket.on('conversation:leave', (conversationId: string) => {
       socket.leave(`conversation:${conversationId}`)
+    })
+
+    socket.on('community:room:join', async (roomId: string, ack?: (payload: { ok: boolean; roomId?: string; message?: string }) => void) => {
+      try {
+        if (!socket.userId || !ObjectId.isValid(roomId)) {
+          ack?.({ ok: false, message: 'roomId không hợp lệ' })
+          return
+        }
+        const roomObjectId = new ObjectId(roomId)
+        const userObjectId = new ObjectId(socket.userId)
+        const room = await databaseService.communityRooms.findOne({ _id: roomObjectId, status: 'active' })
+        const member = await databaseService.communityRoomMembers.findOne({ roomId: roomObjectId, userId: userObjectId })
+        const canAccess = socket.userRole === 'admin' || (Boolean(room) && member?.status === 'active')
+        if (!canAccess) {
+          socket.emit('error', { message: 'Bạn chưa tham gia phòng cộng đồng này.' })
+          ack?.({ ok: false, message: 'Bạn chưa tham gia phòng cộng đồng này.' })
+          return
+        }
+        socket.join(`community:room:${roomId}`)
+        ack?.({ ok: true, roomId })
+      } catch {
+        socket.emit('error', { message: 'Không thể tham gia kênh realtime cộng đồng.' })
+        ack?.({ ok: false, message: 'Không thể tham gia kênh realtime cộng đồng.' })
+      }
+    })
+
+    socket.on('community:room:leave', (roomId: string) => {
+      socket.leave(`community:room:${roomId}`)
     })
 
     // --- FIX 3.2: emit gọn lại – chỉ dùng room-based, bỏ fetchSockets loop ---

@@ -4,6 +4,7 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import databaseService from './services/database.services'
 import cleanupService from './services/cleanup.services'
+import aiModerationService from './services/aiModeration.services'
 import { config } from 'dotenv'
 import usersRouter from './routes/users.routes'
 import categoriesRouter from './routes/categories.routes'
@@ -29,6 +30,9 @@ import couponsRouter from './routes/coupons.routes'
 import campaignsRouter from './routes/campaigns.routes'
 import loyaltyRouter from './routes/loyalty.routes'
 import recommendationsRouter from './routes/recommendations.routes'
+import communityRouter from './routes/community.routes'
+import adminCommunityRouter from './routes/adminCommunity.routes'
+import adminModerationRouter from './routes/adminModeration.routes'
 import typesenseService from './services/typesense.services'
 import { defaultErrorHandler } from '~/middlewares/error.middlewares'
 
@@ -42,6 +46,7 @@ databaseService.connect()
 cleanupService.startCartCleanup()
 cleanupService.startAbandonedOrderCleanup() // Cleanup abandoned orders every hour
 cleanupService.startStaleConversationReassign() // Re-queue stale chat conversations every 5 minutes
+aiModerationService.startWorker()
 initFolder() // Tạo thư mục temp cho upload
 typesenseService.initCollections() // Initialize Typesense search index
 
@@ -84,6 +89,9 @@ app.use('/coupons', couponsRouter)
 app.use('/campaigns', campaignsRouter)
 app.use('/loyalty', loyaltyRouter)
 app.use('/recommendations', recommendationsRouter)
+app.use('/community', communityRouter)
+app.use('/admin/community', adminCommunityRouter)
+app.use('/admin/moderation', adminModerationRouter)
 
 // ─── Internal endpoints (ML Service → BE webhook) ─────────────────────────────
 // Called by ML service after retraining to invalidate stale Redis recommendation cache
