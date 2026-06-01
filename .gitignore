@@ -5,8 +5,13 @@ dist/
 # Test
 src/tests/
 vitest.config.ts
+!vitest.config.ts
 coverage/
 *.test.ts
 *.spec.ts
+!src/tests/
+!src/tests/setup.ts
+!src/tests/community.services.test.ts
+!src/tests/aiModeration.services.test.ts
 
 note.txt

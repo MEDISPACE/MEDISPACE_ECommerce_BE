@@ -17,7 +17,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: builder
     container_name: medispace-backend-dev
+    command: npx nodemon --watch src --ext ts,js,json --exec "tsx ./src/index.ts"
     ports:
       - "8000:8000"
     env_file:
@@ -31,7 +33,7 @@ services:
       REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads
-      - ./src:/app/src        # Hot-reload: mount source để ts-node-dev pick up
+      - ./src:/app/src        # Hot-reload: mount source để tsx pick up
     depends_on:
       - redis
       - typesense
