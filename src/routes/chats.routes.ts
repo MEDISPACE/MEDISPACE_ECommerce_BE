@@ -8,7 +8,8 @@ import {
   getConversationController,
   getAvailablePharmacistController,
   deleteConversationController,
-  assignConversationController
+  assignConversationController,
+  saveMessageFeedbackController
 } from '~/controllers/chats.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { sendMessageValidator, rateLimitMessageValidator } from '~/middlewares/chats.middlewares'
@@ -121,6 +122,18 @@ chatsRouter.post(
   accessTokenValidator,
   verifiedUserValidator,
   wrapRequestHandler(markAsReadController)
+)
+
+/**
+ * Save user feedback for a message
+ * Path: /messages/:messageId/feedback
+ * Method: POST
+ */
+chatsRouter.post(
+  '/messages/:messageId/feedback',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(saveMessageFeedbackController)
 )
 
 export default chatsRouter

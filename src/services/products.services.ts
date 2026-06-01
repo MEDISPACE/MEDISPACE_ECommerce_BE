@@ -138,12 +138,9 @@ class ProductsService {
 
     await databaseService.products.insertOne(product)
 
-    // Sync to Typesense (fire-and-forget)
-    typesenseService
-      .indexProduct({
-        ...product,
-        category: { name: (await categoriesService.getCategoryById(payload.categoryId.toString())).name }
-      })
+    // Sync to Typesense — fetch full product with details join để có activeIngredients, dosageForm, etc.
+    this.getProductById(productId.toString())
+      .then((full) => typesenseService.indexProduct(full))
       .catch(() => {})
 
     // Update category product count
@@ -547,6 +544,9 @@ class ProductsService {
       lastModifiedBy
     }
 
+    // Remove details from product updateData — details go to productDetails collection
+    delete updateData.details
+
     // Generate new slug if name changed and slug not provided
     if (payload.name && !payload.slug) {
       updateData.slug = this.generateSlug(payload.name)
@@ -561,6 +561,22 @@ class ProductsService {
     }
 
     await databaseService.products.updateOne({ _id: new ObjectId(productId) }, { $set: updateData })
+
+    // Upsert productDetails if details provided in payload
+    if (payload.details && Object.keys(payload.details).length > 0) {
+      await databaseService.productDetails.updateOne(
+        { productId: new ObjectId(productId) },
+        {
+          $set: {
+            ...payload.details,
+            productId: new ObjectId(productId),
+            updatedAt: new Date()
+          },
+          $setOnInsert: { createdAt: new Date() }
+        },
+        { upsert: true }
+      )
+    }
 
     // Update product counts if category or brand changed
     if (payload.categoryId && payload.categoryId !== product.categoryId.toString()) {
@@ -585,6 +601,7 @@ class ProductsService {
       await brandsService.updateProductCount(new ObjectId(payload.brandId), 1)
     }
 
+    // Fetch full product with details join — ensures Typesense gets activeIngredients, dosageForm, etc.
     const updated = await this.getProductById(productId)
 
     // Sync to Typesense (fire-and-forget)

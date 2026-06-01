@@ -27,6 +27,18 @@ export interface CreateProductReqBody {
   featuredImage?: string
 }
 
+export interface UpdateProductDetailInline {
+  activeIngredients?: string
+  dosageForm?: 'tablet' | 'capsule' | 'syrup' | 'injection' | 'cream' | 'drops' | 'other'
+  packSize?: string
+  strength?: string
+  manufacturer?: string
+  indications?: string
+  dosageInstructions?: string
+  storageInstructions?: string
+  registrationNumber?: string
+}
+
 export interface UpdateProductReqBody {
   name?: string
   slug?: string
@@ -42,7 +54,9 @@ export interface UpdateProductReqBody {
   isActive?: boolean
   requiresPrescription?: boolean
   featuredImage?: string
+  details?: UpdateProductDetailInline // Thông tin y tế — upsert vào productDetails collection
 }
+
 
 export interface GetProductsQuery {
   page?: string
