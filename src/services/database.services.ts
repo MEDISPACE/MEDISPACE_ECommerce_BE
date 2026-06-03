@@ -137,6 +137,7 @@ class DatabaseService {
       await safeCreateIndex(this.moderationFindings, { messageId: 1 }, { unique: true })
 
       await safeCreateIndex(this.moderationReports, { messageId: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationReports, { messageId: 1, reporterId: 1 }, { unique: true })
       await safeCreateIndex(this.moderationActions, { messageId: 1, createdAt: -1 })
       await safeCreateIndex(this.moderationAppeals, { status: 1, createdAt: -1 })
       await safeCreateIndex(this.moderationAppeals, { roomId: 1, userId: 1, status: 1, createdAt: -1 })
