@@ -4,12 +4,14 @@ import typesenseService from '~/services/typesense.services'
 import databaseService from '~/services/database.services'
 import HTTP_STATUS from '~/constants/httpStatus'
 
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 // ─── GET /search/suggest?q= ──────────────────────────────────────────────────
 export const suggestController = async (req: Request, res: Response) => {
   const q = (req.query.q as string) || ''
 
   if (!q || q.trim().length < 2) {
-    return res.json({ products: [], brands: [], categories: [] })
+    return res.json({ products: [], brands: [], categories: [], articles: [] })
   }
 
   // Returns { products, brands, categories } — each with .hits[]
@@ -42,7 +44,8 @@ export const searchProductsController = async (req: Request, res: Response) => {
   if (!tsResult) {
     const mongoFilter: Record<string, unknown> = { isActive: true }
     if (q && q !== '*') {
-      mongoFilter.$or = [{ name: { $regex: q, $options: 'i' } }, { sku: { $regex: q, $options: 'i' } }]
+      const safeQuery = escapeRegex(q)
+      mongoFilter.$or = [{ name: { $regex: safeQuery, $options: 'i' } }, { sku: { $regex: safeQuery, $options: 'i' } }]
     }
     if (categoryId) {
       try {
@@ -105,8 +108,22 @@ export const searchArticlesController = async (req: Request, res: Response) => {
 
   if (!tsResult) {
     const filter: Record<string, unknown> = { isPublished: true }
+    if (categoryId && ObjectId.isValid(categoryId)) {
+      filter.categoryId = new ObjectId(categoryId)
+    }
     if (q && q !== '*') {
-      filter.$or = [{ title: { $regex: q, $options: 'i' } }, { excerpt: { $regex: q, $options: 'i' } }]
+      const safeQuery = escapeRegex(q)
+      const queryRegex = new RegExp(safeQuery, 'i')
+      filter.$or = [
+        { title: { $regex: safeQuery, $options: 'i' } },
+        { excerpt: { $regex: safeQuery, $options: 'i' } },
+        { content: { $regex: safeQuery, $options: 'i' } },
+        { tags: { $in: [queryRegex] } },
+        { healthTopics: { $in: [queryRegex] } },
+        { symptoms: { $in: [queryRegex] } },
+        { activeIngredients: { $in: [queryRegex] } },
+        { targetAudiences: { $in: [queryRegex] } }
+      ]
     }
     const articles = await databaseService.articles
       .find(filter)

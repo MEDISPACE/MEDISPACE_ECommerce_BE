@@ -131,6 +131,58 @@ const isPinnedSchema = {
   }
 }
 
+const optionalShortTextSchema = {
+  optional: { options: { nullable: true } },
+  isString: {
+    errorMessage: 'Value must be a string'
+  },
+  trim: true,
+  isLength: {
+    options: { max: 200 },
+    errorMessage: 'Value must be at most 200 characters'
+  }
+}
+
+const optionalIsoDateSchema = {
+  optional: { options: { nullable: true } },
+  isISO8601: {
+    errorMessage: 'Date must be a valid ISO date'
+  }
+}
+
+const referencesSchema = {
+  optional: true,
+  isArray: {
+    options: { max: 20 },
+    errorMessage: 'References must be an array with at most 20 items'
+  }
+}
+
+const optionalStringArraySchema = {
+  optional: true,
+  isArray: {
+    options: { max: 30 },
+    errorMessage: 'Value must be an array with at most 30 items'
+  }
+}
+
+const contentVersionSchema = {
+  optional: true,
+  isInt: {
+    options: { min: 1, max: 999 },
+    errorMessage: 'Content version must be a positive integer'
+  },
+  toInt: true
+}
+
+const riskLevelSchema = {
+  optional: true,
+  isIn: {
+    options: [['general', 'medication', 'disease', 'emergency-sensitive']],
+    errorMessage: 'Risk level is invalid'
+  }
+}
+
 // Query schemas
 const pageSchema = {
   optional: true,
@@ -188,7 +240,30 @@ export const createArticleValidator = validate(
       featuredImage: featuredImageSchema,
       status: statusSchema,
       isFeatured: isFeaturedSchema,
-      isPinned: isPinnedSchema
+      isPinned: isPinnedSchema,
+      references: referencesSchema,
+      'references.*.title': optionalShortTextSchema,
+      'references.*.url': {
+        ...optionalShortTextSchema,
+        isLength: {
+          options: { max: 1000 },
+          errorMessage: 'Reference URL must be at most 1000 characters'
+        }
+      },
+      reviewedBy: optionalShortTextSchema,
+      reviewedByTitle: optionalShortTextSchema,
+      reviewedAt: optionalIsoDateSchema,
+      lastMedicallyReviewedAt: optionalIsoDateSchema,
+      contentVersion: contentVersionSchema,
+      riskLevel: riskLevelSchema,
+      targetAudiences: optionalStringArraySchema,
+      'targetAudiences.*': optionalShortTextSchema,
+      symptoms: optionalStringArraySchema,
+      'symptoms.*': optionalShortTextSchema,
+      activeIngredients: optionalStringArraySchema,
+      'activeIngredients.*': optionalShortTextSchema,
+      healthTopics: optionalStringArraySchema,
+      'healthTopics.*': optionalShortTextSchema
     },
     ['body']
   )
@@ -221,7 +296,30 @@ export const updateArticleValidator = validate(
       featuredImage: featuredImageSchema,
       status: statusSchema,
       isFeatured: isFeaturedSchema,
-      isPinned: isPinnedSchema
+      isPinned: isPinnedSchema,
+      references: referencesSchema,
+      'references.*.title': optionalShortTextSchema,
+      'references.*.url': {
+        ...optionalShortTextSchema,
+        isLength: {
+          options: { max: 1000 },
+          errorMessage: 'Reference URL must be at most 1000 characters'
+        }
+      },
+      reviewedBy: optionalShortTextSchema,
+      reviewedByTitle: optionalShortTextSchema,
+      reviewedAt: optionalIsoDateSchema,
+      lastMedicallyReviewedAt: optionalIsoDateSchema,
+      contentVersion: contentVersionSchema,
+      riskLevel: riskLevelSchema,
+      targetAudiences: optionalStringArraySchema,
+      'targetAudiences.*': optionalShortTextSchema,
+      symptoms: optionalStringArraySchema,
+      'symptoms.*': optionalShortTextSchema,
+      activeIngredients: optionalStringArraySchema,
+      'activeIngredients.*': optionalShortTextSchema,
+      healthTopics: optionalStringArraySchema,
+      'healthTopics.*': optionalShortTextSchema
     },
     ['body']
   )

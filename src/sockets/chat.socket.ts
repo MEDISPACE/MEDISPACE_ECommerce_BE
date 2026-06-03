@@ -47,10 +47,14 @@ export const getIO = (): SocketIOServer => {
 }
 
 export const initChatSocket = (httpServer: HTTPServer) => {
-  const allowedOrigins = process.env.FRONTEND_URLS?.split(',').map(url => url.trim()) || '*'
+  const allowedOrigins = (process.env.FRONTEND_URLS || '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean)
+
   _io = new SocketIOServer(httpServer, {
     cors: {
-      origin: allowedOrigins,
+      origin: allowedOrigins.length > 0 ? allowedOrigins : true,
       credentials: true,
       methods: ['GET', 'POST']
     }
@@ -130,6 +134,34 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     // Leave conversation room
     socket.on('conversation:leave', (conversationId: string) => {
       socket.leave(`conversation:${conversationId}`)
+    })
+
+    socket.on('community:room:join', async (roomId: string, ack?: (payload: { ok: boolean; roomId?: string; message?: string }) => void) => {
+      try {
+        if (!socket.userId || !ObjectId.isValid(roomId)) {
+          ack?.({ ok: false, message: 'roomId không hợp lệ' })
+          return
+        }
+        const roomObjectId = new ObjectId(roomId)
+        const userObjectId = new ObjectId(socket.userId)
+        const room = await databaseService.communityRooms.findOne({ _id: roomObjectId, status: 'active' })
+        const member = await databaseService.communityRoomMembers.findOne({ roomId: roomObjectId, userId: userObjectId })
+        const canAccess = socket.userRole === 'admin' || (Boolean(room) && member?.status === 'active')
+        if (!canAccess) {
+          socket.emit('error', { message: 'Bạn chưa tham gia phòng cộng đồng này.' })
+          ack?.({ ok: false, message: 'Bạn chưa tham gia phòng cộng đồng này.' })
+          return
+        }
+        socket.join(`community:room:${roomId}`)
+        ack?.({ ok: true, roomId })
+      } catch {
+        socket.emit('error', { message: 'Không thể tham gia kênh realtime cộng đồng.' })
+        ack?.({ ok: false, message: 'Không thể tham gia kênh realtime cộng đồng.' })
+      }
+    })
+
+    socket.on('community:room:leave', (roomId: string) => {
+      socket.leave(`community:room:${roomId}`)
     })
 
     // --- FIX 3.2: emit gọn lại – chỉ dùng room-based, bỏ fetchSockets loop ---
@@ -288,7 +320,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   while (true) {
                     const { done, value } = await reader.read()
                     if (done) break
-                    
+
                     buffer += decoder.decode(value, { stream: true })
                     const lines = buffer.split('\n')
                     buffer = lines.pop() || ''
@@ -336,7 +368,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     suggestedProducts,
                     aiData.suggested_questions
                   )
-                  
+
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
                   io.to('pharmacists').emit('message:new', aiMessage) // DS thấy AI reply
 
@@ -417,7 +449,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         const onlineCount = await databaseService.users.countDocuments({ role: 1, isOnline: true })
         if (onlineCount === 0) {
           const systemMsg = await chatsService.sendAIMessage(
-            conversationId, 
+            conversationId,
             'Hiện tại các Dược sĩ của Medispace đang không online. Trợ lý AI sẽ tiếp tục hỗ trợ bạn. Bạn cũng có thể để lại lời nhắn kèm số điện thoại.'
           )
           io.to(`conversation:${conversationId}`).emit('message:new', systemMsg)
@@ -432,10 +464,10 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
         // 3. Gán dược sĩ
         const { pharmacistId } = await chatsService.assignPharmacist(conversationId)
-        
+
         // 4. Gửi tin nhắn thông báo hệ thống kết nối
         const systemMsg = await chatsService.sendAIMessage(
-          conversationId, 
+          conversationId,
           'Đang kết nối bạn với Dược sĩ của Medispace...'
         )
         io.to(`conversation:${conversationId}`).emit('message:new', systemMsg)

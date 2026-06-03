@@ -8,7 +8,16 @@ import {
   incrementViewController,
   publishArticleController,
   archiveArticleController,
-  getRelatedArticlesController
+  getRelatedArticlesController,
+  getRelatedProductsController,
+  trackArticleJourneyEventController,
+  getArticleJourneyAnalyticsController,
+  articleAiAssistController,
+  askArticleAiController,
+  getPersonalizedArticlesController,
+  getArticlePreferencesController,
+  setSavedArticleController,
+  setFollowedHealthTopicController
 } from '~/controllers/articles.controllers'
 import {
   createArticleValidator,
@@ -31,12 +40,28 @@ const articlesRouter = Router()
 articlesRouter.get('/', getArticlesValidator, wrapRequestHandler(getArticlesController))
 
 /**
- * Description: Get article by ID or slug (Public)
- * Path: /articles/:articleId
- * Method: GET
- * Params: { articleId: string } (ObjectId or slug)
+ * Description: Generate AI assistance for article authoring (Pharmacist/Admin)
+ * Path: /articles/ai-assist
+ * Method: POST
  */
-articlesRouter.get('/:articleId', articleIdValidator, wrapRequestHandler(getArticleController))
+articlesRouter.post(
+  '/ai-assist',
+  accessTokenValidator,
+  pharmacistOrAdminValidator,
+  wrapRequestHandler(articleAiAssistController)
+)
+
+/**
+ * Description: Get personalized published articles for current user
+ * Path: /articles/personalized
+ * Method: GET
+ * Query: { limit?: number }
+ */
+articlesRouter.get('/personalized', accessTokenValidator, wrapRequestHandler(getPersonalizedArticlesController))
+
+articlesRouter.get('/me/preferences', accessTokenValidator, wrapRequestHandler(getArticlePreferencesController))
+
+articlesRouter.patch('/topics/:topicId/follow', accessTokenValidator, wrapRequestHandler(setFollowedHealthTopicController))
 
 /**
  * Description: Get related articles (Public)
@@ -48,12 +73,67 @@ articlesRouter.get('/:articleId', articleIdValidator, wrapRequestHandler(getArti
 articlesRouter.get('/:articleId/related', articleIdValidator, wrapRequestHandler(getRelatedArticlesController))
 
 /**
+ * Description: Get related products for an article (Public)
+ * Path: /articles/:articleId/related-products
+ * Method: GET
+ * Params: { articleId: string }
+ * Query: { limit?: number }
+ */
+articlesRouter.get('/:articleId/related-products', articleIdValidator, wrapRequestHandler(getRelatedProductsController))
+
+/**
+ * Description: Track article health journey CTA/conversion event (Public)
+ * Path: /articles/:articleId/journey-events
+ * Method: POST
+ */
+articlesRouter.post(
+  '/:articleId/journey-events',
+  articleIdValidator,
+  wrapRequestHandler(trackArticleJourneyEventController)
+)
+
+/**
+ * Description: Ask AI assistant about an article (Public)
+ * Path: /articles/:articleId/ask-ai
+ * Method: POST
+ */
+articlesRouter.post('/:articleId/ask-ai', articleIdValidator, wrapRequestHandler(askArticleAiController))
+
+articlesRouter.patch(
+  '/:articleId/save',
+  accessTokenValidator,
+  articleIdValidator,
+  wrapRequestHandler(setSavedArticleController)
+)
+
+/**
+ * Description: Get article health journey analytics (Admin only)
+ * Path: /articles/:articleId/journey-analytics
+ * Method: GET
+ */
+articlesRouter.get(
+  '/:articleId/journey-analytics',
+  accessTokenValidator,
+  adminValidator,
+  articleIdValidator,
+  wrapRequestHandler(getArticleJourneyAnalyticsController)
+)
+
+/**
  * Description: Increment view count (Public)
  * Path: /articles/:articleId/view
  * Method: POST
  * Params: { articleId: string }
  */
 articlesRouter.post('/:articleId/view', articleIdValidator, wrapRequestHandler(incrementViewController))
+
+/**
+ * Description: Get article by ID or slug (Public)
+ * Path: /articles/:articleId
+ * Method: GET
+ * Params: { articleId: string } (ObjectId or slug)
+ */
+articlesRouter.get('/:articleId', articleIdValidator, wrapRequestHandler(getArticleController))
 
 /**
  * Description: Create article (Pharmacist/Admin)

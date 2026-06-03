@@ -46,6 +46,19 @@ async function seed() {
     } catch {}
   }
 
+  if (!force) {
+    try {
+      const articlesCollection = await tsClient.collections('articles').retrieve()
+      const articleFields = new Set((articlesCollection.fields || []).map((field: any) => field.name))
+      const requiredArticleFields = ['riskLevel', 'targetAudiences', 'symptoms', 'activeIngredients', 'healthTopics']
+      const missingArticleFields = requiredArticleFields.filter((field) => !articleFields.has(field))
+      if (missingArticleFields.length > 0) {
+        console.log(`[Seed] Recreating "articles" because schema is missing: ${missingArticleFields.join(', ')}`)
+        await tsClient.collections('articles').delete()
+      }
+    } catch {}
+  }
+
   // ── Init Typesense collections ──────────────────────────────────────────────
   console.log('[Seed] Initializing Typesense collections...')
   await typesenseService.initCollections()
