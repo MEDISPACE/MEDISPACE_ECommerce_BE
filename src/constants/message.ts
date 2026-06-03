@@ -603,6 +603,7 @@ export const ARTICLES_MESSAGES = {
   GET_RELATED_PRODUCTS_SUCCESS: 'Get related products successfully',
   TRACK_JOURNEY_EVENT_SUCCESS: 'Article journey event tracked successfully',
   GET_JOURNEY_ANALYTICS_SUCCESS: 'Get article journey analytics successfully',
+  GET_ADMIN_INSIGHTS_SUCCESS: 'Get article admin insights successfully',
   ARTICLE_AI_ASSIST_SUCCESS: 'Article AI assistance generated successfully',
   ARTICLE_AI_ASK_SUCCESS: 'Article AI answer generated successfully',
   GET_PERSONALIZED_ARTICLES_SUCCESS: 'Get personalized articles successfully'

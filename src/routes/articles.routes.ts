@@ -12,6 +12,7 @@ import {
   getRelatedProductsController,
   trackArticleJourneyEventController,
   getArticleJourneyAnalyticsController,
+  getArticleAdminInsightsController,
   articleAiAssistController,
   askArticleAiController,
   getPersonalizedArticlesController,
@@ -58,6 +59,8 @@ articlesRouter.post(
  * Query: { limit?: number }
  */
 articlesRouter.get('/personalized', accessTokenValidator, wrapRequestHandler(getPersonalizedArticlesController))
+
+articlesRouter.get('/admin/insights', accessTokenValidator, adminValidator, wrapRequestHandler(getArticleAdminInsightsController))
 
 articlesRouter.get('/me/preferences', accessTokenValidator, wrapRequestHandler(getArticlePreferencesController))
 

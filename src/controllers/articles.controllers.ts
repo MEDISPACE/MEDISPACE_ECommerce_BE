@@ -158,6 +158,15 @@ export const getArticleJourneyAnalyticsController = async (req: Request<{ articl
   })
 }
 
+export const getArticleAdminInsightsController = async (req: Request, res: Response) => {
+  const days = req.query.days ? parseInt(req.query.days as string) : 30
+  const result = await articlesService.getAdminInsights(days)
+  return res.status(HTTP_STATUS.OK).json({
+    message: ARTICLES_MESSAGES.GET_ADMIN_INSIGHTS_SUCCESS,
+    result
+  })
+}
+
 export const articleAiAssistController = async (
   req: Request<ParamsDictionary, unknown, ArticleAiAssistReqBody>,
   res: Response
