@@ -1,226 +1,290 @@
-# Spec: Community Rooms, Moderation va AI Review
+# Đặc tả tính năng: Cộng đồng, kiểm duyệt và AI Moderation
 
-> **Phien ban:** 1.0  
-> **Cap nhat:** 2026-06-01  
-> **Trang thai:** Feature-ready, da merge `origin/develop` vao nhanh feature
-
----
-
-## 1. Muc tieu tinh nang
-
-Tinh nang nay bo sung khu vuc cong dong cho MEDISPACE, cho phep nguoi dung tham gia phong suc khoe, trao doi tin nhan, va duoc kiem duyet bang rule-based moderation, admin moderation, appeal flow va AI moderation.
-
-Pham vi hien tai gom:
-
-- Tao, cap nhat, archive/unarchive phong cong dong tu admin.
-- Phong public va private, co request join, invite, approve/reject/member status.
-- Tin nhan realtime trong phong, co sender info, unread count va message/member count.
-- Rule-based moderation khi gui tin nhan.
-- Admin moderation queue, action history, appeal history.
-- AI moderation job queue, manual rerun, retry, audit list.
-- Mock mode cho e2e khong goi AI provider that.
+> **Phiên bản:** 1.1
+> **Cập nhật:** 2026-06-03
+> **Phạm vi:** Backend MEDISPACE E-Commerce, có ghi chú các màn hình FE liên quan
+> **Trạng thái:** Đã triển khai trên nhánh tính năng `feature/ai-moderation-community`
 
 ---
 
-## 2. Kien truc tong quan
+## 1. Tổng quan
 
+Tính năng Cộng đồng cho phép người dùng MEDISPACE tham gia các phòng thảo luận theo chủ đề sức khỏe, gửi tin nhắn, theo dõi hội thoại theo thời gian thực và tương tác với các thành viên khác trong cùng phòng.
+
+Vì đây là môi trường liên quan đến sức khỏe, tính năng không chỉ là một kênh chat đơn thuần. Hệ thống cần có lớp kiểm soát nghiệp vụ để hạn chế thông tin nguy hiểm, nội dung nhạy cảm, spam, lạm dụng, chia sẻ thông tin cá nhân và các lời khuyên y tế không an toàn. Do đó, phần cộng đồng được thiết kế cùng với hệ thống kiểm duyệt nhiều lớp:
+
+- Kiểm duyệt rule-based ngay khi người dùng gửi tin.
+- Hàng đợi kiểm duyệt cho admin.
+- Hành động quản trị như ẩn, khôi phục, xóa tin nhắn, mute hoặc ban người dùng.
+- Luồng appeal để người dùng khiếu nại khi bị mute, ban hoặc khi tin nhắn bị xử lý.
+- AI Moderation để hỗ trợ đánh giá nội dung có rủi ro và tạo audit job rõ ràng.
+- Realtime events để cập nhật message, member, unread count và moderation event cho FE.
+
+Mục tiêu cuối cùng là tạo một không gian trao đổi có ích cho người dùng nhưng vẫn có khả năng kiểm soát rủi ro vận hành, pháp lý và an toàn y tế.
+
+---
+
+## 2. Phạm vi tính năng
+
+### 2.1 Phần đã triển khai
+
+Tính năng hiện tại bao gồm:
+
+- Quản lý phòng cộng đồng trong admin:
+  - Tạo phòng.
+  - Cập nhật tên, slug, visibility, disease key.
+  - Archive và unarchive phòng.
+  - Tìm kiếm, lọc và phân trang danh sách phòng.
+- Quyền tham gia phòng:
+  - Phòng `public`: người dùng có thể join trực tiếp.
+  - Phòng `private`: người dùng gửi yêu cầu tham gia, admin duyệt.
+  - Admin có thể invite thành viên bằng `userId` hoặc email.
+  - Admin có thể cập nhật trạng thái thành viên.
+- Chat trong phòng:
+  - Gửi tin nhắn.
+  - Danh sách tin nhắn có thông tin người gửi.
+  - Phân biệt tin của mình và tin của người khác ở FE.
+  - Realtime message event.
+  - Unread count và message/member count.
+- Kiểm duyệt:
+  - Rule-based moderation khi gửi tin.
+  - Report message.
+  - Moderation queue cho admin.
+  - Admin action.
+  - Audit history cho moderation actions.
+- Appeal:
+  - Người dùng gửi appeal cho ban, mute hoặc message.
+  - Admin approve/reject appeal.
+  - Có thể xem appeal đang mở và lịch sử appeal theo filter.
+- AI Moderation:
+  - Tự động enqueue nếu bật `AI_MODERATION_ENABLED`.
+  - Admin có thể chạy AI review thủ công cho từng message.
+  - AI job audit list.
+  - Retry job.
+  - Mock mode ổn định cho e2e.
+  - Sanitize lỗi và redact dữ liệu nhạy cảm trước khi gửi prompt.
+
+### 2.2 Phần nằm ngoài phạm vi hiện tại
+
+Các phần dưới đây chưa phải mục tiêu chính của phiên bản này:
+
+- Phân quyền moderator riêng trong từng phòng ở UI đầy đủ.
+- Dashboard metric chuyên sâu cho AI moderation.
+- Tự động cleanup toàn bộ dữ liệu test/e2e.
+- Notification đầy đủ cho mọi event appeal/join request.
+- Bộ rule moderation cấu hình động từ admin.
+- Flow invite external user chưa tồn tại tài khoản.
+
+---
+
+## 3. Vai trò người dùng
+
+### 3.1 Guest
+
+Guest có thể xem danh sách phòng public tùy endpoint/public UI, nhưng không thể join, gửi tin, report hoặc appeal nếu chưa đăng nhập.
+
+### 3.2 Customer/User đã xác thực
+
+Người dùng đã xác thực có thể:
+
+- Xem danh sách phòng public.
+- Xem danh sách phòng của mình, bao gồm private room mà họ đang active hoặc được invite.
+- Join public room.
+- Gửi request join private room.
+- Accept invite bằng cách join room đã được invite.
+- Gửi tin nhắn nếu là active member và không bị mute/ban.
+- Report message.
+- Đánh dấu phòng đã đọc.
+- Gửi appeal khi bị mute, ban hoặc khi message bị xử lý.
+
+### 3.3 Admin
+
+Admin có thể:
+
+- Tạo và quản lý phòng.
+- Duyệt hoặc từ chối thành viên.
+- Invite thành viên.
+- Xem toàn bộ moderation queue.
+- Xử lý message và user qua moderation action.
+- Chạy AI review thủ công.
+- Retry AI job.
+- Xem audit actions.
+- Xử lý appeal.
+
+---
+
+## 4. Luồng nghiệp vụ chính
+
+### 4.1 Tạo phòng cộng đồng
+
+Admin tạo phòng từ admin UI hoặc API `/admin/community/rooms`.
+
+Dữ liệu tối thiểu:
+
+- `name`
+- `slug`
+- `visibility`: `public` hoặc `private`
+- `diseaseKey`
+
+Sau khi tạo:
+
+- Room có `status=active`.
+- `slug` là duy nhất.
+- Room xuất hiện trong admin room list.
+- Public room có thể xuất hiện trong danh sách public.
+- Private room chỉ xuất hiện với admin hoặc user có quan hệ thành viên phù hợp.
+
+### 4.2 Tham gia phòng public
+
+Người dùng gọi:
+
+```http
+POST /community/rooms/:roomId/join
 ```
-FE Community/Admin UI
-        |
-        | REST + Socket.IO
-        v
-Node/Express BE
-        |
-        +-- communityService: rooms, members, messages, reports
-        +-- moderationService: queue, actions, appeals
-        +-- aiModerationService: AI jobs, prompt, apply result
-        |
-        v
-MongoDB collections
 
-Optional:
-Node BE -> OpenAI-compatible LLM endpoint /chat/completions
+Nếu room là public:
+
+- Hệ thống tạo hoặc cập nhật membership.
+- Member chuyển thành `active`.
+- Emit realtime `community:member:joined`.
+- Người dùng có thể đọc/gửi tin nhắn.
+
+### 4.3 Xin tham gia phòng private
+
+Người dùng gọi:
+
+```http
+POST /community/rooms/:roomId/join-request
 ```
 
-Module chinh:
+Nếu room là private:
 
-| Module | Vai tro |
-|--------|---------|
-| `src/routes/community.routes.ts` | API user-facing cho room, join, message, report, appeal |
-| `src/routes/adminCommunity.routes.ts` | API admin quan ly room/member/invite |
-| `src/routes/adminModeration.routes.ts` | API admin queue/action/appeal/AI jobs |
-| `src/services/community.services.ts` | Nghiep vu room, member, message, report |
-| `src/services/moderation.services.ts` | Nghiep vu moderation queue, actions, appeals |
-| `src/services/aiModeration.services.ts` | Queue job AI, call provider, apply auto hide/finding |
-| `src/sockets/chat.socket.ts` | Socket room join va realtime events |
-| `src/services/database.services.ts` | Collection getters va indexes |
+- Hệ thống tạo membership `status=pending`.
+- Emit event cho admin: `community:member:requested`.
+- FE hiển thị trạng thái đã gửi yêu cầu.
+- Nút join/request nên bị disable hoặc đổi trạng thái để tránh gửi lặp.
 
----
+Admin duyệt bằng:
 
-## 3. Domain model
+```http
+PATCH /admin/community/rooms/:roomId/members/:userId
+```
 
-### 3.1 Community room
+Với body ví dụ:
 
-Collection: `communityRooms`
+```json
+{
+  "status": "active"
+}
+```
 
-Field chinh:
+Sau khi duyệt:
 
-| Field | Type | Mo ta |
-|-------|------|-------|
-| `_id` | ObjectId | Room id |
-| `name` | string | Ten phong |
-| `slug` | string | Unique slug |
-| `visibility` | `public` / `private` | Kieu truy cap |
-| `diseaseKey` | string | Nhom benh/chu de |
-| `status` | `active` / `archived` | Trang thai phong |
-| `createdBy` | ObjectId | Admin tao phong |
-| `createdAt`, `updatedAt` | Date | Audit thoi gian |
+- Member được active.
+- User có thể join realtime room.
+- User có thể đọc/gửi tin nhắn.
 
-Room list co them metrics tu aggregation:
+### 4.4 Invite thành viên vào phòng private
 
-- `memberCount`
-- `messageCount`
-- `unreadCount` theo viewer
-- `viewerMemberStatus`
+Admin gọi:
 
-### 3.2 Room member
+```http
+POST /admin/community/rooms/:roomId/invite
+```
 
-Collection: `communityRoomMembers`
+Body có thể dùng:
 
-| Field | Type | Mo ta |
-|-------|------|-------|
-| `roomId` | ObjectId | Phong |
-| `userId` | ObjectId | User |
-| `role` | `member` / `moderator` | Vai tro trong phong |
-| `status` | `active` / `pending` / `invited` / `left` / `muted` / `banned` | Trang thai tham gia |
-| `mutedUntil` | Date/null | Thoi han mute |
-| `lastReadAt` | Date/null | Moc tinh unread |
-| `joinedAt`, `updatedAt` | Date | Audit thoi gian |
+```json
+{
+  "userId": "..."
+}
+```
 
-Rule truy cap:
+Hoặc:
 
-- Public room: user co the join truc tiep.
-- Private room:
-  - User goi join-request -> `pending`.
-  - Admin approve bang update member `status=active`.
-  - Admin invite user/email -> `invited`.
-  - User da `invited` co the join thanh `active`.
-- User `banned` khong chat duoc cho toi khi admin unban/approve appeal.
-- User `muted` hoac con `mutedUntil` khong chat duoc.
+```json
+{
+  "email": "user@example.com"
+}
+```
 
-### 3.3 Community message
+Hệ thống:
 
-Collection: `communityMessages`
+- Tìm user theo `userId` hoặc email.
+- Tạo hoặc cập nhật membership `status=invited`.
+- Emit event `community:member:invited` đến user.
+- Khi user gọi join, membership chuyển thành `active`.
 
-| Field | Type | Mo ta |
-|-------|------|-------|
-| `_id` | ObjectId | Message id |
-| `roomId` | ObjectId | Phong |
-| `senderId` | ObjectId | Nguoi gui |
-| `content` | string | Noi dung |
-| `status` | `visible` / `hidden` / `deleted` | Trang thai hien thi |
-| `moderated` | object | Ket qua rule/AI moderation |
-| `createdAt`, `updatedAt` | Date | Audit thoi gian |
+### 4.5 Gửi tin nhắn
 
-Message list lookup sender de FE hien thi ten/avatar nguoi gui.
+Người dùng gửi:
 
----
+```http
+POST /community/rooms/:roomId/messages
+```
 
-## 4. Public/community API
+Body:
 
-Base path: `/community`
+```json
+{
+  "content": "Nội dung tin nhắn"
+}
+```
 
-| Method | Endpoint | Auth | Mo ta |
-|--------|----------|------|-------|
-| `GET` | `/rooms` | optional | List public rooms, co filter/search |
-| `GET` | `/rooms/my` | user | List rooms user co quyen thay, gom private active/invited |
-| `POST` | `/rooms` | admin | Legacy admin-only create room |
-| `POST` | `/rooms/:roomId/join` | user | Join public room hoac accept invite |
-| `POST` | `/rooms/:roomId/join-request` | user | Tao request join private room |
-| `POST` | `/rooms/:roomId/leave` | user | Roi phong |
-| `POST` | `/rooms/:roomId/read` | user | Cap nhat `lastReadAt` de tinh unread |
-| `POST` | `/rooms/:roomId/appeals` | user | Gui appeal ban/mute/message |
-| `GET` | `/rooms/:roomId/messages` | user | List visible messages trong room |
-| `POST` | `/rooms/:roomId/messages` | user | Gui message va chay moderation |
-| `POST` | `/messages/:messageId/report` | user | Report message |
+Luồng xử lý:
 
-Response chung dung envelope `data` hoac `result` tuy controller cu/moi. FE service da unwrap ca hai dang.
+1. Kiểm tra room tồn tại và active.
+2. Kiểm tra user là active member.
+3. Kiểm tra user không bị ban.
+4. Kiểm tra user không bị mute hoặc `mutedUntil` đã hết hạn.
+5. Insert message.
+6. Chạy rule-based moderation.
+7. Nếu nội dung vi phạm nặng, tự động ẩn message.
+8. Nếu cần review, tạo moderation finding.
+9. Nếu AI moderation được bật, enqueue AI job.
+10. Emit realtime event tương ứng.
 
----
+Nếu message visible:
 
-## 5. Admin community API
+- Emit `community:message:new` cho room.
 
-Base path: `/admin/community`
+Nếu message bị auto hide:
 
-Tat ca endpoint yeu cau `accessTokenValidator`, `verifiedUserValidator`, `adminRequired`.
+- Emit `community:message:hidden` cho user gửi.
+- Admin nhận `community:moderation:queued`.
 
-| Method | Endpoint | Mo ta |
-|--------|----------|-------|
-| `GET` | `/rooms` | List room admin, co pagination/filter/search server-side |
-| `POST` | `/rooms` | Tao room |
-| `PATCH` | `/rooms/:roomId` | Cap nhat name/slug/visibility/diseaseKey |
-| `PATCH` | `/rooms/:roomId/archive` | Archive room |
-| `PATCH` | `/rooms/:roomId/unarchive` | Mo lai room |
-| `GET` | `/rooms/:roomId/members` | List member, co status filter |
-| `PATCH` | `/rooms/:roomId/members/:userId` | Cap nhat role/status/mutedUntil |
-| `POST` | `/rooms/:roomId/invite` | Invite user theo `userId` hoac `email` |
+### 4.6 Report message
 
-Admin UI tuong ung: `AdminCommunityPage` ben FE.
+User report message qua:
 
----
+```http
+POST /community/messages/:messageId/report
+```
 
-## 6. Moderation flow
+Hệ thống:
 
-### 6.1 Rule-based moderation khi gui tin
+- Kiểm tra reporter có quyền truy cập room.
+- Không cho report trùng cùng message bởi cùng user.
+- Tạo record trong `moderationReports`.
+- Tạo hoặc cập nhật `moderationFindings`.
+- Tăng `reportCount`.
+- Emit `community:moderation:queued` cho admin.
 
-Khi user gui message:
+### 4.7 Admin xử lý moderation queue
 
-1. `communityService.requireCanChat()` kiem tra room active, member active, khong bi mute/ban.
-2. Insert base message `status=visible`.
-3. Chay `moderateTextRuleBased(content)`.
-4. Neu severity cao:
-   - Cap nhat message `status=hidden`.
-   - Ghi `moderated.autoHidden=true`.
-   - Tao moderation finding.
-   - Emit event cho admin/user.
-5. Neu severity can review:
-   - Tao moderation finding `status=open`.
-6. Neu AI moderation auto enabled:
-   - Enqueue AI review job.
+Admin xem queue:
 
-Rule-based moderation hien la lop dau, nhanh va deterministic. No co the false positive/false negative, nen AI review va admin queue la lop bo sung.
+```http
+GET /admin/moderation/queue
+```
 
-### 6.2 Moderation finding
+Admin chọn action:
 
-Collection: `moderationFindings`
+```http
+PATCH /admin/moderation/messages/:messageId/action
+```
 
-| Field | Mo ta |
-|-------|-------|
-| `roomId`, `messageId`, `senderId` | Context |
-| `trigger` | `rule` / `report` / `ai` |
-| `status` | `open` / `resolved` / `dismissed` |
-| `severity` | `low` / `medium` / `high` / `critical` |
-| `categories` | Danh muc vi pham |
-| `confidence` | Do tin cay |
-| `reasons` | Ly do |
-| `ai` | Ket qua AI neu trigger/nguon lien quan AI |
-
-### 6.3 Admin moderation API
-
-Base path: `/admin/moderation`
-
-| Method | Endpoint | Mo ta |
-|--------|----------|-------|
-| `GET` | `/queue` | List findings, filter severity/trigger/search |
-| `GET` | `/actions` | Audit action history, filter room/message/user/action/date |
-| `GET` | `/appeals` | List appeal, filter status/type/room/user/search |
-| `GET` | `/ai-jobs` | List AI review jobs, filter status/roomId/messageId/search |
-| `POST` | `/ai-jobs/:jobId/retry` | Retry failed/succeeded/pending job |
-| `PATCH` | `/appeals/:appealId` | Approve/reject appeal |
-| `PATCH` | `/messages/:messageId/action` | Apply admin action |
-| `POST` | `/messages/:messageId/ai-review` | Manual rerun AI review cho message |
-
-Admin action ho tro:
+Các action hiện hỗ trợ:
 
 - `hide_message`
 - `restore_message`
@@ -231,258 +295,514 @@ Admin action ho tro:
 - `unban_user`
 - `dismiss`
 
-Moi action ghi vao `moderationActions` de audit.
+Sau khi xử lý:
+
+- Message hoặc member được cập nhật.
+- Finding được resolve/dismiss nếu phù hợp.
+- Ghi audit vào `moderationActions`.
+- Emit realtime event cho room/user/admin.
+
+### 4.8 Appeal
+
+User gửi appeal:
+
+```http
+POST /community/rooms/:roomId/appeals
+```
+
+Body cho ban/mute:
+
+```json
+{
+  "type": "ban",
+  "reason": "Lý do khiếu nại"
+}
+```
+
+Body cho message:
+
+```json
+{
+  "type": "message",
+  "messageId": "...",
+  "reason": "Tôi cho rằng tin nhắn này bị ẩn nhầm"
+}
+```
+
+Rule:
+
+- Không tạo appeal trùng đang mở cho cùng `roomId + userId + type + messageId`.
+- Appeal mới có `status=open`.
+- Admin có thể xem trong `/admin/moderation/appeals`.
+
+Admin xử lý:
+
+```http
+PATCH /admin/moderation/appeals/:appealId
+```
+
+Body:
+
+```json
+{
+  "decision": "approved",
+  "notes": "Đã kiểm tra lại"
+}
+```
+
+Khi approve:
+
+- Appeal `ban`: member chuyển về trạng thái có thể tham gia lại.
+- Appeal `mute`: xóa mute, member có thể chat lại.
+- Appeal `message`: khôi phục message nếu hợp lệ.
+
+Khi reject:
+
+- Appeal đóng với `status=rejected`.
+- Không thay đổi trạng thái ban/mute/message.
 
 ---
 
-## 7. Appeal flow
+## 5. Mô hình dữ liệu
 
-User co the gui appeal khi:
+### 5.1 `communityRooms`
 
-- Bi ban khoi room: `type=ban`
-- Bi mute: `type=mute`
-- Message bi hidden/deleted: `type=message`, can `messageId`
+Đại diện cho phòng cộng đồng.
 
-Rule nghiep vu:
+| Trường | Kiểu | Ý nghĩa |
+|--------|------|---------|
+| `_id` | ObjectId | ID phòng |
+| `name` | string | Tên hiển thị |
+| `slug` | string | Định danh duy nhất |
+| `visibility` | `public` / `private` | Quyền xem/tham gia |
+| `diseaseKey` | string | Chủ đề/nhóm bệnh |
+| `status` | `active` / `archived` | Trạng thái phòng |
+| `createdBy` | ObjectId | Admin tạo phòng |
+| `createdAt` | Date | Thời điểm tạo |
+| `updatedAt` | Date | Thời điểm cập nhật |
 
-- Chi tao appeal neu room active.
-- Appeal duplicate `status=open` cho cung `roomId + userId + type + messageId` bi chan.
-- Khi admin approve:
-  - `ban` -> cap nhat member `status=left` de user co the join lai.
-  - `mute` -> xoa `mutedUntil`, member active lai.
-  - `message` -> restore message neu phu hop.
-- Khi reject: chi cap nhat appeal status va audit action.
+### 5.2 `communityRoomMembers`
 
-Admin UI co section xem appeal dang mo va filter de xem history `open/approved/rejected`.
+Đại diện cho quan hệ user-room.
+
+| Trường | Kiểu | Ý nghĩa |
+|--------|------|---------|
+| `roomId` | ObjectId | Phòng |
+| `userId` | ObjectId | Người dùng |
+| `role` | `member` / `moderator` | Vai trò trong phòng |
+| `status` | `active` / `pending` / `invited` / `left` / `muted` / `banned` | Trạng thái thành viên |
+| `mutedUntil` | Date/null | Thời điểm hết mute |
+| `lastReadAt` | Date/null | Mốc đọc cuối cùng |
+| `joinedAt` | Date | Thời điểm tham gia |
+| `updatedAt` | Date | Thời điểm cập nhật |
+
+### 5.3 `communityMessages`
+
+Đại diện cho tin nhắn trong phòng.
+
+| Trường | Kiểu | Ý nghĩa |
+|--------|------|---------|
+| `_id` | ObjectId | ID tin nhắn |
+| `roomId` | ObjectId | Phòng chứa tin nhắn |
+| `senderId` | ObjectId | Người gửi |
+| `content` | string | Nội dung |
+| `status` | `visible` / `hidden` / `deleted` | Trạng thái hiển thị |
+| `moderated` | object | Kết quả kiểm duyệt rule/AI |
+| `createdAt` | Date | Thời điểm gửi |
+| `updatedAt` | Date | Thời điểm cập nhật |
+
+### 5.4 `moderationFindings`
+
+Đại diện cho một item trong hàng đợi kiểm duyệt.
+
+| Trường | Ý nghĩa |
+|--------|---------|
+| `roomId` | Phòng liên quan |
+| `messageId` | Tin nhắn liên quan |
+| `senderId` | Người gửi tin |
+| `trigger` | Nguồn tạo finding: `rule`, `report`, `ai` |
+| `status` | `open`, `resolved`, `dismissed` |
+| `severity` | `low`, `medium`, `high`, `critical` |
+| `categories` | Nhóm vi phạm |
+| `confidence` | Độ tin cậy |
+| `reasons` | Lý do |
+| `ai` | Kết quả AI nếu có |
+| `reportCount` | Số report |
+
+### 5.5 `moderationActions`
+
+Audit log cho hành động admin.
+
+Ghi nhận:
+
+- Admin thực hiện.
+- Action.
+- Room/message/user liên quan.
+- Ghi chú.
+- Thời điểm thực hiện.
+
+### 5.6 `moderationAppeals`
+
+Đại diện cho khiếu nại của user.
+
+| Trường | Ý nghĩa |
+|--------|---------|
+| `roomId` | Phòng liên quan |
+| `userId` | Người gửi appeal |
+| `messageId` | Message liên quan nếu type là `message` |
+| `type` | `ban`, `mute`, `message` |
+| `reason` | Lý do appeal |
+| `status` | `open`, `approved`, `rejected` |
+| `resolvedBy` | Admin xử lý |
+| `resolvedAt` | Thời điểm xử lý |
+| `resolutionNotes` | Ghi chú xử lý |
+
+### 5.7 `moderationAiJobs`
+
+Đại diện cho một lần AI review message.
+
+| Trường | Ý nghĩa |
+|--------|---------|
+| `messageId` | Tin nhắn cần review |
+| `roomId` | Phòng |
+| `senderId` | Người gửi |
+| `promptVersion` | Version prompt |
+| `status` | `pending`, `running`, `succeeded`, `failed` |
+| `attempts` | Số lần chạy |
+| `lockedUntil` | Lock xử lý job |
+| `lastError` | Lỗi đã sanitize |
+| `aiResult` | Kết quả AI |
+| `applied` | Kết quả apply vào message/finding |
+| `latencyMs` | Thời gian gọi AI |
 
 ---
 
-## 8. AI moderation
+## 6. API chi tiết
 
-### 8.1 Cau hinh
+### 6.1 Community API
 
-Bien moi truong:
+Base path:
 
-| Env | Default | Mo ta |
-|-----|---------|-------|
-| `AI_MODERATION_ENABLED` | `false` | Bat auto enqueue khi user gui message |
-| `AI_MODERATION_BASE_URL` | - | OpenAI-compatible base URL, vi du `http://localhost:8001/v1` |
-| `AI_MODERATION_MODEL` | `gemma-4-e4b-it.gguf` | Model name |
-| `AI_MODERATION_API_KEY` | - | Bearer token neu provider can |
-| `AI_MODERATION_MOCK` | `false` | Mock deterministic cho test/e2e |
-| `AI_MODERATION_TIMEOUT_MS` | `12000` | Timeout call provider |
-| `AI_MODERATION_MAX_ATTEMPTS` | `3` | So lan retry toi da |
-| `AI_MODERATION_WORKER_INTERVAL_MS` | `5000` | Worker interval |
-| `AI_MODERATION_HIDE_CONFIDENCE` | `0.78` | Nguong auto hide |
-| `AI_MODERATION_REVIEW_CONFIDENCE` | `0.55` | Nguong tao finding review |
+```http
+/community
+```
 
-Fallback env duoc ho tro:
+| Method | Endpoint | Quyền | Mô tả |
+|--------|----------|-------|-------|
+| `GET` | `/rooms` | Public/optional auth | Danh sách phòng public, hỗ trợ search/filter |
+| `GET` | `/rooms/my` | User đã xác thực | Danh sách phòng user có quyền thấy |
+| `POST` | `/rooms` | Admin | Tạo phòng, endpoint legacy |
+| `POST` | `/rooms/:roomId/join` | User | Join public room hoặc accept invite |
+| `POST` | `/rooms/:roomId/join-request` | User | Gửi yêu cầu vào private room |
+| `POST` | `/rooms/:roomId/leave` | User | Rời phòng |
+| `POST` | `/rooms/:roomId/read` | User | Đánh dấu đã đọc |
+| `POST` | `/rooms/:roomId/appeals` | User | Gửi appeal |
+| `GET` | `/rooms/:roomId/messages` | Member | Lấy danh sách tin nhắn |
+| `POST` | `/rooms/:roomId/messages` | Member active | Gửi tin nhắn |
+| `POST` | `/messages/:messageId/report` | User có quyền room | Report tin nhắn |
+
+### 6.2 Admin Community API
+
+Base path:
+
+```http
+/admin/community
+```
+
+Tất cả endpoint yêu cầu admin.
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| `GET` | `/rooms` | Danh sách phòng admin, có search/filter/pagination |
+| `POST` | `/rooms` | Tạo phòng |
+| `PATCH` | `/rooms/:roomId` | Cập nhật phòng |
+| `PATCH` | `/rooms/:roomId/archive` | Lưu trữ phòng |
+| `PATCH` | `/rooms/:roomId/unarchive` | Mở lại phòng |
+| `GET` | `/rooms/:roomId/members` | Danh sách thành viên |
+| `PATCH` | `/rooms/:roomId/members/:userId` | Cập nhật thành viên |
+| `POST` | `/rooms/:roomId/invite` | Mời thành viên |
+
+### 6.3 Admin Moderation API
+
+Base path:
+
+```http
+/admin/moderation
+```
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| `GET` | `/queue` | Hàng đợi kiểm duyệt |
+| `GET` | `/actions` | Lịch sử hành động kiểm duyệt |
+| `GET` | `/appeals` | Danh sách appeal |
+| `GET` | `/ai-jobs` | Danh sách AI moderation jobs |
+| `POST` | `/ai-jobs/:jobId/retry` | Retry AI job |
+| `PATCH` | `/appeals/:appealId` | Duyệt/từ chối appeal |
+| `PATCH` | `/messages/:messageId/action` | Thực hiện moderation action |
+| `POST` | `/messages/:messageId/ai-review` | Chạy lại AI review cho message |
+
+---
+
+## 7. AI Moderation
+
+### 7.1 Mục tiêu
+
+AI Moderation không thay thế admin. Nó là lớp hỗ trợ để:
+
+- Phát hiện nội dung có rủi ro mà rule-based có thể bỏ sót.
+- Tạo queue item cho admin review.
+- Tự động ẩn nội dung nguy hiểm khi confidence đủ cao.
+- Lưu audit job để truy vết model, latency, kết quả và lỗi.
+
+### 7.2 Cấu hình môi trường
+
+| Biến môi trường | Mặc định | Ý nghĩa |
+|-----------------|----------|---------|
+| `AI_MODERATION_ENABLED` | `false` | Bật tự động enqueue AI review khi gửi message |
+| `AI_MODERATION_BASE_URL` | rỗng | Base URL OpenAI-compatible, ví dụ `http://localhost:8001/v1` |
+| `AI_MODERATION_MODEL` | `gemma-4-e4b-it.gguf` | Tên model |
+| `AI_MODERATION_API_KEY` | rỗng | API key nếu provider yêu cầu |
+| `AI_MODERATION_MOCK` | `false` | Mock mode cho test/e2e |
+| `AI_MODERATION_TIMEOUT_MS` | `12000` | Timeout gọi provider |
+| `AI_MODERATION_MAX_ATTEMPTS` | `3` | Số lần thử tối đa |
+| `AI_MODERATION_WORKER_INTERVAL_MS` | `5000` | Chu kỳ worker |
+| `AI_MODERATION_HIDE_CONFIDENCE` | `0.78` | Ngưỡng tự động ẩn |
+| `AI_MODERATION_REVIEW_CONFIDENCE` | `0.55` | Ngưỡng đưa vào queue |
+
+Hệ thống cũng hỗ trợ fallback từ:
 
 - `CUSTOM_LLM_BASE_URL`
 - `CUSTOM_LLM_API_KEY`
 - `CUSTOM_LLM_MODEL`
 
-Khuyen nghi staging/prod:
+### 7.3 Luồng xử lý AI job
 
-- Bat `AI_MODERATION_ENABLED=true` chi khi provider on dinh.
-- Neu model co cold start, tang `AI_MODERATION_TIMEOUT_MS` len `60000`.
-- Khong bat `AI_MODERATION_MOCK` ngoai test/e2e.
+1. Message được gửi hoặc admin bấm chạy AI review.
+2. Hệ thống upsert job theo `messageId + promptVersion`.
+3. Worker lấy job `pending`, chuyển sang `running`.
+4. Hệ thống gọi `reviewText()`.
+5. Nội dung message được redact email/số điện thoại trước khi đưa vào prompt.
+6. Provider trả JSON.
+7. Hệ thống normalize kết quả.
+8. Nếu `shouldHide=true`, severity cao và confidence đạt ngưỡng, message bị ẩn.
+9. Nếu cần review, hệ thống tạo hoặc cập nhật `moderationFindings`.
+10. Job chuyển sang `succeeded`.
+11. Nếu lỗi, job chuyển sang `failed`, lưu `lastError` đã sanitize.
 
-### 8.2 AI job lifecycle
-
-Collection: `moderationAiJobs`
-
-| Status | Mo ta |
-|--------|-------|
-| `pending` | Dang cho worker xu ly |
-| `running` | Dang lock va call provider |
-| `succeeded` | Da co ket qua va da apply |
-| `failed` | Provider/parse/apply loi, co `lastError` da sanitize |
-
-Flow:
-
-1. `enqueueMessageReview()` upsert job theo unique key `messageId + promptVersion`.
-2. Worker `processPendingJobs()` lock job bang `lockedUntil`.
-3. `reviewText()` build prompt, redact email/phone trong message, call `/chat/completions`.
-4. Parse JSON AI response va normalize fields.
-5. `applyResult()` update message `moderated.ai`.
-6. Neu AI severity/confidence dat nguong:
-   - Auto hide message.
-   - Tao/merge moderation finding `trigger=ai`.
-   - Emit realtime cho room/admin/user.
-7. Update job `succeeded` hoac `failed`.
-
-AI response expected:
+### 7.4 Schema kết quả AI mong muốn
 
 ```json
 {
-  "severity": "low | medium | high | critical",
-  "categories": ["pii", "spam", "toxic", "medical_harm", "harassment", "unsafe_advice", "self_harm", "other"],
-  "confidence": 0.0,
+  "severity": "low",
+  "categories": [],
+  "confidence": 0.92,
   "shouldHide": false,
   "requiresHumanReview": false,
-  "reason": "short reason",
-  "suggestedAction": "none | review | hide"
+  "reason": "Nội dung an toàn",
+  "suggestedAction": "none"
 }
 ```
 
-### 8.3 Privacy va safety
+Giá trị hợp lệ:
 
-Da ap dung:
+- `severity`: `low`, `medium`, `high`, `critical`
+- `categories`: `pii`, `spam`, `toxic`, `medical_harm`, `harassment`, `unsafe_advice`, `self_harm`, `other`
+- `suggestedAction`: `none`, `review`, `hide`
 
-- Prompt gui cho LLM dung `redactText()` de thay email/phone bang `[email]`, `[phone]`.
-- Khong luu prompt raw.
-- `lastError` luu DB duoc sanitize Bearer token/API key va cat 500 ky tu.
-- AI result chi la signal; admin van co queue/action/appeal de sua sai.
+### 7.5 Mock mode cho e2e
 
-Rui ro con lai:
+Khi bật:
 
-- Message content goc van nam trong DB vi day la chat feature.
-- AI co the false positive/false negative.
-- Neu provider ngoai he thong, can review DPA/privacy policy truoc khi bat prod.
+```bash
+AI_MODERATION_MOCK=true
+```
 
-### 8.4 Mock mode cho e2e
+Hệ thống không gọi provider thật.
 
-Khi `AI_MODERATION_MOCK=true`:
+Nội dung có marker:
 
-- Khong call provider.
-- Content co `[ai-hide]` hoac `AI_E2E_HIDE` -> high, `medical_harm`, confidence `0.95`, auto hide.
-- Content co `[ai-review]` hoac `AI_E2E_REVIEW` -> medium, review.
-- Content khac -> low/safe.
+- `[ai-hide]` hoặc `AI_E2E_HIDE`: trả về severity `high`, confidence `0.95`, auto hide.
+- `[ai-review]` hoặc `AI_E2E_REVIEW`: trả về severity `medium`, cần review.
+- Nội dung khác: trả về `low`.
 
-Dung de chay Playwright e2e on dinh.
+Mock mode chỉ dùng cho test/e2e, không bật ở staging/prod.
+
+### 7.6 Bảo mật và dữ liệu nhạy cảm
+
+Các biện pháp đã có:
+
+- Email và số điện thoại được thay bằng `[email]`, `[phone]` trước khi gửi sang LLM.
+- Không lưu prompt raw vào DB.
+- Không log API key.
+- `lastError` được lọc Bearer token/API key trước khi lưu.
+- AI result chỉ là tín hiệu hỗ trợ; admin vẫn có quyền sửa bằng action và appeal.
+
+Rủi ro còn lại:
+
+- Nội dung message gốc vẫn được lưu trong DB vì đây là bản chất của chat.
+- Nếu dùng provider AI bên ngoài, cần đánh giá privacy, DPA và chính sách dữ liệu trước khi bật production.
+- AI có thể false positive hoặc false negative, nên không nên coi AI là nguồn quyết định tuyệt đối.
 
 ---
 
-## 9. Realtime events
+## 8. Realtime
 
-Socket.IO room:
+Socket.IO dùng các room:
 
-- Personal room: `user:{userId}`
-- Admin room: `admins`
-- Community room: `community:room:{roomId}`
+| Room | Ý nghĩa |
+|------|---------|
+| `user:{userId}` | Kênh cá nhân của user |
+| `admins` | Kênh admin |
+| `community:room:{roomId}` | Kênh realtime của phòng cộng đồng |
 
-Client join community room bang event:
+Client join phòng bằng:
 
 - `community:room:join`
 - `community:room:leave`
 
-Server events:
+Các event chính:
 
-| Event | Receiver | Mo ta |
-|-------|----------|-------|
-| `community:message:new` | room | Message moi visible |
-| `community:message:hidden` | room/user | Message bi hidden |
-| `community:message:deleted` | room/user | Message bi deleted |
-| `community:member:joined` | room | Member join |
-| `community:member:left` | room | Member leave |
-| `community:member:updated` | room/user | Admin update member |
-| `community:member:requested` | admins | Co join request private room |
-| `community:member:invited` | user | User duoc invite |
-| `community:room:read` | user | User mark read |
-| `community:moderation:queued` | admins | Finding moi can review |
-| `community:appeal:created` | user/admin flow | Appeal moi |
-| `community:appeal:resolved` | user | Appeal da xu ly |
+| Event | Người nhận | Ý nghĩa |
+|-------|------------|---------|
+| `community:message:new` | Room | Có message mới |
+| `community:message:hidden` | Room/User | Message bị ẩn |
+| `community:message:deleted` | Room/User | Message bị xóa |
+| `community:member:joined` | Room | Có member join |
+| `community:member:left` | Room | Có member rời phòng |
+| `community:member:updated` | Room/User | Trạng thái member thay đổi |
+| `community:member:requested` | Admin | Có request vào private room |
+| `community:member:invited` | User | User được invite |
+| `community:room:read` | User | User đã đọc phòng |
+| `community:moderation:queued` | Admin | Có finding cần duyệt |
+| `community:appeal:created` | User/Admin flow | Appeal được tạo |
+| `community:appeal:resolved` | User | Appeal đã xử lý |
 
-Realtime count hien duoc FE cap nhat tu message/member/read events va fallback bang fetch/list.
+FE dùng các event này để cập nhật:
 
----
-
-## 10. Indexes va collections
-
-Indexes duoc tao trong `databaseService.createIndexes()`:
-
-| Collection | Index |
-|------------|-------|
-| `communityRooms` | `{ slug: 1 } unique` |
-| `communityRooms` | `{ visibility: 1, status: 1, createdAt: -1 }` |
-| `communityRoomMembers` | `{ roomId: 1, userId: 1 } unique` |
-| `communityRoomMembers` | `{ roomId: 1, status: 1, updatedAt: -1 }` |
-| `communityRoomMembers` | `{ userId: 1, status: 1, updatedAt: -1 }` |
-| `communityMessages` | `{ roomId: 1, createdAt: -1 }` |
-| `communityMessages` | `{ senderId: 1, createdAt: -1 }` |
-| `communityMessages` | `{ status: 1, createdAt: -1 }` |
-| `moderationFindings` | `{ status: 1, createdAt: -1 }` |
-| `moderationFindings` | `{ roomId: 1, status: 1, createdAt: -1 }` |
-| `moderationFindings` | `{ messageId: 1 } unique` |
-| `moderationReports` | `{ messageId: 1, createdAt: -1 }` |
-| `moderationActions` | `{ messageId: 1, createdAt: -1 }` |
-| `moderationAppeals` | `{ status: 1, createdAt: -1 }` |
-| `moderationAppeals` | `{ roomId: 1, userId: 1, status: 1, createdAt: -1 }` |
-| `moderationAiJobs` | `{ status: 1, lockedUntil: 1, createdAt: 1 }` |
-| `moderationAiJobs` | `{ messageId: 1, promptVersion: 1 } unique` |
+- Danh sách tin nhắn.
+- Message count.
+- Unread count.
+- Member count.
+- Trạng thái moderation/appeal.
 
 ---
 
-## 11. Admin UI va FE surface
+## 9. Chỉ mục MongoDB
 
-Backend docs nay lien quan cac man FE sau:
+Các index quan trọng:
 
-| FE page/spec | Vai tro |
-|--------------|---------|
-| `AdminCommunityPage` | Tao/sua/archive room, member management, invite |
-| `AdminModerationPage` | Queue, actions, appeals, AI jobs |
-| Community pages | Room list, private request status, chat room, unread/member count |
-| Playwright `community-moderation.spec.ts` | Private join, approve, realtime count, ban/appeal |
-| Playwright `community-ai-moderation.spec.ts` | AI review job + auto hide + admin audit UI |
-
-UX state da co:
-
-- Join/request button disable theo member status.
-- Trang thai da gui request/appeal.
-- Search/filter server-side trong admin room, moderation queue, actions, appeals, AI jobs.
-- Appeal history co the xem bang status filter.
+| Collection | Index | Mục đích |
+|------------|-------|----------|
+| `communityRooms` | `{ slug: 1 } unique` | Chống trùng slug |
+| `communityRooms` | `{ visibility: 1, status: 1, createdAt: -1 }` | List/filter room |
+| `communityRoomMembers` | `{ roomId: 1, userId: 1 } unique` | Một user chỉ có một membership trong room |
+| `communityRoomMembers` | `{ roomId: 1, status: 1, updatedAt: -1 }` | List member theo room/status |
+| `communityRoomMembers` | `{ userId: 1, status: 1, updatedAt: -1 }` | List phòng của user |
+| `communityMessages` | `{ roomId: 1, createdAt: -1 }` | List message |
+| `communityMessages` | `{ senderId: 1, createdAt: -1 }` | Query message theo user |
+| `communityMessages` | `{ status: 1, createdAt: -1 }` | Query message theo trạng thái |
+| `moderationFindings` | `{ status: 1, createdAt: -1 }` | Queue admin |
+| `moderationFindings` | `{ roomId: 1, status: 1, createdAt: -1 }` | Queue theo phòng |
+| `moderationFindings` | `{ messageId: 1 } unique` | Một finding chính cho mỗi message |
+| `moderationReports` | `{ messageId: 1, createdAt: -1 }` | Report theo message |
+| `moderationActions` | `{ messageId: 1, createdAt: -1 }` | Audit action |
+| `moderationAppeals` | `{ status: 1, createdAt: -1 }` | Appeal queue |
+| `moderationAppeals` | `{ roomId: 1, userId: 1, status: 1, createdAt: -1 }` | Chống/truy vấn appeal trùng |
+| `moderationAiJobs` | `{ status: 1, lockedUntil: 1, createdAt: 1 }` | Worker lấy job |
+| `moderationAiJobs` | `{ messageId: 1, promptVersion: 1 } unique` | Upsert job theo message/version |
 
 ---
 
-## 12. Test va verification
+## 10. Admin UI liên quan
 
-### 12.1 Backend
+Dù tài liệu nằm ở BE, các API này đang được FE sử dụng ở các màn:
+
+| Màn hình FE | Vai trò |
+|-------------|---------|
+| `AdminCommunityPage` | Quản lý phòng, thành viên, invite, duyệt private request |
+| `AdminModerationPage` | Xem queue, xử lý action, xem appeals, xem AI jobs |
+| Community room list | Hiển thị room, trạng thái join/request, member/message/unread count |
+| Community room detail | Chat realtime trong room |
+
+Các cải tiến UX đã có:
+
+- Hiển thị rõ trạng thái đã gửi request.
+- Disable button theo member status.
+- Hiển thị tên/avatar người gửi trong room.
+- Filter/search trong admin room và moderation.
+- Appeal có thể xem theo trạng thái, không chỉ appeal đang mở.
+- AI job audit có status, retry, search/filter.
+
+---
+
+## 11. Kiểm thử
+
+### 11.1 Backend
+
+Build:
 
 ```bash
 npm run build
+```
+
+Toàn bộ test:
+
+```bash
 npm test -- --run
 ```
 
-Focused AI moderation:
+Test riêng AI moderation:
 
 ```bash
 npm test -- --run src/tests/aiModeration.services.test.ts
 ```
 
-### 12.2 Frontend e2e thong thuong
-
-Chay seed truoc:
+### 11.2 Seed tài khoản e2e
 
 ```bash
-cd ../MEDISPACE_ECommerce_BE
+cd MEDISPACE_ECommerce_BE
 npm run seed:e2e
 ```
 
-Chay FE e2e:
+Seed tạo/cập nhật các tài khoản test:
+
+- Admin e2e.
+- Customer e2e.
+- Customer2 e2e.
+
+### 11.3 E2E community thông thường
 
 ```bash
-cd ../MEDISPACE_ECommerce_FE
+cd MEDISPACE_ECommerce_FE
 npm run test:e2e -- --reporter=list
 ```
 
-### 12.3 AI moderation e2e on dinh
+Luồng được kiểm tra:
 
-Can backend rieng voi mock:
+- Tạo private room.
+- Gửi request join.
+- Admin approve member.
+- Realtime message/unread count.
+- Moderation ban.
+- Appeal và approve appeal.
+
+### 11.4 E2E AI moderation ổn định
+
+Chạy backend mock:
 
 ```bash
-cd ../MEDISPACE_ECommerce_BE
+cd MEDISPACE_ECommerce_BE
 PORT=8010 AI_MODERATION_MOCK=true AI_MODERATION_ENABLED=true npm run dev
 ```
 
-FE dung API mock backend:
+Chạy FE trỏ vào backend mock:
 
 ```bash
-cd ../MEDISPACE_ECommerce_FE
+cd MEDISPACE_ECommerce_FE
 VITE_API_URL=http://localhost:8010 npm run dev -- --port 3000
 ```
 
-Chay spec:
+Chạy spec:
 
 ```bash
 E2E_AI_MODERATION=true \
@@ -491,55 +811,119 @@ E2E_BASE_URL=http://localhost:3000 \
 npm run test:e2e -- --reporter=list tests/e2e/specs/community-ai-moderation.spec.ts
 ```
 
-### 12.4 Smoke AI provider that
+Spec này kiểm tra:
 
-Khong in key/base URL ra log. Chi can xac nhan provider tra result:
+- Tạo room.
+- Join room.
+- Gửi message có marker AI.
+- Admin chạy AI review.
+- AI job `succeeded`.
+- Message bị auto hide.
+- Finding `trigger=ai` được tạo.
+- Admin UI hiển thị AI job audit.
+
+### 11.5 Smoke test AI provider thật
+
+Nên chạy smoke mà không in API key/base URL ra log.
+
+Ví dụ:
 
 ```bash
 AI_MODERATION_BASE_URL=http://your-provider/v1 \
 AI_MODERATION_MODEL=your-model \
 AI_MODERATION_TIMEOUT_MS=60000 \
-npx tsx -e "import aiModerationService from './src/services/aiModeration.services'; (async()=>{ const r=await aiModerationService.reviewText('Toi bi ho nhe, co nen uong thuoc theo huong dan bac si khong?'); console.log({severity:r.severity, confidence:r.confidence, shouldHide:r.shouldHide, suggestedAction:r.suggestedAction}); })()"
+npx tsx -e "import aiModerationService from './src/services/aiModeration.services'; (async()=>{ const r=await aiModerationService.reviewText('Tôi bị ho nhẹ, có nên uống thuốc theo hướng dẫn bác sĩ không?'); console.log({severity:r.severity, confidence:r.confidence, shouldHide:r.shouldHide, suggestedAction:r.suggestedAction}); })()"
 ```
 
----
+Ghi chú vận hành:
 
-## 13. Van hanh va monitoring
-
-Nen theo doi:
-
-- So AI jobs `pending/running/failed/succeeded`.
-- AI latency (`latencyMs`).
-- Ty le auto hidden.
-- So finding open qua lau.
-- So appeal approved/rejected.
-- So report/room/message theo ngay.
-- Socket join error cho private room.
-
-Can canh bao:
-
-- AI job failed lien tuc.
-- Pending jobs ton qua nguong.
-- Auto hide tang bat thuong.
-- Provider timeout tang sau deploy.
+- Timeout mặc định `12000ms` có thể thấp nếu model cold start.
+- Với provider local hoặc model lớn, nên cân nhắc `60000ms`.
 
 ---
 
-## 14. Gioi han hien tai va viec nen lam tiep
+## 12. Vận hành và monitoring
 
-Gioi han:
+Nên theo dõi:
 
-- Rule-based moderation con don gian, can tuning bang du lieu that.
-- AI moderation chua co dashboard metric rieng, moi co job audit list.
-- Appeal flow la admin-driven, chua co SLA/notification day du cho admin.
-- Private room invite theo email can dam bao email ton tai hoac co flow invite external neu mo rong.
+- Số lượng AI job theo trạng thái `pending`, `running`, `failed`, `succeeded`.
+- Latency AI trung bình, p50, p95.
+- Tỷ lệ AI job failed.
+- Số message bị auto hide.
+- Số moderation finding đang mở.
+- Số appeal đang mở.
+- Tỷ lệ appeal approved/rejected.
+- Số join request private room chưa xử lý.
+- Socket connection/join room error.
 
-De xuat tiep:
+Cảnh báo nên có:
 
-1. Them dashboard metric cho AI moderation: success rate, failed rate, latency p50/p95.
-2. Them scheduled cleanup/retry cho AI jobs bi lock qua lau.
-3. Them audit export cho moderation actions/appeals.
-4. Them configurable rule set cho moderation engine.
-5. Them notification admin khi co private join request/appeal moi.
-6. Review privacy neu bat provider AI ben ngoai o production.
+- AI job pending quá lâu.
+- AI provider timeout tăng đột biến.
+- Auto hide tăng bất thường.
+- Appeal tồn đọng quá lâu.
+- Moderation queue tăng nhanh trong thời gian ngắn.
 
+---
+
+## 13. Rủi ro và kiểm soát
+
+### 13.1 Rủi ro nghiệp vụ
+
+- Người dùng có thể chia sẻ lời khuyên y tế nguy hiểm.
+- Người dùng có thể chia sẻ thông tin cá nhân.
+- Rule-based moderation có thể bắt nhầm hoặc bỏ sót.
+- AI moderation có thể đánh giá sai.
+- Admin xử lý không nhất quán nếu thiếu audit/context.
+
+### 13.2 Kiểm soát đã có
+
+- Rule-based moderation ngay khi gửi tin.
+- AI review hỗ trợ đánh giá sâu hơn.
+- Queue để admin kiểm tra thủ công.
+- Audit action.
+- Appeal flow để khôi phục khi xử lý sai.
+- Private room có request/approve.
+- Member status rõ ràng: `pending`, `invited`, `active`, `muted`, `banned`, `left`.
+
+### 13.3 Kiểm soát nên bổ sung
+
+- Dashboard SLA moderation.
+- Notification admin khi có appeal hoặc private join request mới.
+- Rule engine cấu hình được từ admin.
+- Báo cáo/export audit moderation.
+- Chính sách retention dữ liệu moderation.
+- Đánh giá privacy nếu dùng AI provider bên ngoài.
+
+---
+
+## 14. Những việc nên làm tiếp
+
+Ưu tiên đề xuất:
+
+1. Thêm dashboard metric cho AI moderation.
+2. Thêm notification cho admin khi có join request, finding hoặc appeal mới.
+3. Thêm cleanup/retry job cho AI jobs bị lock quá lâu.
+4. Chuẩn hóa retention policy cho moderation data.
+5. Bổ sung rule-based moderation có cấu hình động.
+6. Thêm export audit cho moderation actions và appeals.
+7. Chạy staging test với AI provider thật và timeout production-like.
+
+---
+
+## 15. Tóm tắt
+
+Tính năng cộng đồng hiện không chỉ là một room chat. Nó là một workflow hoàn chỉnh gồm:
+
+- Quản lý phòng.
+- Quản lý thành viên.
+- Chat realtime.
+- Private join request/invite.
+- Kiểm duyệt rule-based.
+- Kiểm duyệt bằng AI.
+- Admin action.
+- Audit log.
+- Appeal.
+- E2E ổn định.
+
+Thiết kế hiện tại đủ để đưa vào PR và kiểm thử staging. Trước khi bật rộng ở production, nên ưu tiên monitoring, notification cho admin và rà lại chính sách dữ liệu khi dùng AI provider thật.
