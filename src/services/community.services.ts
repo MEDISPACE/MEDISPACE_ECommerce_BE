@@ -666,22 +666,21 @@ class CommunityService {
 
     await this.requireActiveMember(message.roomId as ObjectId, params.reporterId)
 
-    const existingReport = await databaseService.moderationReports.findOne({
-      messageId: params.messageId,
-      reporterId: params.reporterId
-    })
-    if (existingReport) {
-      throw new ErrorWithStatus({ message: 'Bạn đã báo cáo tin nhắn này.', status: HTTP_STATUS.CONFLICT })
-    }
-
     const now = new Date()
-    await databaseService.moderationReports.insertOne({
-      roomId: message.roomId as ObjectId,
-      messageId: params.messageId,
-      reporterId: params.reporterId,
-      reason: params.reason?.trim(),
-      createdAt: now
-    } as any)
+    try {
+      await databaseService.moderationReports.insertOne({
+        roomId: message.roomId as ObjectId,
+        messageId: params.messageId,
+        reporterId: params.reporterId,
+        reason: params.reason?.trim(),
+        createdAt: now
+      } as any)
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new ErrorWithStatus({ message: 'Bạn đã báo cáo tin nhắn này.', status: HTTP_STATUS.CONFLICT })
+      }
+      throw error
+    }
 
     const existing = await databaseService.moderationFindings.findOne({ messageId: params.messageId })
     if (existing) {
