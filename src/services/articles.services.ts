@@ -64,6 +64,96 @@ class ArticlesService {
       .map((id) => new ObjectId(id))
   }
 
+  private normalizeSearchText(value: unknown) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+  }
+
+  private tokenizeSearchText(value: unknown) {
+    return this.normalizeSearchText(value)
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 3)
+  }
+
+  private buildArticleProductTerms(article: any) {
+    const weighted = new Map<string, number>()
+    const addTerms = (values: unknown[], weight: number) => {
+      values.forEach((value) => {
+        const normalizedPhrase = this.normalizeSearchText(value).trim()
+        if (normalizedPhrase.length >= 3) {
+          weighted.set(normalizedPhrase, Math.max(weighted.get(normalizedPhrase) || 0, weight))
+        }
+        this.tokenizeSearchText(value).forEach((term) => {
+          weighted.set(term, Math.max(weighted.get(term) || 0, Math.max(weight - 1, 1)))
+        })
+      })
+    }
+
+    addTerms([article.category?.name], 7)
+    addTerms([...(article.tags || []), ...(article.healthTopics || []), ...(article.symptoms || []), ...(article.activeIngredients || [])], 8)
+    addTerms([article.title], 4)
+    addTerms([article.excerpt], 3)
+
+    return Array.from(weighted.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 24)
+      .map(([term, weight]) => ({ term, weight }))
+  }
+
+  private scoreArticleProduct(product: any, terms: Array<{ term: string; weight: number }>, articleRiskLevel?: string) {
+    const productName = this.normalizeSearchText(product.name)
+    const productCategory = this.normalizeSearchText(product.category?.name)
+    const productShort = this.normalizeSearchText(product.shortDescription)
+    const productMedical = this.normalizeSearchText(
+      `${product.detail?.activeIngredients || ''} ${product.detail?.indications || ''}`
+    )
+    const combined = `${productName} ${productCategory} ${productShort} ${productMedical}`
+
+    const reasons = new Set<string>()
+    let score = 0
+
+    terms.forEach(({ term, weight }) => {
+      if (!term || !combined.includes(term)) return
+      score += weight
+      if (productName.includes(term)) score += 4
+      if (productCategory.includes(term)) {
+        score += 5
+        reasons.add('Cùng nhóm sản phẩm/chủ đề')
+      }
+      if (productMedical.includes(term)) {
+        score += 4
+        reasons.add('Phù hợp hoạt chất/công dụng')
+      }
+      if (productShort.includes(term)) {
+        score += 2
+        reasons.add('Mô tả sản phẩm liên quan')
+      }
+    })
+
+    if (product.stockQuantity > 0) score += 2
+    if (!product.requiresPrescription) {
+      score += 3
+      reasons.add('OTC')
+    } else if (['disease', 'emergency-sensitive'].includes(articleRiskLevel || '')) {
+      score -= 12
+    } else {
+      score -= 3
+      reasons.add('Cần đơn/tư vấn dược sĩ')
+    }
+
+    score += Math.min(Number(product.rating || 0), 5)
+    score += Math.min(Number(product.reviewCount || 0) / 20, 3)
+
+    return {
+      score,
+      reasons: Array.from(reasons).slice(0, 3)
+    }
+  }
+
   private normalizeReviewMetadata(payload: CreateArticleReqBody | UpdateArticleReqBody) {
     const metadata: Record<string, unknown> = {}
     if (payload.references !== undefined) {
@@ -554,11 +644,12 @@ class ArticlesService {
     const explicitProductIds = Array.isArray(article.relatedProductIds)
       ? this.safeObjectIds(article.relatedProductIds)
       : []
+    const highRiskArticle = ['disease', 'emergency-sensitive'].includes(article.riskLevel || '')
 
     const pipeline: Record<string, unknown>[] = []
 
     if (explicitProductIds.length > 0) {
-      pipeline.push({ $match: { _id: { $in: explicitProductIds }, isActive: true } })
+      pipeline.push({ $match: { _id: { $in: explicitProductIds }, isActive: true, status: 'active', stockQuantity: { $gt: 0 } } })
       pipeline.push({
         $addFields: {
           relatedOrder: { $indexOfArray: [explicitProductIds, '$_id'] }
@@ -566,36 +657,77 @@ class ArticlesService {
       })
       pipeline.push({ $sort: { relatedOrder: 1 } })
     } else {
-      const searchTerms = [
+      const terms = this.buildArticleProductTerms(article)
+      const rawTerms = [
         article.category?.name,
-        ...(Array.isArray(article.tags) ? article.tags : []),
-        ...String(article.title || '').split(/\s+/).slice(0, 6)
+        ...(article.tags || []),
+        ...(article.healthTopics || []),
+        ...(article.symptoms || []),
+        ...(article.activeIngredients || []),
+        ...String(article.title || '').split(/\s+/).slice(0, 8)
       ]
-        .map((term) => String(term).trim())
+        .map((term) => String(term || '').trim())
         .filter((term) => term.length >= 3)
-        .slice(0, 10)
-
-      const fallbackFilter: Record<string, unknown> = {
+      const regexTerms = Array.from(new Set([...rawTerms, ...terms.slice(0, 12).map(({ term }) => term)]))
+        .slice(0, 20)
+        .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, ' '))
+      const candidateMatch: Record<string, unknown> = {
         isActive: true,
+        status: 'active',
         stockQuantity: { $gt: 0 }
       }
-
-      if (searchTerms.length > 0) {
-        fallbackFilter.$or = searchTerms.flatMap((term) => [
-          { name: { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, ' '), $options: 'i' } },
-          { shortDescription: { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, ' '), $options: 'i' } }
-        ])
+      if (highRiskArticle) {
+        candidateMatch.requiresPrescription = false
       }
 
-      pipeline.push({ $match: fallbackFilter })
-      pipeline.push({ $sort: { rating: -1, reviewCount: -1, createdAt: -1 } })
+      pipeline.push(
+        { $match: candidateMatch },
+        {
+          $lookup: {
+            from: process.env.DB_CATEGORIES_COLLECTION || 'categories',
+            localField: 'categoryId',
+            foreignField: '_id',
+            as: 'category'
+          }
+        },
+        {
+          $lookup: {
+            from: process.env.DB_PRODUCT_DETAILS_COLLECTION || 'productDetails',
+            localField: '_id',
+            foreignField: 'productId',
+            as: 'detail'
+          }
+        },
+        {
+          $addFields: {
+            category: { $arrayElemAt: ['$category', 0] },
+            detail: { $arrayElemAt: ['$detail', 0] }
+          }
+        }
+      )
+
+      if (regexTerms.length > 0) {
+        pipeline.push({
+          $match: {
+            $or: regexTerms.flatMap((term) => [
+              { name: { $regex: term, $options: 'i' } },
+              { shortDescription: { $regex: term, $options: 'i' } },
+              { 'category.name': { $regex: term, $options: 'i' } },
+              { 'detail.activeIngredients': { $regex: term, $options: 'i' } },
+              { 'detail.indications': { $regex: term, $options: 'i' } }
+            ])
+          }
+        })
+      }
+
+      pipeline.push({ $sort: { requiresPrescription: 1, rating: -1, reviewCount: -1, createdAt: -1 } }, { $limit: Math.max(safeLimit * 8, 40) })
     }
 
     pipeline.push(
-      { $limit: safeLimit },
+      ...(explicitProductIds.length > 0 ? [{ $limit: safeLimit }] : []),
       {
         $lookup: {
-          from: 'categories',
+          from: process.env.DB_CATEGORIES_COLLECTION || 'categories',
           localField: 'categoryId',
           foreignField: '_id',
           as: 'category'
@@ -603,7 +735,7 @@ class ArticlesService {
       },
       {
         $lookup: {
-          from: 'brands',
+          from: process.env.DB_BRANDS_COLLECTION || 'brands',
           localField: 'brandId',
           foreignField: '_id',
           as: 'brand'
@@ -618,6 +750,7 @@ class ArticlesService {
       {
         $project: {
           relatedOrder: 0,
+          detail: 0,
           costPrice: 0,
           createdBy: 0,
           lastModifiedBy: 0
@@ -625,7 +758,24 @@ class ArticlesService {
       }
     )
 
-    return databaseService.products.aggregate(pipeline).toArray()
+    const products = await databaseService.products.aggregate(pipeline).toArray()
+    if (explicitProductIds.length > 0) {
+      return products
+    }
+
+    const terms = this.buildArticleProductTerms(article)
+    return products
+      .map((product) => {
+        const { score, reasons } = this.scoreArticleProduct(product, terms, article.riskLevel)
+        return {
+          ...product,
+          relatedScore: score,
+          relatedReasons: reasons
+        }
+      })
+      .filter((product) => product.relatedScore >= 6)
+      .sort((a, b) => b.relatedScore - a.relatedScore)
+      .slice(0, safeLimit)
   }
 
   async trackJourneyEvent(
@@ -684,6 +834,121 @@ class ArticlesService {
       title: article.title,
       counts,
       uniqueSessions: uniqueSessions.length,
+      recentEvents
+    }
+  }
+
+  async getAdminInsights(days = 30) {
+    const safeDays = Math.min(Math.max(Number(days) || 30, 1), 365)
+    const since = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000)
+
+    const [statusCounts, riskCounts, eventCounts, topEngagedArticles, categoryPerformance, editorialWarnings, savedArticleIds, followedTopics, recentEvents] =
+      await Promise.all([
+        databaseService.articles
+          .aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }])
+          .toArray(),
+        databaseService.articles
+          .aggregate([{ $group: { _id: { $ifNull: ['$riskLevel', 'general'] }, count: { $sum: 1 } } }])
+          .toArray(),
+        databaseService.articleJourneyEvents
+          .aggregate([
+            { $match: { createdAt: { $gte: since } } },
+            { $group: { _id: '$eventType', count: { $sum: 1 }, uniqueSessions: { $addToSet: '$sessionId' } } },
+            { $project: { count: 1, uniqueSessions: { $size: '$uniqueSessions' } } },
+            { $sort: { count: -1 } }
+          ])
+          .toArray(),
+        databaseService.articleJourneyEvents
+          .aggregate([
+            { $match: { createdAt: { $gte: since } } },
+            { $group: { _id: '$articleId', totalEvents: { $sum: 1 }, aiAsks: { $sum: { $cond: [{ $eq: ['$eventType', 'article_ai_ask'] }, 1, 0] } }, ctaEvents: { $sum: { $cond: [{ $in: ['$eventType', ['cta_chat', 'cta_prescription_upload', 'cta_product_search', 'related_product_click']] }, 1, 0] } } } },
+            { $sort: { totalEvents: -1 } },
+            { $limit: 8 },
+            { $lookup: { from: process.env.DB_ARTICLES_COLLECTION || 'articles', localField: '_id', foreignField: '_id', as: 'article' } },
+            { $addFields: { article: { $arrayElemAt: ['$article', 0] } } },
+            { $project: { articleId: '$_id', title: '$article.title', slug: '$article.slug', viewCount: '$article.viewCount', riskLevel: '$article.riskLevel', totalEvents: 1, aiAsks: 1, ctaEvents: 1 } }
+          ])
+          .toArray(),
+        databaseService.articleJourneyEvents
+          .aggregate([
+            { $match: { createdAt: { $gte: since } } },
+            { $group: { _id: '$categoryId', totalEvents: { $sum: 1 }, aiAsks: { $sum: { $cond: [{ $eq: ['$eventType', 'article_ai_ask'] }, 1, 0] } }, ctaEvents: { $sum: { $cond: [{ $in: ['$eventType', ['cta_chat', 'cta_prescription_upload', 'cta_product_search', 'related_product_click']] }, 1, 0] } } } },
+            { $sort: { totalEvents: -1 } },
+            { $limit: 8 },
+            { $lookup: { from: process.env.DB_HEALTH_CATEGORIES_COLLECTION || 'healthCategories', localField: '_id', foreignField: '_id', as: 'category' } },
+            { $addFields: { category: { $arrayElemAt: ['$category', 0] } } },
+            { $project: { categoryId: '$_id', categoryName: { $ifNull: ['$category.name', 'Chưa phân loại'] }, totalEvents: 1, aiAsks: 1, ctaEvents: 1 } }
+          ])
+          .toArray(),
+        databaseService.articles
+          .aggregate([
+            {
+              $match: {
+                status: 'published',
+                isPublished: true,
+                $or: [
+                  { reviewedBy: { $in: [null, ''] } },
+                  { references: { $size: 0 } },
+                  { references: { $exists: false } },
+                  { lastMedicallyReviewedAt: { $lt: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000) } },
+                  { riskLevel: 'emergency-sensitive' }
+                ]
+              }
+            },
+            { $sort: { riskLevel: -1, viewCount: -1, updatedAt: -1 } },
+            { $limit: 10 },
+            {
+              $project: {
+                title: 1,
+                slug: 1,
+                riskLevel: { $ifNull: ['$riskLevel', 'general'] },
+                reviewedBy: 1,
+                referencesCount: { $size: { $ifNull: ['$references', []] } },
+                lastMedicallyReviewedAt: 1,
+                viewCount: 1
+              }
+            }
+          ])
+          .toArray(),
+        databaseService.users.distinct('savedArticleIds'),
+        databaseService.users.distinct('followedHealthTopics'),
+        databaseService.articleJourneyEvents
+          .find({ createdAt: { $gte: since } })
+          .sort({ createdAt: -1 })
+          .limit(12)
+          .toArray()
+      ])
+
+    const counts = statusCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item._id || 'unknown'] = item.count
+      return acc
+    }, {})
+    const riskLevels = riskCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item._id || 'general'] = item.count
+      return acc
+    }, {})
+    const funnel = eventCounts.reduce<Record<string, { count: number; uniqueSessions: number }>>((acc, item) => {
+      acc[item._id] = { count: item.count, uniqueSessions: item.uniqueSessions }
+      return acc
+    }, {})
+
+    return {
+      period: { days: safeDays, since },
+      overview: {
+        totalArticles: Object.values(counts).reduce((sum, count) => sum + count, 0),
+        published: counts.published || 0,
+        pending: counts.pending || 0,
+        draft: counts.draft || 0,
+        archived: counts.archived || 0,
+        totalEvents: eventCounts.reduce((sum, item) => sum + item.count, 0),
+        savedArticles: savedArticleIds.length,
+        followedTopics: followedTopics.length
+      },
+      riskLevels,
+      funnel,
+      topEngagedArticles,
+      categoryPerformance,
+      editorialWarnings,
       recentEvents
     }
   }
