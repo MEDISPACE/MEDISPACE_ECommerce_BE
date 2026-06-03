@@ -159,4 +159,122 @@ describe('AiModerationService', () => {
       { upsert: true, returnDocument: 'after' }
     )
   })
+
+  it('[ai-review] mock returns medium severity, shouldHide=false, suggestedAction=review', async () => {
+    process.env.AI_MODERATION_MOCK = 'true'
+
+    const result = await aiModerationService.reviewText('[ai-review] possibly misleading advice')
+
+    expect(result).toMatchObject({
+      severity: 'medium',
+      confidence: 0.82,
+      shouldHide: false,
+      requiresHumanReview: true,
+      suggestedAction: 'review'
+    })
+    expect(axios.post).not.toHaveBeenCalled()
+  })
+
+  it('safe content mock returns low severity and shouldHide=false', async () => {
+    process.env.AI_MODERATION_MOCK = 'true'
+
+    const result = await aiModerationService.reviewText('How do I take vitamin C supplements?')
+
+    expect(result).toMatchObject({
+      severity: 'low',
+      shouldHide: false,
+      requiresHumanReview: false,
+      suggestedAction: 'none'
+    })
+    expect(axios.post).not.toHaveBeenCalled()
+  })
+
+  it('AI result below autoHide threshold → not auto-hidden, not queued (low severity)', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+
+    const roomId = new ObjectId()
+    const senderId = new ObjectId()
+    const messageId = new ObjectId()
+    const jobId = new ObjectId()
+    const message = { _id: messageId, roomId, senderId, content: 'What vitamins should I take?', status: 'visible' }
+
+    mockModerationAiJobs.findOneAndUpdate.mockResolvedValueOnce({
+      _id: jobId, messageId, roomId, senderId,
+      ruleResult: { severity: 'low', categories: [] }
+    })
+    mockCommunityMessages.findOne.mockResolvedValueOnce(message).mockResolvedValueOnce(message)
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'low',
+              categories: [],
+              confidence: 0.45,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Benign health question',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.processNextJob()
+
+    expect(result?.applied).toMatchObject({ queued: false, autoHidden: false })
+    expect(mockCommunityMessages.updateOne).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ $set: expect.objectContaining({ status: 'hidden' }) })
+    )
+    expect(mockModerationFindings.findOneAndUpdate).not.toHaveBeenCalled()
+  })
+
+  it('AI result above review threshold only → queued=true but autoHidden=false', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+
+    const roomId = new ObjectId()
+    const senderId = new ObjectId()
+    const messageId = new ObjectId()
+    const jobId = new ObjectId()
+    const findingId = new ObjectId()
+    const message = { _id: messageId, roomId, senderId, content: 'Possibly misleading content', status: 'visible' }
+
+    mockModerationAiJobs.findOneAndUpdate.mockResolvedValueOnce({
+      _id: jobId, messageId, roomId, senderId,
+      ruleResult: { severity: 'medium', categories: ['spam'] }
+    })
+    mockCommunityMessages.findOne.mockResolvedValueOnce(message).mockResolvedValueOnce(message)
+    mockModerationFindings.findOneAndUpdate.mockResolvedValueOnce({ _id: findingId })
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'medium',
+              categories: ['spam'],
+              confidence: 0.62, // above review threshold (0.55) but below hide threshold (0.78)
+              shouldHide: false,
+              requiresHumanReview: true,
+              reason: 'Possibly misleading – needs review',
+              suggestedAction: 'review'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.processNextJob()
+
+    expect(result?.applied).toMatchObject({ queued: true, autoHidden: false })
+    expect(mockModerationFindings.findOneAndUpdate).toHaveBeenCalledTimes(1)
+    // Message should NOT have been hidden
+    expect(mockCommunityMessages.updateOne).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ $set: expect.objectContaining({ status: 'hidden' }) })
+    )
+  })
 })
