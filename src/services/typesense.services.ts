@@ -70,6 +70,11 @@ const articleSchema = {
     { name: 'categoryId', type: 'string' as const, facet: true, optional: true },
     { name: 'categoryName', type: 'string' as const, facet: true, optional: true },
     { name: 'tags', type: 'string[]' as const, facet: true, optional: true },
+    { name: 'riskLevel', type: 'string' as const, facet: true, optional: true },
+    { name: 'targetAudiences', type: 'string[]' as const, facet: true, optional: true },
+    { name: 'symptoms', type: 'string[]' as const, facet: true, optional: true },
+    { name: 'activeIngredients', type: 'string[]' as const, facet: true, optional: true },
+    { name: 'healthTopics', type: 'string[]' as const, facet: true, optional: true },
     { name: 'authorName', type: 'string' as const, optional: true },
     { name: 'isPublished', type: 'bool' as const, facet: true },
     { name: 'isFeatured', type: 'bool' as const, facet: true },
@@ -149,6 +154,11 @@ function toArticleDocument(article: any): Record<string, unknown> {
     categoryId: article.categoryId?.toString() || '',
     categoryName: article.category?.name || '',
     tags: Array.isArray(article.tags) ? article.tags : [],
+    riskLevel: article.riskLevel || 'general',
+    targetAudiences: Array.isArray(article.targetAudiences) ? article.targetAudiences : [],
+    symptoms: Array.isArray(article.symptoms) ? article.symptoms : [],
+    activeIngredients: Array.isArray(article.activeIngredients) ? article.activeIngredients : [],
+    healthTopics: Array.isArray(article.healthTopics) ? article.healthTopics : [],
     authorName: article.authorName || '',
     isPublished: Boolean(article.isPublished),
     isFeatured: Boolean(article.isFeatured),
@@ -203,7 +213,19 @@ class TypesenseService {
 
     for (const { name, schema } of collections) {
       try {
-        await client.collections(name).retrieve()
+        const collection = await client.collections(name).retrieve()
+        const existingFieldNames = new Set((collection.fields || []).map((field: any) => field.name))
+        const schemaFieldNames = (schema.fields || []).map((field: any) => field.name)
+        const missingFields = schemaFieldNames.filter((fieldName: string) => !existingFieldNames.has(fieldName))
+
+        if (missingFields.length > 0) {
+          console.log(`[Typesense] Collection "${name}" schema missing fields: ${missingFields.join(', ')}. Recreating.`)
+          await client.collections(name).delete()
+          await client.collections().create(schema as any)
+          console.log(`[Typesense] Recreated collection "${name}".`)
+          continue
+        }
+
         console.log(`[Typesense] Collection "${name}" exists.`)
       } catch {
         await client.collections().create(schema as any)
@@ -352,7 +374,7 @@ class TypesenseService {
   }
 
   async suggest(q: string): Promise<any> {
-    if (!this.isAvailable) return { products: [], brands: [], categories: [] }
+    if (!this.isAvailable) return { products: [], brands: [], categories: [], articles: [] }
     try {
       // Two-stage product search:
       // Stage 1: match by name/sku/brandName → "exact concept" matches
@@ -406,6 +428,18 @@ class TypesenseService {
             per_page: 2,
             include_fields: 'mongoId,name,slug,icon,productCount,level',
             num_typos: 1
+          },
+          // Health articles
+          {
+            collection: ARTICLES_COLLECTION,
+            q,
+            query_by: 'title,excerpt,tags,healthTopics,symptoms,activeIngredients,targetAudiences,categoryName',
+            query_by_weights: '5,3,2,3,3,3,2,2',
+            filter_by: 'isPublished:=true',
+            per_page: 4,
+            include_fields: 'mongoId,title,slug,excerpt,featuredImage,categoryName,tags,riskLevel',
+            num_typos: 1,
+            prefix: true
           }
         ]
       })
@@ -443,11 +477,12 @@ class TypesenseService {
       return {
         products: productHits,
         brands: results.results[2].hits || [],
-        categories: results.results[3].hits || []
+        categories: results.results[3].hits || [],
+        articles: results.results[4].hits || []
       }
     } catch (err) {
       console.error('[Typesense] suggest error:', (err as Error)?.message)
-      return { products: [], brands: [], categories: [] }
+      return { products: [], brands: [], categories: [], articles: [] }
     }
   }
 
@@ -512,9 +547,11 @@ class TypesenseService {
     try {
       return await client.collections(ARTICLES_COLLECTION).documents().search({
         q: q || '*',
-        query_by: 'title,excerpt,content,tags',
+        query_by: 'title,excerpt,content,tags,healthTopics,symptoms,activeIngredients,targetAudiences,categoryName',
+        query_by_weights: '5,3,1,2,3,3,3,2,2',
         filter_by: filters.join(' && '),
-        sort_by: 'viewCount:desc',
+        facet_by: 'categoryId,categoryName,tags,riskLevel,targetAudiences,healthTopics',
+        sort_by: '_text_match:desc,viewCount:desc',
         page,
         per_page: limit,
         num_typos: 2,
