@@ -127,7 +127,7 @@ describe('CommunityService', () => {
     mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: new ObjectId() })
     mockCommunityRooms.findOne.mockResolvedValueOnce({ _id: roomId, visibility: 'public', status: 'active' })
     mockCommunityRoomMembers.findOne.mockResolvedValueOnce({ roomId, userId, status: 'active' })
-    mockModerationReports.findOne.mockResolvedValueOnce({ _id: new ObjectId(), messageId, reporterId: userId })
+    mockModerationReports.insertOne.mockRejectedValueOnce({ code: 11000 })
 
     await expect(
       communityService.reportMessage({ messageId, reporterId: userId, reason: 'duplicate' })

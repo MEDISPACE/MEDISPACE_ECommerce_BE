@@ -253,6 +253,8 @@ Nếu message bị auto hide:
 - Emit `community:message:hidden` cho user gửi.
 - Admin nhận `community:moderation:queued`.
 
+Khi lấy danh sách tin nhắn, message `hidden` vẫn có thể được trả về cho chính sender. Đây là chủ ý UX để người gửi biết tin của mình đã bị ẩn, trong khi các thành viên khác không thấy nội dung đó.
+
 ### 4.6 Report message
 
 User report message qua:
@@ -270,6 +272,8 @@ Hệ thống:
 - Tăng `reportCount`.
 - Emit `community:moderation:queued` cho admin.
 
+Để tránh race condition, `moderationReports` có unique index theo `{ messageId, reporterId }`. Nếu hai request report song song cùng tới, request thứ hai sẽ bị duplicate key và trả về conflict thay vì tạo thêm report.
+
 ### 4.7 Admin xử lý moderation queue
 
 Admin xem queue:
@@ -286,19 +290,20 @@ PATCH /admin/moderation/messages/:messageId/action
 
 Các action hiện hỗ trợ:
 
-- `hide_message`
+- `approve`
+- `hide`
+- `delete`
 - `restore_message`
-- `delete_message`
 - `mute_user`
-- `unmute_user`
 - `ban_user`
+- `unmute_user`
 - `unban_user`
-- `dismiss`
+- `reopen_finding`
 
 Sau khi xử lý:
 
 - Message hoặc member được cập nhật.
-- Finding được resolve/dismiss nếu phù hợp.
+- Finding được chuyển `resolved` hoặc mở lại bằng `reopen_finding` nếu phù hợp.
 - Ghi audit vào `moderationActions`.
 - Emit realtime event cho room/user/admin.
 
@@ -390,8 +395,8 @@ Khi reject:
 | `roomId` | ObjectId | Phòng |
 | `userId` | ObjectId | Người dùng |
 | `role` | `member` / `moderator` | Vai trò trong phòng |
-| `status` | `active` / `pending` / `invited` / `left` / `muted` / `banned` | Trạng thái thành viên |
-| `mutedUntil` | Date/null | Thời điểm hết mute |
+| `status` | `active` / `pending` / `invited` / `left` / `banned` | Trạng thái thành viên |
+| `mutedUntil` | Date/null | Thời điểm hết mute. Mute không phải một giá trị `status`; FE phải đọc field này để xác định user đang bị mute. |
 | `lastReadAt` | Date/null | Mốc đọc cuối cùng |
 | `joinedAt` | Date | Thời điểm tham gia |
 | `updatedAt` | Date | Thời điểm cập nhật |
@@ -420,8 +425,8 @@ Khi reject:
 | `roomId` | Phòng liên quan |
 | `messageId` | Tin nhắn liên quan |
 | `senderId` | Người gửi tin |
-| `trigger` | Nguồn tạo finding: `rule`, `report`, `ai` |
-| `status` | `open`, `resolved`, `dismissed` |
+| `trigger` | Nguồn tạo finding: `auto`, `user_report`, `ai` |
+| `status` | `open`, `resolved` |
 | `severity` | `low`, `medium`, `high`, `critical` |
 | `categories` | Nhóm vi phạm |
 | `confidence` | Độ tin cậy |
@@ -589,6 +594,8 @@ Hệ thống cũng hỗ trợ fallback từ:
 10. Job chuyển sang `succeeded`.
 11. Nếu lỗi, job chuyển sang `failed`, lưu `lastError` đã sanitize.
 
+Trong một process, service có cờ `running` để tránh worker tự chạy chồng lên nhau. Nếu triển khai nhiều instance, cơ chế chống xử lý trùng dựa vào DB lock `lockedUntil` trên `moderationAiJobs`, đây mới là lớp bảo vệ chính.
+
 ### 7.4 Schema kết quả AI mong muốn
 
 ```json
@@ -705,6 +712,7 @@ Các index quan trọng:
 | `moderationFindings` | `{ roomId: 1, status: 1, createdAt: -1 }` | Queue theo phòng |
 | `moderationFindings` | `{ messageId: 1 } unique` | Một finding chính cho mỗi message |
 | `moderationReports` | `{ messageId: 1, createdAt: -1 }` | Report theo message |
+| `moderationReports` | `{ messageId: 1, reporterId: 1 } unique` | Chống duplicate report, kể cả khi có request song song |
 | `moderationActions` | `{ messageId: 1, createdAt: -1 }` | Audit action |
 | `moderationAppeals` | `{ status: 1, createdAt: -1 }` | Appeal queue |
 | `moderationAppeals` | `{ roomId: 1, userId: 1, status: 1, createdAt: -1 }` | Chống/truy vấn appeal trùng |
@@ -884,7 +892,7 @@ Cảnh báo nên có:
 - Audit action.
 - Appeal flow để khôi phục khi xử lý sai.
 - Private room có request/approve.
-- Member status rõ ràng: `pending`, `invited`, `active`, `muted`, `banned`, `left`.
+- Member status rõ ràng: `pending`, `invited`, `active`, `banned`, `left`; trạng thái mute được biểu diễn bằng `mutedUntil`.
 
 ### 13.3 Kiểm soát nên bổ sung
 
