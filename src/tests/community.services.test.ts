@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ObjectId } from 'mongodb'
 
+// ── Mock DB collections ──────────────────────────────────────────────────────
+
 const mockCommunityRooms = {
   findOne: vi.fn(),
   insertOne: vi.fn(),
@@ -59,13 +61,33 @@ vi.mock('~/sockets/chat.socket', () => ({
   getIO: () => ({ to: () => ({ emit: vi.fn() }) })
 }))
 
+vi.mock('~/services/aiModeration.services', () => ({
+  default: { enqueueMessageReview: vi.fn().mockResolvedValue(null) }
+}))
+
 const { default: communityService } = await import('~/services/community.services')
 const { default: moderationService } = await import('~/services/moderation.services')
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeRoom(overrides: Record<string, unknown> = {}) {
+  return { _id: new ObjectId(), visibility: 'public', status: 'active', ...overrides }
+}
+
+function makeMember(roomId: ObjectId, userId: ObjectId, overrides: Record<string, unknown> = {}) {
+  return { roomId, userId, status: 'active', role: 'member', ...overrides }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// CommunityService
+// ────────────────────────────────────────────────────────────────────────────
 
 describe('CommunityService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
+
+  // ── Room listing ────────────────────────────────────────────────────────────
 
   it('lists only public active rooms for anonymous users', async () => {
     const toArray = vi.fn().mockResolvedValue([])
@@ -93,10 +115,12 @@ describe('CommunityService', () => {
     })
   })
 
+  // ── Join room ───────────────────────────────────────────────────────────────
+
   it('blocks direct join to private room without invite', async () => {
     const roomId = new ObjectId()
     const userId = new ObjectId()
-    mockCommunityRooms.findOne.mockResolvedValueOnce({ _id: roomId, visibility: 'private', status: 'active' })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId, visibility: 'private' }))
     mockCommunityRoomMembers.findOne.mockResolvedValueOnce(null)
 
     await expect(communityService.joinRoom(roomId, userId)).rejects.toMatchObject({ status: 403 })
@@ -106,8 +130,8 @@ describe('CommunityService', () => {
   it('allows invited user to join private room', async () => {
     const roomId = new ObjectId()
     const userId = new ObjectId()
-    mockCommunityRooms.findOne.mockResolvedValueOnce({ _id: roomId, visibility: 'private', status: 'active' })
-    mockCommunityRoomMembers.findOne.mockResolvedValueOnce({ roomId, userId, status: 'invited' })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId, visibility: 'private' }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId, { status: 'invited' }))
     mockCommunityRoomMembers.updateOne.mockResolvedValueOnce({ modifiedCount: 1 })
 
     const result = await communityService.joinRoom(roomId, userId)
@@ -120,19 +144,235 @@ describe('CommunityService', () => {
     )
   })
 
+  it('banned user cannot join room', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId, visibility: 'public' }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId, { status: 'banned' }))
+
+    await expect(communityService.joinRoom(roomId, userId)).rejects.toMatchObject({ status: 403 })
+  })
+
+  // ── Leave room ──────────────────────────────────────────────────────────────
+
+  it('active member can leave room – status becomes left', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityRoomMembers.updateOne.mockResolvedValueOnce({ modifiedCount: 1 })
+
+    const result = await communityService.leaveRoom(roomId, userId)
+    expect(result.status).toBe('left')
+    expect(mockCommunityRoomMembers.updateOne).toHaveBeenCalledWith(
+      { roomId, userId },
+      { $set: expect.objectContaining({ status: 'left' }) }
+    )
+  })
+
+  it('non-member cannot leave room', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(null)
+
+    await expect(communityService.leaveRoom(roomId, userId)).rejects.toMatchObject({ status: 403 })
+  })
+
+  // ── Mark room read ──────────────────────────────────────────────────────────
+
+  it('markRoomRead updates lastReadAt for the member', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityRoomMembers.updateOne.mockResolvedValueOnce({ modifiedCount: 1 })
+
+    const result = await communityService.markRoomRead(roomId, userId)
+
+    expect(result.roomId).toEqual(roomId)
+    expect(result.lastReadAt).toBeInstanceOf(Date)
+    expect(mockCommunityRoomMembers.updateOne).toHaveBeenCalledWith(
+      { roomId, userId },
+      { $set: expect.objectContaining({ lastReadAt: expect.any(Date) }) }
+    )
+  })
+
+  // ── Send message ────────────────────────────────────────────────────────────
+
+  it('sends clean message – status=visible, no finding created', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    const stored = { _id: messageId, roomId, senderId: userId, content: 'Hello world', status: 'visible', moderated: { autoHidden: false } }
+    mockCommunityMessages.findOne.mockResolvedValueOnce(stored)
+
+    const result = await communityService.sendMessage({ roomId, userId, content: 'Hello world' })
+
+    expect(result.message?.status).toBe('visible')
+    expect(result.moderation.severity).toBe('low')
+    expect(mockModerationFindings.insertOne).not.toHaveBeenCalled()
+  })
+
+  it('sends message with phone number – status=hidden, severity=high, autoHidden=true', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    const stored = { _id: messageId, roomId, senderId: userId, content: 'Call 0901234567', status: 'hidden' }
+    mockCommunityMessages.findOne.mockResolvedValueOnce(stored)
+
+    const result = await communityService.sendMessage({ roomId, userId, content: 'Call 0901234567' })
+
+    expect(result.moderation.severity).toBe('high')
+    expect(result.moderation.categories).toContain('pii')
+    expect(result.message?.status).toBe('hidden')
+    expect(mockModerationFindings.insertOne).toHaveBeenCalledTimes(1)
+    const findingArg = mockModerationFindings.insertOne.mock.calls[0][0]
+    expect(findingArg.trigger).toBe('auto')
+    expect(findingArg.severity).toBe('high')
+  })
+
+  it('sends spam message (2+ URLs) – status=visible, finding created, severity=medium', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Check http://spam1.com and http://spam2.com now'
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    const stored = { _id: messageId, roomId, senderId: userId, content, status: 'visible' }
+    mockCommunityMessages.findOne.mockResolvedValueOnce(stored)
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.moderation.severity).toBe('medium')
+    expect(result.moderation.categories).toContain('spam')
+    expect(result.message?.status).toBe('visible')
+    expect(mockModerationFindings.insertOne).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends toxic message – visible but finding created', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Đồ ngu quá đi'
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    const stored = { _id: messageId, roomId, senderId: userId, content, status: 'visible' }
+    mockCommunityMessages.findOne.mockResolvedValueOnce(stored)
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.moderation.categories).toContain('toxic')
+    expect(result.message?.status).toBe('visible')
+  })
+
+  it('sends medical_harm message – auto-hidden, finding created', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Tự ý tăng liều 5 viên mỗi ngày không cần bác sĩ'
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    const stored = { _id: messageId, roomId, senderId: userId, content, status: 'hidden' }
+    mockCommunityMessages.findOne.mockResolvedValueOnce(stored)
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.moderation.categories).toContain('medical_harm')
+    expect(result.moderation.severity).toBe('high')
+    expect(result.message?.status).toBe('hidden')
+  })
+
+  it('muted user cannot send message', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const mutedUntil = new Date(Date.now() + 3600_000) // muted for 1 hour
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId, { mutedUntil }))
+
+    await expect(
+      communityService.sendMessage({ roomId, userId, content: 'should fail' })
+    ).rejects.toMatchObject({ status: 403 })
+  })
+
+  // ── Report message ──────────────────────────────────────────────────────────
+
   it('prevents duplicate reports for the same message by the same user', async () => {
     const roomId = new ObjectId()
     const userId = new ObjectId()
     const messageId = new ObjectId()
     mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: new ObjectId() })
-    mockCommunityRooms.findOne.mockResolvedValueOnce({ _id: roomId, visibility: 'public', status: 'active' })
-    mockCommunityRoomMembers.findOne.mockResolvedValueOnce({ roomId, userId, status: 'active' })
-    mockModerationReports.findOne.mockResolvedValueOnce({ _id: new ObjectId(), messageId, reporterId: userId })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockModerationReports.insertOne.mockRejectedValueOnce({ code: 11000 })
 
     await expect(
       communityService.reportMessage({ messageId, reporterId: userId, reason: 'duplicate' })
     ).rejects.toMatchObject({ status: 409 })
   })
+
+  it('first report creates finding with trigger=user_report', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const findingId = new ObjectId()
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: new ObjectId() })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockModerationReports.findOne.mockResolvedValueOnce(null)
+    mockModerationReports.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockModerationFindings.findOne.mockResolvedValueOnce(null)
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: findingId })
+
+    const result = await communityService.reportMessage({ messageId, reporterId: userId })
+
+    expect(result.findingId).toEqual(findingId)
+    const findingArg = mockModerationFindings.insertOne.mock.calls[0][0]
+    expect(findingArg.trigger).toBe('user_report')
+    expect(findingArg.reportCount).toBe(1)
+  })
+
+  it('second report on same message updates existing finding reportCount', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const existingFindingId = new ObjectId()
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: new ObjectId() })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockModerationReports.findOne.mockResolvedValueOnce(null)
+    mockModerationReports.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockModerationFindings.findOne.mockResolvedValueOnce({ _id: existingFindingId, messageId })
+    mockModerationFindings.updateOne.mockResolvedValueOnce({ modifiedCount: 1 })
+
+    const result = await communityService.reportMessage({ messageId, reporterId: userId })
+
+    expect(result.findingId).toEqual(existingFindingId)
+    expect(mockModerationFindings.updateOne).toHaveBeenCalledWith(
+      { _id: existingFindingId },
+      expect.objectContaining({ $inc: { reportCount: 1 } })
+    )
+  })
+
+  // ── Appeal ──────────────────────────────────────────────────────────────────
 
   it('prevents duplicate open moderation appeals', async () => {
     const roomId = new ObjectId()
