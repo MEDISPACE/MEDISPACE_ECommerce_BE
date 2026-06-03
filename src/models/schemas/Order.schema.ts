@@ -26,6 +26,13 @@ export interface ShippingAddress {
   postalCode?: string
 }
 
+export interface OrderAppliedCoupon {
+  code: string
+  name?: string
+  type: string
+  discountAmount: number
+}
+
 export interface OrderType {
   _id?: ObjectId
   userId: ObjectId
@@ -44,6 +51,7 @@ export interface OrderType {
   shippingFee: number
   discountAmount: number
   totalAmount: number
+  appliedCoupons?: OrderAppliedCoupon[]
 
   notes?: string
   trackingNumber?: string
@@ -78,6 +86,7 @@ export default class Order {
   shippingFee: number
   discountAmount: number
   totalAmount: number
+  appliedCoupons: OrderAppliedCoupon[]
 
   notes?: string
   trackingNumber?: string
@@ -113,6 +122,7 @@ export default class Order {
     this.shippingFee = order.shippingFee || 0
     this.discountAmount = order.discountAmount || 0
     this.totalAmount = order.totalAmount
+    this.appliedCoupons = order.appliedCoupons || []
 
     this.notes = order.notes
     this.trackingNumber = order.trackingNumber

@@ -281,6 +281,15 @@ class CouponService {
   ) {
     const upperCode = couponCode.toUpperCase()
 
+    const existingRedemption = await databaseService.couponRedemptions.findOne({
+      couponCode: upperCode,
+      userId,
+      orderId
+    })
+    if (existingRedemption) {
+      return
+    }
+
     // Atomic: chỉ increment nếu còn lượt dùng (tránh race condition)
     const coupon = await databaseService.coupons.findOneAndUpdate(
       {
@@ -300,9 +309,10 @@ class CouponService {
     )
 
     if (!coupon) {
-      // Coupon hết lượt hoặc đã bị tắt — log nhưng không throw (order đã tạo rồi)
-      console.warn(`[Coupon] Cannot record redemption for ${upperCode}: limit reached or inactive.`)
-      return
+      throw new ErrorWithStatus({
+        message: `Mã giảm giá ${upperCode} vừa hết lượt hoặc đã bị vô hiệu hóa. Vui lòng kiểm tra lại đơn hàng.`,
+        status: HTTP_STATUS.CONFLICT
+      })
     }
 
     // Kiểm tra per-user limit atomically (dùng unique index nếu có)
@@ -316,8 +326,10 @@ class CouponService {
         { _id: coupon._id },
         { $inc: { currentUsageCount: -1 } }
       )
-      console.warn(`[Coupon] User ${userId} exceeded perUserLimit for ${upperCode}.`)
-      return
+      throw new ErrorWithStatus({
+        message: `Bạn đã đạt giới hạn sử dụng mã ${upperCode}.`,
+        status: HTTP_STATUS.CONFLICT
+      })
     }
 
     // Insert redemption record
@@ -329,6 +341,26 @@ class CouponService {
       discountAmount
     })
     await databaseService.couponRedemptions.insertOne(redemption)
+  }
+
+  /**
+   * Hoàn tác các lượt dùng coupon của một order khi order bị hủy / thanh toán thất bại.
+   * Idempotent: nếu không còn redemption thì không làm gì.
+   */
+  async releaseCouponRedemptionsForOrder(orderId: ObjectId) {
+    const redemptions = await databaseService.couponRedemptions.find({ orderId }).toArray()
+    if (!redemptions.length) return { releasedCount: 0 }
+
+    for (const redemption of redemptions) {
+      await databaseService.coupons.updateOne(
+        { _id: redemption.couponId, currentUsageCount: { $gt: 0 } },
+        { $inc: { currentUsageCount: -1 }, $set: { updatedAt: new Date() } }
+      )
+    }
+
+    const result = await databaseService.couponRedemptions.deleteMany({ orderId })
+    await cacheService.invalidate('coupons:*')
+    return { releasedCount: result.deletedCount || 0 }
   }
 
   // ============================

@@ -22,12 +22,11 @@ export class PayOSProvider implements PaymentProvider {
     // Using timestamp + random part to ensure uniqueness and fit in integer limits
     const orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000))
 
-    const appUrl = process.env.CLIENT_URL || 'http://localhost:3000'
     const apiUrl = process.env.API_URL || 'http://localhost:8000'
 
     // Return URL goes to backend first to verify and update payment status
     const returnUrl = `${apiUrl}/payment/payos/return?orderId=${order._id}`
-    const cancelUrl = `${appUrl}/order/success?orderId=${order._id}&paymentStatus=failed`
+    const cancelUrl = `${apiUrl}/payment/payos/return?orderId=${order._id}&status=CANCELLED`
 
     // Description format: "DH {orderNumber}"
     // We will use this to lookup the order in the webhook
