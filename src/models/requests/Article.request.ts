@@ -11,6 +11,17 @@ export interface CreateArticleReqBody {
   metaTitle?: string
   metaDescription?: string
   metaKeywords?: string[]
+  references?: Array<{ title: string; url?: string }>
+  reviewedBy?: string
+  reviewedByTitle?: string
+  reviewedAt?: string
+  lastMedicallyReviewedAt?: string
+  contentVersion?: number
+  riskLevel?: 'general' | 'medication' | 'disease' | 'emergency-sensitive'
+  targetAudiences?: string[]
+  symptoms?: string[]
+  activeIngredients?: string[]
+  healthTopics?: string[]
   status?: 'draft' | 'pending' | 'published' | 'archived'
   isFeatured?: boolean
   isPinned?: boolean
@@ -30,6 +41,17 @@ export interface UpdateArticleReqBody {
   metaTitle?: string
   metaDescription?: string
   metaKeywords?: string[]
+  references?: Array<{ title: string; url?: string }>
+  reviewedBy?: string
+  reviewedByTitle?: string
+  reviewedAt?: string
+  lastMedicallyReviewedAt?: string
+  contentVersion?: number
+  riskLevel?: 'general' | 'medication' | 'disease' | 'emergency-sensitive'
+  targetAudiences?: string[]
+  symptoms?: string[]
+  activeIngredients?: string[]
+  healthTopics?: string[]
   status?: 'draft' | 'pending' | 'published' | 'archived'
   isFeatured?: boolean
   isPinned?: boolean
@@ -79,4 +101,35 @@ export interface GetHealthCategoriesQuery {
   search?: string
   sortBy?: 'name' | 'order' | 'articleCount' | 'createdAt'
   sortOrder?: 'asc' | 'desc'
+}
+
+export interface TrackArticleJourneyEventReqBody {
+  eventType:
+    | 'cta_chat'
+    | 'cta_prescription_upload'
+    | 'cta_product_search'
+    | 'related_product_click'
+    | 'article_share'
+    | 'source_click'
+    | 'article_ai_ask'
+    | 'article_save'
+    | 'topic_follow'
+  targetType?: 'chat' | 'prescription' | 'search' | 'product' | 'source' | 'article' | 'ai'
+  targetId?: string
+  targetUrl?: string
+  sessionId?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ArticleAiAssistReqBody {
+  action: 'outline' | 'seo' | 'excerpt' | 'faq' | 'quality_check' | 'sources'
+  title?: string
+  excerpt?: string
+  content?: string
+  categoryName?: string
+  tags?: string[]
+}
+
+export interface ArticleAskReqBody {
+  question: string
 }
