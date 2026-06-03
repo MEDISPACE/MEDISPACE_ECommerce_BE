@@ -531,6 +531,15 @@ class ReturnRequestService {
                     order.totalAmount,
                     order.orderNumber
                 )
+                const returnedItemCount = request.items.reduce((sum: number, item: any) => sum + item.quantity, 0)
+                const orderItemCount = (order.items || []).reduce((sum: number, item: any) => sum + item.quantity, 0)
+                if (returnedItemCount >= orderItemCount) {
+                    await loyaltyService.refundRedeemedPointsForOrder(
+                        request.userId,
+                        request.orderId,
+                        order.orderNumber
+                    )
+                }
             }
         } catch (err) {
             console.error('Loyalty revoke points error:', err)

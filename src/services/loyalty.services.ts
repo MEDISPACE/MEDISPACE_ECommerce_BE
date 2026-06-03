@@ -234,6 +234,52 @@ class LoyaltyService {
     return redeemAmount
   }
 
+  /**
+   * Hoàn lại điểm đã đổi khi order bị hủy / thanh toán thất bại / rollback.
+   * Idempotent theo orderId: chỉ hoàn nếu có transaction redeem và chưa có transaction adjust hoàn điểm.
+   */
+  async refundRedeemedPointsForOrder(userId: ObjectId, orderId: ObjectId, orderNumber: string) {
+    const redeemTx = await databaseService.loyaltyTransactions.findOne({
+      userId,
+      orderId,
+      type: 'redeem'
+    })
+    if (!redeemTx || redeemTx.points >= 0) return
+
+    const existingRefund = await databaseService.loyaltyTransactions.findOne({
+      userId,
+      orderId,
+      type: 'adjust',
+      description: { $regex: 'Hoàn điểm đã đổi' }
+    })
+    if (existingRefund) return
+
+    const pointsToRefund = Math.abs(redeemTx.points)
+    const updatedAccount = await databaseService.loyaltyAccounts.findOneAndUpdate(
+      { userId },
+      {
+        $inc: {
+          pointsBalance: pointsToRefund,
+          totalPointsRedeemed: -pointsToRefund
+        },
+        $set: { updatedAt: new Date() }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!updatedAccount) return
+
+    const transaction = new LoyaltyTransaction({
+      userId,
+      type: 'adjust',
+      points: pointsToRefund,
+      balanceAfter: updatedAccount.pointsBalance,
+      orderId,
+      description: `Hoàn điểm đã đổi do đơn ${orderNumber} không hoàn tất`
+    })
+    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+  }
+
   // ============================
   // POINT REVOCATION (RETURNS)
   // ============================

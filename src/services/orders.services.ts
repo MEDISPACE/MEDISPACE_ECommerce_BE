@@ -17,6 +17,34 @@ import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 
 class OrderService {
+  private async restoreStockForOrder(order: any) {
+    await this.restoreStockForItems(order.items || [])
+  }
+
+  private async restoreStockForItems(items: any[]) {
+    for (const item of items) {
+      const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+      if (product) {
+        const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+        const quantityPerUnit = variant?.quantityPerUnit || 1
+        const stockToRestore = item.quantity * quantityPerUnit
+        await databaseService.products.updateOne(
+          { _id: new ObjectId(item.productId) },
+          { $inc: { stockQuantity: stockToRestore } }
+        )
+      }
+    }
+  }
+
+  private async releaseOrderBenefits(order: any) {
+    if (!order?._id || !order?.userId) return
+
+    await Promise.all([
+      couponService.releaseCouponRedemptionsForOrder(order._id as ObjectId),
+      loyaltyService.refundRedeemedPointsForOrder(order.userId, order._id as ObjectId, order.orderNumber)
+    ])
+  }
+
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
     const {
@@ -305,6 +333,7 @@ class OrderService {
       shippingFee,
       discountAmount,
       totalAmount,
+      appliedCoupons,
       notes,
       estimatedDeliveryDate,
       pointsRedeemed,
@@ -313,7 +342,27 @@ class OrderService {
 
     const result = await databaseService.orders.insertOne(order)
 
+    // Giữ chỗ lượt dùng coupon trước khi trừ stock.
+    // Nếu các bước sau fail, releaseOrderBenefits sẽ hoàn lại lượt dùng và điểm.
+    try {
+      if (appliedCoupons && appliedCoupons.length > 0) {
+        for (const coupon of appliedCoupons) {
+          await couponService.recordCouponRedemption(
+            coupon.code,
+            userId,
+            result.insertedId,
+            coupon.discountAmount || 0
+          )
+        }
+      }
+    } catch (error) {
+      await databaseService.orders.deleteOne({ _id: result.insertedId })
+      await loyaltyService.refundRedeemedPointsForOrder(userId, orderId, orderNumber)
+      throw error
+    }
+
     // Deduct stock for each order item (atomic update to prevent race condition / stock going negative)
+    const deductedItems: any[] = []
     for (const item of orderItems) {
       const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
       if (product) {
@@ -329,12 +378,15 @@ class OrderService {
 
         if (deductResult.modifiedCount === 0) {
           // Stock không đủ (do concurrent order) — roll back đơn hàng và thông báo
+          await this.restoreStockForItems(deductedItems)
           await databaseService.orders.deleteOne({ _id: result.insertedId })
+          await this.releaseOrderBenefits({ ...order, _id: result.insertedId })
           throw new ErrorWithStatus({
             message: `Sản phẩm "${item.name}" vừa hết hàng. Vui lòng kiểm tra lại giỏ hàng.`,
             status: HTTP_STATUS.CONFLICT
           })
         }
+        deductedItems.push(item)
 
         // Low-stock alert: check tồn kho sau khi trừ, cảnh báo nếu ≤ 30 (fire-and-forget)
         const LOW_STOCK_THRESHOLD = 30
@@ -392,18 +444,6 @@ class OrderService {
         paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
       } catch (error) {
         // error suppressed
-      }
-    }
-
-    // Ghi nhận coupon redemption (fire-and-forget, không block response)
-    if (appliedCoupons && appliedCoupons.length > 0) {
-      for (const coupon of appliedCoupons) {
-        couponService.recordCouponRedemption(
-          coupon.code,
-          userId,
-          result.insertedId,
-          coupon.discountAmount || 0
-        ).catch(() => { /* silent */ })
       }
     }
 
@@ -526,7 +566,7 @@ class OrderService {
   }
 
   // Update order status (admin only)
-  async updateOrderStatus(orderId: ObjectId, newStatus: string, trackingNumber?: string) {
+  async updateOrderStatus(orderId: ObjectId, newStatus: string, trackingNumber?: string, notes?: string) {
     const order = await databaseService.orders.findOne({ _id: orderId })
 
     if (!order) {
@@ -545,6 +585,10 @@ class OrderService {
     if (newStatus === 'shipped' && trackingNumber) {
       updateData.trackingNumber = trackingNumber
       updateData.shippedAt = new Date()
+    }
+
+    if (notes) {
+      updateData.notes = notes
     }
 
     if (newStatus === 'delivered') {
@@ -571,18 +615,8 @@ class OrderService {
 
     // Restore stock when order is cancelled
     if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
-      for (const item of order.items || []) {
-        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
-        if (product) {
-          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
-          const quantityPerUnit = variant?.quantityPerUnit || 1
-          const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne(
-            { _id: new ObjectId(item.productId) },
-            { $inc: { stockQuantity: stockToRestore } }
-          )
-        }
-      }
+      await this.restoreStockForOrder(order)
+      await this.releaseOrderBenefits(order)
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
@@ -629,6 +663,17 @@ class OrderService {
       if (order.orderStatus === 'pending' || order.orderStatus === 'pending_payment') {
         updateData.orderStatus = 'confirmed'
       }
+    }
+
+    if (newStatus === 'failed' && order.paymentStatus !== 'failed') {
+      updateData.orderStatus = 'cancelled'
+      updateData.cancelledAt = new Date()
+      updateData.cancelReason = 'Thanh toán không thành công'
+
+      if (order.orderStatus !== 'cancelled' && order.orderStatus !== 'delivered') {
+        await this.restoreStockForOrder(order)
+      }
+      await this.releaseOrderBenefits(order)
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
