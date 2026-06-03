@@ -1,0 +1,101 @@
+export type ModerationCategory = 'pii' | 'spam' | 'toxic' | 'medical_harm' | 'user_report'
+export type ModerationSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export interface ModerationResult {
+  categories: ModerationCategory[]
+  severity: ModerationSeverity
+  confidence: 'low' | 'medium' | 'high'
+  reasons: string[]
+}
+
+const URL_REGEX = /(https?:\/\/\S+|www\.[^\s]+)/gi
+const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
+
+// VN phone numbers (very rough): 0xxxxxxxxx or +84xxxxxxxxx
+const PHONE_REGEX = /\b(\+84|0)(\d{9})\b/g
+
+function countMatches(text: string, regex: RegExp): number {
+  const m = text.match(regex)
+  return m ? m.length : 0
+}
+
+function normalize(text: string): string {
+  return (text || '').toLowerCase().trim()
+}
+
+export function moderateTextRuleBased(rawText: string): ModerationResult {
+  const text = normalize(rawText)
+  const reasons: string[] = []
+  const categories: Set<ModerationCategory> = new Set()
+
+  if (!text) {
+    return { categories: [], severity: 'low', confidence: 'high', reasons: [] }
+  }
+
+  // PII
+  if (countMatches(text, PHONE_REGEX) > 0) {
+    categories.add('pii')
+    reasons.push('Phát hiện số điện thoại trong nội dung.')
+  }
+  if (countMatches(text, EMAIL_REGEX) > 0) {
+    categories.add('pii')
+    reasons.push('Phát hiện email trong nội dung.')
+  }
+
+  // Spam heuristics
+  const urlCount = countMatches(text, URL_REGEX)
+  if (urlCount >= 2) {
+    categories.add('spam')
+    reasons.push('Có nhiều liên kết trong một tin nhắn.')
+  }
+  if (text.length > 600 && urlCount >= 1) {
+    categories.add('spam')
+    reasons.push('Tin nhắn dài bất thường kèm liên kết.')
+  }
+
+  // Toxic (minimal keyword list; expand later)
+  const toxicKeywords = ['đồ ngu', 'ngu quá', 'óc chó', 'cút', 'đ*', 'dm', 'dmm', 'clm']
+  if (toxicKeywords.some((k) => text.includes(k))) {
+    categories.add('toxic')
+    reasons.push('Ngôn từ có dấu hiệu xúc phạm/quấy rối.')
+  }
+
+  // Medical harm (heuristics)
+  const harmSignals = ['tự ý', 'tăng liều', 'gấp đôi', 'không cần bác sĩ', 'bỏ thuốc', 'ngưng thuốc', 'uống liều']
+  const dosageSignals = ['viên', 'ống', 'ml', 'mg', 'g', 'lần/ngày', 'lần một ngày', 'mỗi ngày']
+  const hasNumber = /\b\d{1,3}\b/.test(text)
+  const harm = harmSignals.some((s) => text.includes(s))
+  const dosage = dosageSignals.some((s) => text.includes(s))
+  if (harm && (hasNumber || dosage)) {
+    categories.add('medical_harm')
+    reasons.push('Có dấu hiệu hướng dẫn dùng thuốc/liều lượng có thể gây nguy hiểm.')
+  }
+
+  // Severity mapping (per your choice: auto hide for HIGH)
+  let severity: ModerationSeverity = 'low'
+  let confidence: 'low' | 'medium' | 'high' = 'high'
+
+  if (categories.has('medical_harm')) {
+    severity = 'high'
+    confidence = 'medium'
+  }
+  if (categories.has('pii')) {
+    severity = 'high'
+    confidence = 'high'
+  }
+  if (categories.has('spam') && severity === 'low') {
+    severity = 'medium'
+    confidence = 'medium'
+  }
+  if (categories.has('toxic') && severity === 'low') {
+    severity = 'medium'
+    confidence = 'medium'
+  }
+
+  return {
+    categories: Array.from(categories),
+    severity,
+    confidence,
+    reasons
+  }
+}

@@ -587,6 +587,8 @@ export const ARTICLES_MESSAGES = {
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
   SORT_BY_INVALID: 'Sort by must be createdAt, publishedAt, viewCount, or title',
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
+  ARTICLE_PERMISSION_DENIED: 'You do not have permission to manage this article',
+  ARTICLE_PUBLISH_PERMISSION_DENIED: 'Only admin can publish, archive, feature, or pin articles',
 
   // Success Messages
   CREATE_ARTICLE_SUCCESS: 'Article created successfully',
@@ -597,7 +599,13 @@ export const ARTICLES_MESSAGES = {
   PUBLISH_ARTICLE_SUCCESS: 'Article published successfully',
   ARCHIVE_ARTICLE_SUCCESS: 'Article archived successfully',
   INCREMENT_VIEW_SUCCESS: 'Article view count updated',
-  GET_RELATED_ARTICLES_SUCCESS: 'Get related articles successfully'
+  GET_RELATED_ARTICLES_SUCCESS: 'Get related articles successfully',
+  GET_RELATED_PRODUCTS_SUCCESS: 'Get related products successfully',
+  TRACK_JOURNEY_EVENT_SUCCESS: 'Article journey event tracked successfully',
+  GET_JOURNEY_ANALYTICS_SUCCESS: 'Get article journey analytics successfully',
+  ARTICLE_AI_ASSIST_SUCCESS: 'Article AI assistance generated successfully',
+  ARTICLE_AI_ASK_SUCCESS: 'Article AI answer generated successfully',
+  GET_PERSONALIZED_ARTICLES_SUCCESS: 'Get personalized articles successfully'
 } as const
 
 export const HEALTH_CATEGORIES_MESSAGES = {
