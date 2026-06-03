@@ -30,6 +30,7 @@ services:
       TYPESENSE_PORT: 8108
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
+      CHAT_AI_URL: ${CHAT_AI_URL:-http://host.docker.internal:8003}
       REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads
