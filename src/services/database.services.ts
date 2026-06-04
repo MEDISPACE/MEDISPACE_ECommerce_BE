@@ -24,10 +24,16 @@ import Campaign from '~/models/schemas/Campaign.schema'
 import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
 import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
 import Notification from '~/models/schemas/Notification.schema'
+import {
+  ensureCriticalLoyaltyCouponIndexes,
+  verifyCriticalLoyaltyCouponIndexes
+} from './loyaltyCouponIndexes.services'
 
 config()
 
-const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
+const uri =
+  process.env.MONGODB_URI ||
+  `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
 
 class DatabaseService {
   private client: MongoClient
@@ -56,9 +62,15 @@ class DatabaseService {
       try {
         await collection.createIndex(indexSpec, { background: true, ...options })
       } catch (error: any) {
-        // Ignore duplicate key errors (index already exists or duplicate data)
-        if (error.code !== 11000 && error.code !== 85) {
-          // Silent - index already exists or duplicate data
+        if (error.code === 11000 || error.code === 85) {
+          console.warn('⚠️ Non-critical MongoDB index was not created:', {
+            collection: collection.collectionName,
+            indexSpec,
+            code: error.code,
+            message: error.message
+          })
+        } else {
+          throw error
         }
       }
     }
@@ -97,6 +109,7 @@ class DatabaseService {
 
       // CouponRedemptions collection indexes
       await safeCreateIndex(this.couponRedemptions, { couponId: 1, userId: 1 })
+      await safeCreateIndex(this.couponRedemptions, { couponCode: 1, userId: 1, orderId: 1 }, { unique: true })
       await safeCreateIndex(this.couponRedemptions, { orderId: 1 })
       await safeCreateIndex(this.couponRedemptions, { userId: 1, createdAt: -1 })
 
@@ -112,8 +125,10 @@ class DatabaseService {
       // LoyaltyTransactions collection indexes
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, createdAt: -1 })
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, type: 1 })
-      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, orderId: 1, type: 1 })
       await safeCreateIndex(this.loyaltyTransactions, { type: 1, isExpired: 1, expiresAt: 1 })
+
+      await ensureCriticalLoyaltyCouponIndexes(this.db)
+      await verifyCriticalLoyaltyCouponIndexes(this.db)
 
       // Notifications collection indexes
       await safeCreateIndex(this.notifications, { userId: 1, isRead: 1, createdAt: -1 })
@@ -145,7 +160,8 @@ class DatabaseService {
       await safeCreateIndex(this.moderationAiJobs, { messageId: 1, promptVersion: 1 }, { unique: true })
 
     } catch (error) {
-      // Silent - indexes may already exist
+      console.error('❌ MongoDB index creation/verification failed:', error)
+      throw error
     }
   }
   get users(): Collection<User> {
