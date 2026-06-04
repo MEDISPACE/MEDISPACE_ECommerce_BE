@@ -67,11 +67,9 @@ class CouponService {
       }
     }
 
-    // 5. Kiểm tra giới hạn số lần mỗi user
-    const userUsageCount = await databaseService.couponRedemptions.countDocuments({
-      couponId: coupon._id,
-      userId
-    })
+    // 5. Kiểm tra giới hạn số lần mỗi user.
+    // userUsageCounts là source of truth sau migration/backfill; couponRedemptions chỉ là audit trail.
+    const userUsageCount = coupon.userUsageCounts?.[userId.toString()] || 0
     if (userUsageCount >= coupon.perUserLimit) {
       return { isValid: false, discountAmount: 0, message: `Bạn đã sử dụng mã này ${coupon.perUserLimit} lần (đã đạt giới hạn).`, discountType: null }
     }
@@ -280,6 +278,7 @@ class CouponService {
     discountAmount: number
   ) {
     const upperCode = couponCode.toUpperCase()
+    const userUsagePath = `userUsageCounts.${userId.toString()}`
 
     const existingRedemption = await databaseService.couponRedemptions.findOne({
       couponCode: upperCode,
@@ -290,19 +289,32 @@ class CouponService {
       return
     }
 
-    // Atomic: chỉ increment nếu còn lượt dùng (tránh race condition)
+    // Atomic: chỉ increment nếu còn tổng lượt và còn lượt theo user.
+    // userUsageCounts.<userId> là counter denormalized để tránh race condition giữa countDocuments và insert.
     const coupon = await databaseService.coupons.findOneAndUpdate(
       {
         code: upperCode,
         isActive: true,
-        $or: [
-          { totalUsageLimit: { $exists: false } },
-          { totalUsageLimit: { $eq: undefined as any } },
-          { $expr: { $lt: ['$currentUsageCount', '$totalUsageLimit'] } }
+        $and: [
+          {
+            $or: [
+              { totalUsageLimit: { $exists: false } },
+              { totalUsageLimit: { $eq: undefined as any } },
+              { $expr: { $lt: ['$currentUsageCount', '$totalUsageLimit'] } }
+            ]
+          },
+          {
+            $expr: {
+              $lt: [
+                { $ifNull: [`$${userUsagePath}`, 0] },
+                '$perUserLimit'
+              ]
+            }
+          }
         ]
       } as any, // cast needed: MongoDB $expr not fully typed in driver
       {
-        $inc: { currentUsageCount: 1 },
+        $inc: { currentUsageCount: 1, [userUsagePath]: 1 },
         $set: { updatedAt: new Date() }
       },
       { returnDocument: 'after' }
@@ -310,24 +322,7 @@ class CouponService {
 
     if (!coupon) {
       throw new ErrorWithStatus({
-        message: `Mã giảm giá ${upperCode} vừa hết lượt hoặc đã bị vô hiệu hóa. Vui lòng kiểm tra lại đơn hàng.`,
-        status: HTTP_STATUS.CONFLICT
-      })
-    }
-
-    // Kiểm tra per-user limit atomically (dùng unique index nếu có)
-    const userUsageCount = await databaseService.couponRedemptions.countDocuments({
-      couponId: coupon._id,
-      userId
-    })
-    if (userUsageCount >= coupon.perUserLimit) {
-      // Rollback increment
-      await databaseService.coupons.updateOne(
-        { _id: coupon._id },
-        { $inc: { currentUsageCount: -1 } }
-      )
-      throw new ErrorWithStatus({
-        message: `Bạn đã đạt giới hạn sử dụng mã ${upperCode}.`,
+        message: `Mã giảm giá ${upperCode} vừa hết lượt, đã đạt giới hạn tài khoản hoặc đã bị vô hiệu hóa. Vui lòng kiểm tra lại đơn hàng.`,
         status: HTTP_STATUS.CONFLICT
       })
     }
@@ -340,7 +335,25 @@ class CouponService {
       orderId,
       discountAmount
     })
-    await databaseService.couponRedemptions.insertOne(redemption)
+    try {
+      await databaseService.couponRedemptions.insertOne(redemption)
+    } catch (error: any) {
+      await databaseService.coupons.updateOne(
+        { _id: coupon._id },
+        [
+          {
+            $set: {
+              currentUsageCount: { $max: [0, { $subtract: ['$currentUsageCount', 1] }] },
+              [userUsagePath]: { $max: [0, { $subtract: [{ $ifNull: [`$${userUsagePath}`, 0] }, 1] }] },
+              updatedAt: new Date()
+            }
+          }
+        ] as any
+      )
+
+      if (error?.code === 11000) return
+      throw error
+    }
   }
 
   /**
@@ -352,9 +365,18 @@ class CouponService {
     if (!redemptions.length) return { releasedCount: 0 }
 
     for (const redemption of redemptions) {
+      const userUsagePath = `userUsageCounts.${redemption.userId.toString()}`
       await databaseService.coupons.updateOne(
-        { _id: redemption.couponId, currentUsageCount: { $gt: 0 } },
-        { $inc: { currentUsageCount: -1 }, $set: { updatedAt: new Date() } }
+        { _id: redemption.couponId },
+        [
+          {
+            $set: {
+              currentUsageCount: { $max: [0, { $subtract: ['$currentUsageCount', 1] }] },
+              [userUsagePath]: { $max: [0, { $subtract: [{ $ifNull: [`$${userUsagePath}`, 0] }, 1] }] },
+              updatedAt: new Date()
+            }
+          }
+        ] as any
       )
     }
 
