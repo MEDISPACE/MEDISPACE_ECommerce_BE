@@ -22,6 +22,7 @@ export interface CouponType_Schema {
   totalUsageLimit?: number // Tổng số lần dùng tối đa (null = không giới hạn)
   perUserLimit: number // Mỗi user được dùng tối đa N lần (default 1)
   currentUsageCount: number // Số lần đã dùng
+  userUsageCounts?: Record<string, number> // Counter theo userId, dùng để reserve coupon atomic
 
   // Đối tượng mục tiêu
   isPublic: boolean // true = hiển thị cho tất cả, false = chỉ người có link/code
@@ -55,6 +56,7 @@ export default class Coupon {
   totalUsageLimit?: number
   perUserLimit: number
   currentUsageCount: number
+  userUsageCounts: Record<string, number>
 
   isPublic: boolean
   targetUserIds?: ObjectId[]
@@ -86,6 +88,7 @@ export default class Coupon {
     this.totalUsageLimit = coupon.totalUsageLimit
     this.perUserLimit = coupon.perUserLimit || 1
     this.currentUsageCount = coupon.currentUsageCount || 0
+    this.userUsageCounts = coupon.userUsageCounts || {}
 
     this.isPublic = coupon.isPublic !== undefined ? coupon.isPublic : true
     this.targetUserIds = coupon.targetUserIds

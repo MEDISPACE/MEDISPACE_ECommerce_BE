@@ -7,6 +7,7 @@ import { UserRole, UserStatus } from '~/constants/enum'
 import { config } from 'dotenv'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
+import orderService from './orders.services'
 
 config()
 
@@ -804,63 +805,7 @@ class AdminService {
       trackingNumber?: string
     }
   ) {
-    // Get current order to check payment method
-    const order = await databaseService.orders.findOne({ _id: new ObjectId(orderId) })
-
-    if (!order) {
-      throw new Error('Order not found')
-    }
-
-    const updateData: Record<string, unknown> = {
-      orderStatus: data.status,
-      updatedAt: new Date()
-    }
-
-    if (data.notes) {
-      updateData.notes = data.notes
-    }
-
-    if (data.trackingNumber) {
-      updateData.trackingNumber = data.trackingNumber
-    }
-
-    if (data.status === 'delivered') {
-      updateData.deliveredAt = new Date()
-
-      // Auto-update payment status for COD orders only
-      if (order.paymentMethod === 'cod' && order.paymentStatus === 'pending') {
-        updateData.paymentStatus = 'paid'
-        updateData.paidAt = new Date()
-      }
-    }
-
-    // Restore stock when order is cancelled
-    if (data.status === 'cancelled' && order.orderStatus !== 'cancelled') {
-      for (const item of order.items || []) {
-        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
-        if (product) {
-          const variant = product.priceVariants?.find((v: { unit: string }) => v.unit === item.unit)
-          const quantityPerUnit = (variant as { quantityPerUnit?: number })?.quantityPerUnit || 1
-          const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne(
-            { _id: new ObjectId(item.productId) },
-            { $inc: { stockQuantity: stockToRestore } }
-          )
-        }
-      }
-    }
-
-    const result = await databaseService.orders.findOneAndUpdate(
-      { _id: new ObjectId(orderId) },
-      { $set: updateData },
-      { returnDocument: 'after' }
-    )
-
-    if (!result) {
-      throw new Error('Order not found')
-    }
-
-    return result
+    return orderService.updateOrderStatus(new ObjectId(orderId), data.status, data.trackingNumber, data.notes)
   }
 
   // ==================== PRESCRIPTION MANAGEMENT ====================
