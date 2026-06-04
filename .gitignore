@@ -13,5 +13,10 @@ coverage/
 !src/tests/setup.ts
 !src/tests/community.services.test.ts
 !src/tests/aiModeration.services.test.ts
+!src/tests/coupons.services.test.ts
+!src/tests/loyalty.services.test.ts
+!src/tests/orders.benefits.test.ts
+!src/tests/returnRequests.allocations.test.ts
+!src/tests/loyaltyCoupon.integration.test.ts
 
 note.txt
