@@ -17,6 +17,100 @@ import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 
 class OrderService {
+  private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
+
+  private assertOrderStatusTransition(order: any, newStatus: string) {
+    const currentStatus = order.orderStatus
+
+    if (currentStatus === newStatus) return
+
+    if (currentStatus === 'cancelled') {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng đã hủy, không thể chuyển trạng thái.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (currentStatus === 'returned') {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng đã hoàn trả, không thể chuyển trạng thái.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (currentStatus === 'delivered' && newStatus !== 'returned') {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng đã giao, không thể chuyển về trạng thái khác.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (newStatus === 'cancelled' && currentStatus === 'delivered') {
+      throw new ErrorWithStatus({
+        message: 'Không thể hủy đơn hàng đã giao.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (newStatus === 'delivered' && order.paymentStatus === 'failed') {
+      throw new ErrorWithStatus({
+        message: 'Không thể giao đơn hàng có thanh toán thất bại.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+  }
+
+  private shouldRestoreBenefitsOnCancel(order: any) {
+    return order.orderStatus !== 'cancelled' && order.orderStatus !== 'delivered' && order.orderStatus !== 'returned'
+  }
+
+  private allocateAmountAcrossItems(totalAmount: number, items: any[]) {
+    const normalizedTotal = Math.max(0, Math.floor(totalAmount || 0))
+    if (normalizedTotal <= 0 || items.length === 0) return items.map(() => 0)
+
+    const subtotal = items.reduce((sum, item) => sum + Math.max(0, item.totalPrice || 0), 0)
+    if (subtotal <= 0) return items.map(() => 0)
+
+    const allocations = items.map((item) => Math.floor((normalizedTotal * Math.max(0, item.totalPrice || 0)) / subtotal))
+    let remainder = normalizedTotal - allocations.reduce((sum, amount) => sum + amount, 0)
+
+    for (let i = 0; i < allocations.length && remainder > 0; i += 1) {
+      if ((items[i].totalPrice || 0) > 0) {
+        allocations[i] += 1
+        remainder -= 1
+      }
+    }
+
+    return allocations
+  }
+
+  private attachBenefitAllocations(items: any[], appliedCoupons: any[], pointsRedeemAmount: number) {
+    const couponAllocationsByItem = items.map(() => [] as any[])
+    const discountTotals = items.map(() => 0)
+
+    for (const coupon of appliedCoupons.filter((c: any) => c.type !== 'free_shipping' && c.discountAmount > 0)) {
+      const allocations = this.allocateAmountAcrossItems(coupon.discountAmount, items)
+      allocations.forEach((amount, index) => {
+        if (amount <= 0) return
+        couponAllocationsByItem[index].push({
+          code: coupon.code,
+          type: coupon.type,
+          amount
+        })
+        discountTotals[index] += amount
+      })
+    }
+
+    const pointAllocations = this.allocateAmountAcrossItems(pointsRedeemAmount, items)
+
+    return items.map((item, index) => ({
+      ...item,
+      couponAllocations: couponAllocationsByItem[index],
+      discountAllocation: discountTotals[index],
+      pointsAllocation: pointAllocations[index]
+    }))
+  }
+
   private async restoreStockForOrder(order: any) {
     await this.restoreStockForItems(order.items || [])
   }
@@ -285,7 +379,14 @@ class OrderService {
     freeShippingApplied = appliedCoupons.some((c: any) => c.type === 'free_shipping')
 
     // Apply freeship coupon
+    let shippingDiscountAmount = 0
     if (freeShippingApplied) {
+      shippingDiscountAmount = shippingFee
+      appliedCoupons = appliedCoupons.map((coupon: any) =>
+        coupon.type === 'free_shipping'
+          ? { ...coupon, discountAmount: shippingDiscountAmount }
+          : coupon
+      )
       shippingFee = 0
     }
 
@@ -314,6 +415,8 @@ class OrderService {
       }
     }
 
+    orderItems = this.attachBenefitAllocations(orderItems, appliedCoupons, pointsRedeemAmount)
+
     const totalAmount = Math.max(0, subtotal + taxAmount + shippingFee - discountAmount - pointsRedeemAmount)
 
     // Check prescription requirement logic if needed
@@ -334,6 +437,7 @@ class OrderService {
       discountAmount,
       totalAmount,
       appliedCoupons,
+      shippingDiscountAmount,
       notes,
       estimatedDeliveryDate,
       pointsRedeemed,
@@ -576,6 +680,12 @@ class OrderService {
       })
     }
 
+    this.assertOrderStatusTransition(order, newStatus)
+
+    if (order.orderStatus === newStatus) {
+      return order
+    }
+
     // Update order
     const updateData: any = {
       orderStatus: newStatus,
@@ -614,7 +724,7 @@ class OrderService {
     }
 
     // Restore stock when order is cancelled
-    if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
+    if (newStatus === 'cancelled' && this.shouldRestoreBenefitsOnCancel(order)) {
       await this.restoreStockForOrder(order)
       await this.releaseOrderBenefits(order)
     }
@@ -651,6 +761,24 @@ class OrderService {
       })
     }
 
+    if (order.paymentStatus === newStatus) {
+      return order
+    }
+
+    if (newStatus === 'paid' && this.terminalOrderStatuses.has(order.orderStatus)) {
+      throw new ErrorWithStatus({
+        message: 'Không thể ghi nhận thanh toán cho đơn hàng đã kết thúc.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (newStatus === 'failed' && (order.paymentStatus === 'paid' || order.orderStatus === 'delivered' || order.orderStatus === 'returned')) {
+      throw new ErrorWithStatus({
+        message: 'Không thể đánh dấu thất bại cho đơn hàng đã thanh toán/giao/hoàn tất.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
     const updateData: any = {
       paymentStatus: newStatus,
       updatedAt: new Date()
@@ -670,7 +798,7 @@ class OrderService {
       updateData.cancelledAt = new Date()
       updateData.cancelReason = 'Thanh toán không thành công'
 
-      if (order.orderStatus !== 'cancelled' && order.orderStatus !== 'delivered') {
+      if (this.shouldRestoreBenefitsOnCancel(order)) {
         await this.restoreStockForOrder(order)
       }
       await this.releaseOrderBenefits(order)

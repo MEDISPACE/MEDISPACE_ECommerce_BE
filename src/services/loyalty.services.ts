@@ -124,7 +124,12 @@ class LoyaltyService {
       description: `Tích ${earnedPoints} điểm từ đơn hàng ${orderNumber}${multiplier > 1 ? ` (x${multiplier} hạng ${TIER_LABELS[account.tier]})` : ''}`,
       expiresAt
     })
-    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    try {
+      await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    } catch (error: any) {
+      if (error?.code === 11000) return
+      throw error
+    }
 
     // Cập nhật account
     const newTotalSpent = account.totalSpent + orderTotal
@@ -185,6 +190,15 @@ class LoyaltyService {
   ): Promise<number> {
     if (pointsToRedeem <= 0) return 0
 
+    const existingRedeem = await databaseService.loyaltyTransactions.findOne({
+      userId,
+      orderId,
+      type: 'redeem'
+    })
+    if (existingRedeem && existingRedeem.points < 0) {
+      return Math.abs(existingRedeem.points) * POINTS_TO_VND
+    }
+
     // Validate min redeem
     if (pointsToRedeem < POINTS_MIN_REDEEM) {
       throw new ErrorWithStatus({
@@ -229,7 +243,27 @@ class LoyaltyService {
       orderId,
       description: `Đổi ${pointsToRedeem.toLocaleString('vi-VN')} điểm giảm ${redeemAmount.toLocaleString('vi-VN')}đ cho đơn ${orderNumber}`
     })
-    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    try {
+      await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        const existing = await databaseService.loyaltyTransactions.findOne({
+          userId,
+          orderId,
+          type: 'redeem'
+        })
+        return existing && existing.points < 0 ? Math.abs(existing.points) * POINTS_TO_VND : 0
+      }
+
+      await databaseService.loyaltyAccounts.updateOne(
+        { userId },
+        {
+          $inc: { pointsBalance: pointsToRedeem, totalPointsRedeemed: -pointsToRedeem },
+          $set: { updatedAt: new Date() }
+        }
+      )
+      throw error
+    }
 
     return redeemAmount
   }
@@ -277,7 +311,23 @@ class LoyaltyService {
       orderId,
       description: `Hoàn điểm đã đổi do đơn ${orderNumber} không hoàn tất`
     })
-    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    try {
+      await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    } catch (error: any) {
+      if (error?.code === 11000) return
+
+      await databaseService.loyaltyAccounts.updateOne(
+        { userId },
+        {
+          $inc: {
+            pointsBalance: -pointsToRefund,
+            totalPointsRedeemed: pointsToRefund
+          },
+          $set: { updatedAt: new Date() }
+        }
+      )
+      throw error
+    }
   }
 
   // ============================
@@ -289,6 +339,13 @@ class LoyaltyService {
    */
   async revokePointsForReturn(userId: ObjectId, orderId: ObjectId, orderTotal: number, orderNumber: string) {
     const account = await this.getOrCreateAccount(userId)
+
+    const existingRevoke = await databaseService.loyaltyTransactions.findOne({
+      userId,
+      orderId,
+      type: 'revoke'
+    })
+    if (existingRevoke) return
 
     // Tìm transaction earn gốc
     const earnTx = await databaseService.loyaltyTransactions.findOne({
@@ -312,7 +369,12 @@ class LoyaltyService {
       orderId,
       description: `Thu hồi ${revokePoints} điểm do hoàn trả đơn ${orderNumber}`
     })
-    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    try {
+      await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    } catch (error: any) {
+      if (error?.code === 11000) return
+      throw error
+    }
 
     // Cập nhật account — cũng trừ totalSpent
     const newTotalSpent = Math.max(0, account.totalSpent - orderTotal)

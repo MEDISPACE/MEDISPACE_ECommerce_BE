@@ -72,6 +72,53 @@ interface ProcessRefundPayload {
 }
 
 class ReturnRequestService {
+  private calculateReturnedItemNetAmount(orderItem: any, returnQuantity: number) {
+    const quantityRatio = orderItem.quantity > 0 ? returnQuantity / orderItem.quantity : 0
+    const grossAmount = Math.floor((orderItem.unitPrice || 0) * returnQuantity)
+    const discountAllocation = Math.floor((orderItem.discountAllocation || 0) * quantityRatio)
+    const pointsAllocation = Math.floor((orderItem.pointsAllocation || 0) * quantityRatio)
+    const netRefundAmount = Math.max(0, grossAmount - discountAllocation - pointsAllocation)
+
+    return {
+      grossAmount,
+      discountAllocation,
+      pointsAllocation,
+      netRefundAmount
+    }
+  }
+
+  private calculateReturnedOrderAmounts(order: any, returnItems: any[]) {
+    return returnItems.reduce(
+      (totals, returnItem) => {
+        const orderItem = (order.items || []).find((item: any) =>
+          item.productId.toString() === returnItem.productId.toString() &&
+          item.unit === returnItem.unit
+        )
+        if (!orderItem) return totals
+
+        const amounts = this.calculateReturnedItemNetAmount(orderItem, returnItem.quantity)
+        totals.grossAmount += amounts.grossAmount
+        totals.discountAllocation += amounts.discountAllocation
+        totals.pointsAllocation += amounts.pointsAllocation
+        totals.netRefundAmount += amounts.netRefundAmount
+        return totals
+      },
+      { grossAmount: 0, discountAllocation: 0, pointsAllocation: 0, netRefundAmount: 0 }
+    )
+  }
+
+  private isFullReturn(order: any, returnItems: any[]) {
+    const returnedByLine = new Map<string, number>()
+    for (const item of returnItems) {
+      returnedByLine.set(`${item.productId.toString()}::${item.unit}`, (returnedByLine.get(`${item.productId.toString()}::${item.unit}`) || 0) + item.quantity)
+    }
+
+    return (order.items || []).every((item: any) => {
+      const key = `${item.productId.toString()}::${item.unit}`
+      return (returnedByLine.get(key) || 0) >= item.quantity
+    })
+  }
+
   /**
    * Create a new return request
    */
@@ -194,8 +241,8 @@ class ReturnRequestService {
         }
       }
 
-      const itemTotal = orderItem.unitPrice * item.quantity
-      totalRequestedAmount += itemTotal
+      const returnedAmounts = this.calculateReturnedItemNetAmount(orderItem, item.quantity)
+      totalRequestedAmount += returnedAmounts.netRefundAmount
 
       returnItems.push({
         productId: new ObjectId(item.productId),
@@ -205,7 +252,10 @@ class ReturnRequestService {
         unit: orderItem.unit,
         quantity: item.quantity,
         unitPrice: orderItem.unitPrice,
-        totalPrice: itemTotal,
+        totalPrice: returnedAmounts.grossAmount,
+        discountAllocation: returnedAmounts.discountAllocation,
+        pointsAllocation: returnedAmounts.pointsAllocation,
+        netRefundAmount: returnedAmounts.netRefundAmount,
         isPrescriptionProduct,
         returnReason: item.returnReason,
         reasonDetail: item.reasonDetail
@@ -525,15 +575,16 @@ class ReturnRequestService {
         try {
             const order = await databaseService.orders.findOne({ _id: request.orderId })
             if (order) {
+                const returnedAmounts = this.calculateReturnedOrderAmounts(order, request.items)
+                const fullReturn = this.isFullReturn(order, request.items)
+
                 await loyaltyService.revokePointsForReturn(
                     request.userId,
                     request.orderId,
-                    order.totalAmount,
+                    returnedAmounts.netRefundAmount,
                     order.orderNumber
                 )
-                const returnedItemCount = request.items.reduce((sum: number, item: any) => sum + item.quantity, 0)
-                const orderItemCount = (order.items || []).reduce((sum: number, item: any) => sum + item.quantity, 0)
-                if (returnedItemCount >= orderItemCount) {
+                if (fullReturn) {
                     await loyaltyService.refundRedeemedPointsForOrder(
                         request.userId,
                         request.orderId,
@@ -560,12 +611,14 @@ class ReturnRequestService {
     )
 
     // Update order payment status
+    const order = await databaseService.orders.findOne({ _id: request.orderId })
+    const fullReturn = order ? this.isFullReturn(order, request.items) : false
     await databaseService.orders.updateOne(
       { _id: request.orderId },
       {
         $set: {
-          paymentStatus: 'refunded',
-          orderStatus: 'returned',
+          paymentStatus: fullReturn ? 'refunded' : 'partially_refunded',
+          ...(fullReturn ? { orderStatus: 'returned' } : {}),
           updatedAt: new Date()
         }
       }

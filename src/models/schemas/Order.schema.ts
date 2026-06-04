@@ -12,6 +12,13 @@ export interface OrderItem {
   campaignId?: ObjectId  // Campaign ID
   prescriptionRequired: boolean
   image?: string
+  discountAllocation?: number
+  pointsAllocation?: number
+  couponAllocations?: {
+    code: string
+    type: string
+    amount: number
+  }[]
 }
 
 export interface ShippingAddress {
@@ -52,6 +59,7 @@ export interface OrderType {
   discountAmount: number
   totalAmount: number
   appliedCoupons?: OrderAppliedCoupon[]
+  shippingDiscountAmount?: number
 
   notes?: string
   trackingNumber?: string
@@ -87,6 +95,7 @@ export default class Order {
   discountAmount: number
   totalAmount: number
   appliedCoupons: OrderAppliedCoupon[]
+  shippingDiscountAmount: number
 
   notes?: string
   trackingNumber?: string
@@ -123,6 +132,7 @@ export default class Order {
     this.discountAmount = order.discountAmount || 0
     this.totalAmount = order.totalAmount
     this.appliedCoupons = order.appliedCoupons || []
+    this.shippingDiscountAmount = order.shippingDiscountAmount || 0
 
     this.notes = order.notes
     this.trackingNumber = order.trackingNumber
