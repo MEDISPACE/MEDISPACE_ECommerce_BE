@@ -49,6 +49,9 @@ export interface ReturnItem {
   quantity: number
   unitPrice: number
   totalPrice: number
+  discountAllocation?: number
+  pointsAllocation?: number
+  netRefundAmount?: number
   isPrescriptionProduct: boolean // Thuốc kê đơn?
   returnReason: ReturnReason
   reasonDetail?: string

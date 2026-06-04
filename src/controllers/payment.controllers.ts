@@ -49,6 +49,11 @@ export const vnpayReturnController = async (req: Request, res: Response) => {
         await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
         await handlePostPaymentSuccess(new ObjectId(result.orderId))
       }
+    } else if (!result.isSuccess && result.orderId && ObjectId.isValid(result.orderId)) {
+      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
+      if (existingOrder && existingOrder.paymentStatus === 'pending') {
+        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'failed')
+      }
     }
 
     const redirectOrderId = result.orderId || ''
@@ -124,6 +129,11 @@ export const payOSReturnController = async (req: Request, res: Response) => {
       if (existingOrder && existingOrder.paymentStatus !== 'paid') {
         await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
         await handlePostPaymentSuccess(new ObjectId(result.orderId))
+      }
+    } else if (!result.isSuccess && result.orderId && ObjectId.isValid(result.orderId)) {
+      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
+      if (existingOrder && existingOrder.paymentStatus === 'pending') {
+        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'failed')
       }
     }
 
