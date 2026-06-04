@@ -413,8 +413,26 @@ class CouponService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
     }
 
-    // Không cho sửa code
-    const { code: _code, currentUsageCount: _count, createdBy: _by, createdAt: _at, ...updateData } = data
+    // Không cho sửa các trường counter/audit do hệ thống quản lý
+    const {
+      code: _code,
+      currentUsageCount: _count,
+      userUsageCounts: _usage,
+      createdBy: _by,
+      createdAt: _at,
+      ...updateData
+    } = data
+
+    if (
+      updateData.totalUsageLimit !== undefined &&
+      updateData.totalUsageLimit !== null &&
+      Number(updateData.totalUsageLimit) < (coupon.currentUsageCount || 0)
+    ) {
+      throw new ErrorWithStatus({
+        message: `Tổng lượt dùng không thể nhỏ hơn số lượt đã dùng (${coupon.currentUsageCount || 0}).`,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
 
     await databaseService.coupons.updateOne(
       { _id: couponId },
@@ -426,6 +444,18 @@ class CouponService {
   }
 
   async deleteCoupon(couponId: ObjectId) {
+    const coupon = await databaseService.coupons.findOne({ _id: couponId })
+    if (!coupon) {
+      throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    if ((coupon.currentUsageCount || 0) > 0) {
+      throw new ErrorWithStatus({
+        message: 'Coupon đã có lượt sử dụng. Vui lòng tắt coupon thay vì xóa để giữ lịch sử đối soát.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
     const result = await databaseService.coupons.deleteOne({ _id: couponId })
     if (result.deletedCount === 0) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
