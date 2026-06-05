@@ -21,6 +21,17 @@ const mockTransactionFindOne = vi.fn()
 const mockTransactionInsertOne = vi.fn()
 const mockTransactionUpdateOne = vi.fn()
 const mockTransactionFind = vi.fn()
+const mockProgramFind = vi.fn()
+const mockProgramFindOne = vi.fn()
+const mockProgramInsertOne = vi.fn()
+const mockProgramUpdateOne = vi.fn()
+const mockProgramUpdateMany = vi.fn()
+
+const mockProgramFindResult = (docs: any[] = []) => ({
+  sort: vi.fn().mockReturnThis(),
+  limit: vi.fn().mockReturnThis(),
+  toArray: vi.fn().mockResolvedValue(docs)
+})
 
 vi.mock('~/services/database.services', () => {
   return {
@@ -37,6 +48,13 @@ vi.mock('~/services/database.services', () => {
         insertOne: mockTransactionInsertOne,
         updateOne: mockTransactionUpdateOne,
         find: mockTransactionFind
+      },
+      loyaltyProgramConfigs: {
+        find: mockProgramFind,
+        findOne: mockProgramFindOne,
+        insertOne: mockProgramInsertOne,
+        updateOne: mockProgramUpdateOne,
+        updateMany: mockProgramUpdateMany
       }
     }
   }
@@ -68,6 +86,7 @@ const makeAccount = (overrides = {}) => ({
 describe('LoyaltyService', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mockProgramFind.mockReturnValue(mockProgramFindResult([]))
   })
 
   describe('getOrCreateAccount()', () => {
@@ -225,6 +244,69 @@ describe('LoyaltyService', () => {
           $set: { updatedAt: expect.any(Date) }
         }
       )
+    })
+  })
+
+  describe('loyalty program config', () => {
+    it('previewRedeem dùng published config thay vì hard-code env', async () => {
+      mockProgramFind.mockReturnValueOnce(mockProgramFindResult([
+        {
+          version: 2,
+          status: 'published',
+          pointsPerVnd: 500,
+          pointsToVnd: 2,
+          maxRedeemRatio: 0.5,
+          minRedeem: 100,
+          expiryDays: 180,
+          tiers: [
+            { code: 'member', label: 'Thành viên', minTotalSpent: 0, multiplier: 1 },
+            { code: 'silver', label: 'Bạc', minTotalSpent: 1000000, multiplier: 1.1 },
+            { code: 'gold', label: 'Vàng', minTotalSpent: 5000000, multiplier: 1.3 },
+            { code: 'platinum', label: 'Bạch kim', minTotalSpent: 20000000, multiplier: 1.8 }
+          ]
+        }
+      ]))
+
+      const result = await loyaltyService.previewRedeem(1000, 10000)
+
+      expect(result.maxRedeemAmount).toBe(2000)
+      expect(result.minRedeem).toBe(100)
+      expect(result.maxRedeemRatio).toBe(0.5)
+      expect(result.configVersion).toBe(2)
+    })
+
+    it('publish bản nháp sẽ archive config published cũ và publish draft mới', async () => {
+      const adminId = new ObjectId()
+      const draft = {
+        _id: new ObjectId(),
+        version: 3,
+        status: 'draft',
+        pointsPerVnd: 1000,
+        pointsToVnd: 1,
+        maxRedeemRatio: 0.3,
+        minRedeem: 10000,
+        expiryDays: 365,
+        tiers: [
+          { code: 'member', label: 'Thành viên', minTotalSpent: 0, multiplier: 1 },
+          { code: 'silver', label: 'Bạc', minTotalSpent: 2000000, multiplier: 1.2 },
+          { code: 'gold', label: 'Vàng', minTotalSpent: 10000000, multiplier: 1.5 },
+          { code: 'platinum', label: 'Bạch kim', minTotalSpent: 50000000, multiplier: 2 }
+        ]
+      }
+      mockProgramFind.mockReturnValueOnce(mockProgramFindResult([draft]))
+      mockProgramFindOne.mockResolvedValueOnce({ ...draft, status: 'published' })
+
+      const result = await loyaltyService.publishDraftProgramConfig(adminId)
+
+      expect(mockProgramUpdateMany).toHaveBeenCalledWith(
+        { status: 'published' },
+        expect.objectContaining({ $set: expect.objectContaining({ status: 'archived', updatedBy: adminId }) })
+      )
+      expect(mockProgramUpdateOne).toHaveBeenCalledWith(
+        { _id: draft._id },
+        expect.objectContaining({ $set: expect.objectContaining({ status: 'published', publishedBy: adminId }) })
+      )
+      expect(result?.status).toBe('published')
     })
   })
 

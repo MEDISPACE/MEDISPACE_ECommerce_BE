@@ -23,6 +23,7 @@ import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
 import Campaign from '~/models/schemas/Campaign.schema'
 import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
 import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
+import LoyaltyProgramConfig from '~/models/schemas/LoyaltyProgramConfig.schema'
 import Notification from '~/models/schemas/Notification.schema'
 import {
   ensureCriticalLoyaltyCouponIndexes,
@@ -134,6 +135,8 @@ class DatabaseService {
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, createdAt: -1 })
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, type: 1 })
       await safeCreateIndex(this.loyaltyTransactions, { type: 1, isExpired: 1, expiresAt: 1 })
+      await safeCreateIndex(this.loyaltyProgramConfigs, { status: 1, version: -1 })
+      await safeCreateIndex(this.loyaltyProgramConfigs, { version: 1 }, { unique: true })
 
       await ensureCriticalLoyaltyCouponIndexes(this.db)
       await verifyCriticalLoyaltyCouponIndexes(this.db)
@@ -243,6 +246,9 @@ class DatabaseService {
   }
   get loyaltyTransactions(): Collection<LoyaltyTransaction> {
     return this.db.collection(process.env.DB_LOYALTY_TRANSACTIONS_COLLECTION as string)
+  }
+  get loyaltyProgramConfigs(): Collection<LoyaltyProgramConfig> {
+    return this.db.collection(process.env.DB_LOYALTY_PROGRAM_CONFIGS_COLLECTION || 'loyalty_program_configs')
   }
   get notifications(): Collection<Notification> {
     return this.db.collection('notifications')
