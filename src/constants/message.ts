@@ -172,6 +172,7 @@ export const PRODUCTS_MESSAGES = {
   // Product Messages
   PRODUCT_NOT_FOUND: 'Product not found',
   PRODUCT_ALREADY_EXISTS: 'Product with this name or SKU already exists',
+  PRODUCT_SLUG_ALREADY_EXISTS: 'Product slug already exists',
   SKU_ALREADY_EXISTS: 'SKU already exists',
   BARCODE_ALREADY_EXISTS: 'Barcode already exists',
   CATEGORY_NOT_FOUND: 'Category not found',
