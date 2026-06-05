@@ -5,7 +5,10 @@ import {
   previewRedeemController,
   getAdminLoyaltyStatsController,
   getAdminLoyaltyAccountsController,
-  adjustAdminLoyaltyPointsController
+  adjustAdminLoyaltyPointsController,
+  getAdminLoyaltyProgramConfigController,
+  saveAdminLoyaltyProgramDraftController,
+  publishAdminLoyaltyProgramConfigController
 } from '~/controllers/loyalty.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -83,6 +86,30 @@ loyaltyRouter.post(
   verifiedUserValidator,
   adminRequired,
   wrapRequestHandler(adjustAdminLoyaltyPointsController)
+)
+
+loyaltyRouter.get(
+  '/admin/program-config',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getAdminLoyaltyProgramConfigController)
+)
+
+loyaltyRouter.put(
+  '/admin/program-config/draft',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(saveAdminLoyaltyProgramDraftController)
+)
+
+loyaltyRouter.post(
+  '/admin/program-config/publish',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(publishAdminLoyaltyProgramConfigController)
 )
 
 export default loyaltyRouter

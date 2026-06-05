@@ -39,10 +39,10 @@ class ProductsService {
     return `${prefix}-${productCode}-${timestamp}`
   }
 
-  // Check if product exists by name, SKU, or barcode
-  async checkProductExists(name: string, sku: string, barcode?: string, excludeId?: ObjectId) {
-    const query: { $or: Array<{ name?: string; sku?: string; barcode?: string }>; _id?: { $ne: ObjectId } } = {
-      $or: [{ name }, { sku }]
+  // Check if product exists by name, slug, SKU, or barcode
+  async checkProductExists(name: string, slug: string, sku: string, barcode?: string, excludeId?: ObjectId) {
+    const query: { $or: Array<{ name?: string; slug?: string; sku?: string; barcode?: string }>; _id?: { $ne: ObjectId } } = {
+      $or: [{ name }, { slug }, { sku }]
     }
 
     if (barcode) {
@@ -58,6 +58,12 @@ class ProductsService {
       if (existingProduct.name === name) {
         throw new ErrorWithStatus({
           message: PRODUCTS_MESSAGES.PRODUCT_ALREADY_EXISTS,
+          status: HTTP_STATUS.CONFLICT
+        })
+      }
+      if (existingProduct.slug === slug) {
+        throw new ErrorWithStatus({
+          message: PRODUCTS_MESSAGES.PRODUCT_SLUG_ALREADY_EXISTS,
           status: HTTP_STATUS.CONFLICT
         })
       }
@@ -113,7 +119,7 @@ class ProductsService {
     const sku = payload.sku || this.generateSKU(payload.name, brand?.name)
 
     // Check product exists
-    await this.checkProductExists(payload.name, sku, payload.barcode)
+    await this.checkProductExists(payload.name, slug, sku, payload.barcode)
 
     const productId = new ObjectId()
     const product = new Product({
@@ -530,12 +536,13 @@ class ProductsService {
       await this.validateBrand(payload.brandId)
     }
 
-    // Check name, SKU, barcode uniqueness if changed
-    if (payload.name || payload.sku || payload.barcode) {
+    // Check name, slug, SKU, barcode uniqueness if changed
+    if (payload.name || payload.slug || payload.sku || payload.barcode) {
       const newName = payload.name || product.name
+      const newSlug = payload.slug || (payload.name ? this.generateSlug(payload.name) : product.slug)
       const newSKU = payload.sku || product.sku
       const newBarcode = payload.barcode || product.barcode
-      await this.checkProductExists(newName, newSKU, newBarcode, new ObjectId(productId))
+      await this.checkProductExists(newName, newSlug, newSKU, newBarcode, new ObjectId(productId))
     }
 
     const updateData: Record<string, unknown> = {

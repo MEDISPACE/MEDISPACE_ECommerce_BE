@@ -47,7 +47,7 @@ export const previewRedeemController = async (req: Request, res: Response) => {
   await loyaltyService.processExpiredPoints(userId)
 
   const account = await loyaltyService.getOrCreateAccount(userId)
-  const result = loyaltyService.previewRedeem(account.pointsBalance, orderSubtotal)
+  const result = await loyaltyService.previewRedeem(account.pointsBalance, orderSubtotal)
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Preview đổi điểm thành công.',
@@ -166,6 +166,35 @@ export const adjustAdminLoyaltyPointsController = async (req: Request, res: Resp
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Điều chỉnh điểm thành công.',
+    result
+  })
+}
+
+// GET /loyalty/admin/program-config — Admin xem cấu hình loyalty program
+export const getAdminLoyaltyProgramConfigController = async (req: Request, res: Response) => {
+  const result = await loyaltyService.getAdminProgramConfig()
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Cấu hình loyalty program.',
+    result
+  })
+}
+
+// PUT /loyalty/admin/program-config/draft — Admin lưu bản nháp cấu hình loyalty
+export const saveAdminLoyaltyProgramDraftController = async (req: Request, res: Response) => {
+  const adminId = new ObjectId(req.decoded_authorization!.userId)
+  const result = await loyaltyService.saveDraftProgramConfig(req.body, adminId)
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Đã lưu bản nháp cấu hình loyalty.',
+    result
+  })
+}
+
+// POST /loyalty/admin/program-config/publish — Admin publish bản nháp cấu hình loyalty
+export const publishAdminLoyaltyProgramConfigController = async (req: Request, res: Response) => {
+  const adminId = new ObjectId(req.decoded_authorization!.userId)
+  const result = await loyaltyService.publishDraftProgramConfig(adminId)
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Đã publish cấu hình loyalty.',
     result
   })
 }
