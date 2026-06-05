@@ -68,8 +68,24 @@ function indexMatches(actual: Record<string, any>, expected: CriticalIndexDefini
   return true
 }
 
+async function listCollectionIndexes(db: Db, collectionName: string) {
+  try {
+    return await db.collection(collectionName).listIndexes().toArray()
+  } catch (error: any) {
+    if (error?.code === 26 || error?.codeName === 'NamespaceNotFound') {
+      return []
+    }
+    throw error
+  }
+}
+
 export async function ensureCriticalLoyaltyCouponIndexes(db: Db) {
   for (const definition of CRITICAL_LOYALTY_COUPON_INDEXES) {
+    const indexes = await listCollectionIndexes(db, definition.collection)
+    if (indexes.some((index) => indexMatches(index, definition))) {
+      continue
+    }
+
     await db.collection(definition.collection).createIndex(definition.keys, {
       background: true,
       ...definition.options
@@ -81,7 +97,7 @@ export async function verifyCriticalLoyaltyCouponIndexes(db: Db) {
   const missing: CriticalIndexDefinition[] = []
 
   for (const definition of CRITICAL_LOYALTY_COUPON_INDEXES) {
-    const indexes = await db.collection(definition.collection).listIndexes().toArray()
+    const indexes = await listCollectionIndexes(db, definition.collection)
     if (!indexes.some((index) => indexMatches(index, definition))) {
       missing.push(definition)
     }

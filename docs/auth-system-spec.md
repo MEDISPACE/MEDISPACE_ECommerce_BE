@@ -1,6 +1,6 @@
 # Đặc tả hệ thống Authentication & Authorization
 
-> **Phiên bản:** 1.0
+> **Phiên bản:** 1.1
 > **Cập nhật:** 2026-06-05
 > **Phạm vi:** Backend MEDISPACE E-Commerce + Frontend React + Socket.IO realtime
 > **Trạng thái:** Đã triển khai trên nhánh `feature/auth-flow-fixes`
@@ -289,6 +289,16 @@ POST /users/logout
 4. Controller: `clearCookie('refreshToken', ...)`.
 
 **`refreshTokenValidator` gán `req.refreshToken`**, đảm bảo controller đọc đúng giá trị refresh token đã validate.
+
+**FE logout UX rule:**
+
+- `AuthContext.logout()` là nơi duy nhất quyết định redirect sau logout.
+- Sau khi BE logout xong hoặc lỗi logout bị ignore, FE clear user state/local tokens, dispatch `auth-changed`, rồi dùng `window.location.replace('/')`.
+- Không dùng `window.location.href` để tránh push thêm history entry.
+- Không gọi thêm `navigate('/login')` ở layout sau khi gọi `logout()`.
+- Admin/pharmacist/account protected layouts chỉ redirect `/login` khi user truy cập route protected mà chưa đăng nhập, không redirect login trong logout handler.
+
+Lý do: nếu layout gọi `logout()` rồi gọi thêm `navigate('/login')`, trong khi `AuthContext.logout()` cũng redirect `/`, UI sẽ flash qua login khoảng 1 giây rồi quay về home. Đây là redirect kép và bị coi là UX lỗi.
 
 ### 5.7 Refresh Token (Token Rotation)
 
@@ -657,6 +667,9 @@ Lưu ý: codebase hiện có nhiều helper phân quyền (`adminRequired`, `adm
 | `src/contexts/AuthContext.tsx` | Auth state management, session restore, login/register/logout |
 | `src/services/authService.ts` | API calls cho auth endpoints |
 | `src/services/apiClient.ts` | Axios instance, interceptor 401 auto-refresh |
+| `src/components/layout/Header.tsx` | Customer logout entrypoint, gọi `logout()` và để AuthContext redirect |
+| `src/components/layout/AdminLayout.tsx` | Admin protected layout, logout handler không tự navigate login |
+| `src/components/layout/PharmacistLayout.tsx` | Pharmacist protected layout, logout handler không tự navigate login |
 | `src/routes/login.oauth.tsx` | OAuth callback handler |
 | `src/components/auth/VerifyEmailPage.tsx` | Email verification UI |
 
