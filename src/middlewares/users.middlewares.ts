@@ -8,7 +8,7 @@ import { verifyToken } from '~/utils/jwt'
 import { validate } from '~/utils/validation'
 import { NextFunction, Request, Response } from 'express'
 import { ObjectId } from 'mongodb'
-import { UserStatus } from '~/constants/enum'
+import { TokenType, UserStatus } from '~/constants/enum'
 import { TokenPayload } from '~/models/requests/User.request'
 import { USERS_MESSAGES } from '~/constants/message'
 import { hashPassword } from '~/utils/crypto'
@@ -35,6 +35,15 @@ const passwordSchema: ParamSchema = {
       minNumbers: 1,
       minSymbols: 1
     }
+  }
+}
+const passwordOnlySchema: ParamSchema = {
+  in: ['body'],
+  isString: {
+    errorMessage: USERS_MESSAGES.PASSWORD_MUST_BE_STRING
+  },
+  notEmpty: {
+    errorMessage: USERS_MESSAGES.PASSWORD_IS_REQUIRED
   }
 }
 const confirmPasswordSchema: ParamSchema = {
@@ -73,6 +82,12 @@ const forgotPasswordTokenSchema: ParamSchema = {
           token: value,
           secretOrPublicKey: process.env.JWT_SECRET_FORGOT_PASSWORD_TOKEN as string
         })
+        if (decodedForgotPasswordToken.tokenType !== TokenType.ForgotPasswordToken) {
+          throw new ErrorWithStatus({
+            message: USERS_MESSAGES.INVALID_FORGOT_PASSWORD_TOKEN,
+            status: HTTP_STATUS.UNAUTHORIZED
+          })
+        }
         const { userId } = decodedForgotPasswordToken
         const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
         if (!user) {
@@ -88,7 +103,10 @@ const forgotPasswordTokenSchema: ParamSchema = {
           })
         }
         req.decodedForgotPasswordToken = decodedForgotPasswordToken
-      } catch {
+      } catch (error) {
+        if (error instanceof ErrorWithStatus) {
+          throw error
+        }
         throw new ErrorWithStatus({
           message: USERS_MESSAGES.INVALID_FORGOT_PASSWORD_TOKEN,
           status: HTTP_STATUS.UNAUTHORIZED
@@ -189,12 +207,18 @@ export const loginValidator = validate(
             if (!user) {
               throw new Error(USERS_MESSAGES.EMAIL_OR_PASSWORD_IS_NOT_CORRECT)
             }
+            if (user.status === UserStatus.Banned) {
+              throw new ErrorWithStatus({
+                message: USERS_MESSAGES.USER_BANNED,
+                status: HTTP_STATUS.FORBIDDEN
+              })
+            }
             req.user = user
             return true
           }
         }
       },
-      password: passwordSchema
+      password: passwordOnlySchema
     },
     ['body']
   )
@@ -206,7 +230,7 @@ export const accessTokenValidator = validate(
         trim: true,
         custom: {
           options: async (value: string, { req }) => {
-            const access_token = value.split(' ')[1]
+            const access_token = value?.split(' ')[1]
             if (!access_token) {
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.ACCESS_TOKEN_IS_REQUIRED,
@@ -218,8 +242,32 @@ export const accessTokenValidator = validate(
                 token: access_token,
                 secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
               })
+              if (decoded_authorization.tokenType !== TokenType.AccessToken) {
+                throw new Error()
+              }
+              const user = await databaseService.users.findOne(
+                { _id: new ObjectId(decoded_authorization.userId) },
+                { projection: { role: 1, status: 1 } }
+              )
+              if (!user) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.USER_NOT_FOUND,
+                  status: HTTP_STATUS.UNAUTHORIZED
+                })
+              }
+              if (user.status === UserStatus.Banned) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.USER_BANNED,
+                  status: HTTP_STATUS.FORBIDDEN
+                })
+              }
+              decoded_authorization.verify = user.status
+              decoded_authorization.role = user.role
               ;(req as Request).decoded_authorization = decoded_authorization
-            } catch {
+            } catch (error) {
+              if (error instanceof ErrorWithStatus) {
+                throw error
+              }
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_ACCESS_TOKEN,
                 status: HTTP_STATUS.UNAUTHORIZED
@@ -254,13 +302,35 @@ export const refreshTokenValidator = validate(
                 verifyToken({ token: refreshToken, secretOrPublicKey: process.env.JWT_SECRET_REFRESH_TOKEN as string }),
                 databaseService.refreshTokens.findOne({ token: refreshToken })
               ])
+              if (decodedRefreshToken.tokenType !== TokenType.RefreshToken) {
+                throw new JsonWebTokenError('Invalid token type')
+              }
               if (refreshTokenDoc === null) {
                 throw new ErrorWithStatus({
                   message: USERS_MESSAGES.USED_REFRESH_TOKEN_OR_NOT_EXISTS,
                   status: HTTP_STATUS.UNAUTHORIZED
                 })
               }
+              const user = await databaseService.users.findOne(
+                { _id: new ObjectId(decodedRefreshToken.userId) },
+                { projection: { role: 1, status: 1 } }
+              )
+              if (!user) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.USER_NOT_FOUND,
+                  status: HTTP_STATUS.UNAUTHORIZED
+                })
+              }
+              if (user.status === UserStatus.Banned) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.USER_BANNED,
+                  status: HTTP_STATUS.FORBIDDEN
+                })
+              }
+              decodedRefreshToken.verify = user.status
+              decodedRefreshToken.role = user.role
               ;(req as Request).decodedRefreshToken = decodedRefreshToken
+              ;(req as Request).refreshToken = refreshToken
             } catch (error) {
               if (error instanceof JsonWebTokenError) {
                 throw new ErrorWithStatus({
@@ -296,6 +366,12 @@ export const emailVerifyTokenValidator = validate(
                 token: value,
                 secretOrPublicKey: process.env.JWT_SECRET_EMAIL_VERIFY_TOKEN as string
               })
+              if (decodedEmailVerifyToken.tokenType !== TokenType.EmailVerifyToken) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,
+                  status: HTTP_STATUS.UNAUTHORIZED
+                })
+              }
               const { userId } = decodedEmailVerifyToken
               const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
               if (!user) {
@@ -311,7 +387,10 @@ export const emailVerifyTokenValidator = validate(
                 })
               }
               ;(req as Request).decodedEmailVerifyToken = decodedEmailVerifyToken
-            } catch {
+            } catch (error) {
+              if (error instanceof ErrorWithStatus) {
+                throw error
+              }
               throw new ErrorWithStatus({
                 message: USERS_MESSAGES.INVALID_EMAIL_VERIFY_TOKEN,
                 status: HTTP_STATUS.UNAUTHORIZED
@@ -337,10 +416,9 @@ export const forgotPasswordValidator = validate(
         custom: {
           options: async (value, { req }) => {
             const user = await databaseService.users.findOne({ email: value })
-            if (!user) {
-              throw new Error(USERS_MESSAGES.EMAIL_NOT_FOUND)
+            if (user) {
+              req.user = user
             }
-            req.user = user
             return true
           }
         }
@@ -368,10 +446,9 @@ export const resetPasswordValidator = validate(
   )
 )
 export const verifiedUserValidator = (req: Request, res: Response, next: NextFunction) => {
-  // lấy trạng thái verify từ access token, không lấy từ database vì làm chậm, giảm hiệu suất
-  // nhưng như vậy cũng có khả năng không đảm bảo nếu user verify email ở thiết bị khác thì thiết bị hiện tại vẫn chưa được verify
-  const { status } = req.decoded_authorization as TokenPayload
-  if (status === UserStatus.Unverified) {
+  // accessTokenValidator refreshes verify/role from DB before this middleware runs.
+  const { verify } = req.decoded_authorization as TokenPayload
+  if (verify === UserStatus.Unverified) {
     return next(
       new ErrorWithStatus({
         message: USERS_MESSAGES.USER_NOT_VERIFIED,
@@ -385,7 +462,7 @@ export const changePasswordValidator = validate(
   checkSchema(
     {
       currentPassword: {
-        ...passwordSchema,
+        ...passwordOnlySchema,
         custom: {
           options: async (value: string, { req }) => {
             const { userId } = req.decoded_authorization as TokenPayload
