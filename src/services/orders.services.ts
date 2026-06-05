@@ -84,14 +84,36 @@ class OrderService {
     return allocations
   }
 
+  private getCouponEligibleItems(items: any[], coupon: any) {
+    const productIds = new Set((coupon.applicableProductIds || []).map((id: any) => id.toString()))
+    const categoryIds = new Set((coupon.applicableCategoryIds || []).map((id: any) => id.toString()))
+    const hasProductTarget = productIds.size > 0
+    const hasCategoryTarget = categoryIds.size > 0
+
+    if (!hasProductTarget && !hasCategoryTarget) return items
+
+    return items.filter((item) => {
+      const productMatches = hasProductTarget && productIds.has(item.productId?.toString())
+      const categoryMatches = hasCategoryTarget && item.categoryId && categoryIds.has(item.categoryId.toString())
+      return productMatches || categoryMatches
+    })
+  }
+
   private attachBenefitAllocations(items: any[], appliedCoupons: any[], pointsRedeemAmount: number) {
     const couponAllocationsByItem = items.map(() => [] as any[])
     const discountTotals = items.map(() => 0)
 
     for (const coupon of appliedCoupons.filter((c: any) => c.type !== 'free_shipping' && c.discountAmount > 0)) {
-      const allocations = this.allocateAmountAcrossItems(coupon.discountAmount, items)
-      allocations.forEach((amount, index) => {
+      const eligibleItems = this.getCouponEligibleItems(items, coupon)
+      const allocations = this.allocateAmountAcrossItems(coupon.discountAmount, eligibleItems)
+      eligibleItems.forEach((eligibleItem, eligibleIndex) => {
+        const amount = allocations[eligibleIndex]
         if (amount <= 0) return
+        const index = items.findIndex((item) =>
+          item.productId?.toString() === eligibleItem.productId?.toString() &&
+          item.unit === eligibleItem.unit
+        )
+        if (index < 0) return
         couponAllocationsByItem[index].push({
           code: coupon.code,
           type: coupon.type,
@@ -197,6 +219,7 @@ class OrderService {
 
         orderItems.push({
           productId: product._id,
+          categoryId: product.categoryId,
           name: product.name,
           sku: product.sku,
           unit: item.unit || product.unit,
@@ -205,7 +228,7 @@ class OrderService {
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * item.quantity,
           campaignId: campaign?._id,
-          prescriptionRequired: product.prescriptionRequired,
+          prescriptionRequired: product.requiresPrescription,
           image:
             product.featuredImage ||
             product.image ||
@@ -269,6 +292,7 @@ class OrderService {
 
         orderItems.push({
           ...cartItem,
+          categoryId: product.categoryId,
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * cartItem.quantity,
@@ -340,15 +364,19 @@ class OrderService {
           cartCoupon.code,
           userId,
           subtotal,
-          hasPrescriptionItems
+          hasPrescriptionItems,
+          orderItems
         )
         if (validation.isValid) {
           // Tính lại discountAmount theo subtotal hiện tại (trường hợp items thay đổi)
           appliedCoupons.push({
             code: cartCoupon.code,
             discountAmount: validation.discountAmount,
+            eligibleSubtotal: validation.eligibleSubtotal,
             type: cartCoupon.type,
-            name: (cartCoupon as any).name || validation.coupon?.name || cartCoupon.code
+            name: (cartCoupon as any).name || validation.coupon?.name || cartCoupon.code,
+            applicableProductIds: validation.coupon?.applicableProductIds || [],
+            applicableCategoryIds: validation.applicableCategoryIds || validation.coupon?.applicableCategoryIds || []
           })
         } else {
           console.log(`[Order] Coupon ${cartCoupon.code} no longer valid at checkout: ${validation.message}`)
@@ -358,13 +386,16 @@ class OrderService {
     } else if (payload.couponCodes && payload.couponCodes.length > 0) {
       // Direct buy: validate coupon codes được gửi lên
       for (const code of payload.couponCodes) {
-        const validation = await couponService.validateCoupon(code, userId, subtotal, hasPrescriptionItems)
+        const validation = await couponService.validateCoupon(code, userId, subtotal, hasPrescriptionItems, orderItems)
         if (validation.isValid && validation.coupon) {
           appliedCoupons.push({
             code: validation.coupon.code,
             discountAmount: validation.discountAmount,
+            eligibleSubtotal: validation.eligibleSubtotal,
             type: validation.coupon.type,
-            name: validation.coupon.name
+            name: validation.coupon.name,
+            applicableProductIds: validation.coupon.applicableProductIds || [],
+            applicableCategoryIds: validation.applicableCategoryIds || validation.coupon.applicableCategoryIds || []
           })
         }
       }
