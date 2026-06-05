@@ -13,6 +13,8 @@ const mockUpdateOne = vi.fn()
 const mockFindOneAndUpdate = vi.fn()
 const mockDeleteOne = vi.fn()
 const mockFind = vi.fn()
+const mockProductsFind = vi.fn()
+const mockCategoriesFind = vi.fn()
 const mockCountDocuments = vi.fn()
 
 const makeCollection = (overrides = {}) => ({
@@ -30,12 +32,16 @@ vi.mock('~/services/database.services', () => {
   const coupons = makeCollection()
   const couponRedemptions = makeCollection()
   const carts = makeCollection()
+  const products = makeCollection({ find: mockProductsFind })
+  const categories = makeCollection({ find: mockCategoriesFind })
 
   return {
     default: {
       coupons,
       couponRedemptions,
-      carts
+      carts,
+      products,
+      categories
     }
   }
 })
@@ -188,6 +194,121 @@ describe('CouponService', () => {
 
       expect(result.isValid).toBe(true)
       expect(mockCountDocuments).not.toHaveBeenCalled()
+    })
+
+    it('Chỉ tính discount trên sản phẩm thuộc product target', async () => {
+      const eligibleProductId = new ObjectId()
+      const otherProductId = new ObjectId()
+      const coupon = makeCoupon({
+        applicableProductIds: [eligibleProductId],
+        minOrderAmount: 100000,
+        value: 10,
+        maxDiscountAmount: 50000
+      })
+      mockFindOne.mockResolvedValueOnce(coupon)
+
+      const result = await couponService.validateCoupon(coupon.code, new ObjectId(USER_ID), 300000, false, [
+        { productId: eligibleProductId, totalPrice: 120000 },
+        { productId: otherProductId, totalPrice: 180000 }
+      ])
+
+      expect(result.isValid).toBe(true)
+      expect(result.eligibleSubtotal).toBe(120000)
+      expect(result.discountAmount).toBe(12000)
+    })
+
+    it('Áp dụng category target cho cả danh mục con và snapshot expanded category ids', async () => {
+      const parentCategoryId = new ObjectId()
+      const childCategoryId = new ObjectId()
+      const productId = new ObjectId()
+      const coupon = makeCoupon({
+        applicableCategoryIds: [parentCategoryId],
+        minOrderAmount: 100000,
+        value: 10,
+        maxDiscountAmount: 50000
+      })
+      mockFindOne.mockResolvedValueOnce(coupon)
+      mockCategoriesFind
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValueOnce([{ _id: parentCategoryId, path: '/vitamin' }]) })
+        .mockReturnValueOnce({
+          toArray: vi.fn().mockResolvedValueOnce([
+            { _id: parentCategoryId },
+            { _id: childCategoryId }
+          ])
+        })
+      mockProductsFind.mockReturnValueOnce({
+        toArray: vi.fn().mockResolvedValueOnce([{ _id: productId, categoryId: childCategoryId }])
+      })
+
+      const result = await couponService.validateCoupon(coupon.code, new ObjectId(USER_ID), 200000, false, [
+        { productId, totalPrice: 200000 }
+      ])
+
+      expect(result.isValid).toBe(true)
+      expect(result.eligibleSubtotal).toBe(200000)
+      expect(result.discountAmount).toBe(20000)
+      expect(result.applicableCategoryIds?.map((id) => id.toString())).toEqual(
+        expect.arrayContaining([parentCategoryId.toString(), childCategoryId.toString()])
+      )
+    })
+  })
+
+  describe('applyCouponToCart()', () => {
+    it('Chỉ xét thuốc kê đơn trong các item được chọn khi apply coupon vào cart', async () => {
+      const userId = new ObjectId(USER_ID)
+      const prescriptionProductId = new ObjectId()
+      const nonPrescriptionProductId = new ObjectId()
+      const cart = {
+        _id: new ObjectId(),
+        userId,
+        subtotal: 250000,
+        requiresPrescription: true,
+        appliedCoupons: [],
+        loyaltyDiscount: 0,
+        taxAmount: 0,
+        shippingFee: 30000,
+        items: [
+          {
+            productId: prescriptionProductId,
+            unit: 'box',
+            totalPrice: 150000,
+            prescriptionRequired: true
+          },
+          {
+            productId: nonPrescriptionProductId,
+            unit: 'box',
+            totalPrice: 100000,
+            prescriptionRequired: false
+          }
+        ]
+      }
+      const coupon = makeCoupon({
+        excludePrescriptionItems: true,
+        minOrderAmount: 100000,
+        value: 10
+      })
+      mockFindOne
+        .mockResolvedValueOnce(cart)
+        .mockResolvedValueOnce(coupon)
+      mockUpdateOne.mockResolvedValueOnce({ modifiedCount: 1 })
+
+      const result = await couponService.applyCouponToCart(
+        coupon.code,
+        userId,
+        undefined,
+        100000,
+        [{ productId: nonPrescriptionProductId.toString(), unit: 'box' }]
+      )
+
+      expect(result.addedCoupon.discountAmount).toBe(10000)
+      expect(mockUpdateOne).toHaveBeenCalledWith(
+        { _id: cart._id },
+        expect.objectContaining({
+          $set: expect.objectContaining({
+            discountAmount: 10000
+          })
+        })
+      )
     })
   })
 
