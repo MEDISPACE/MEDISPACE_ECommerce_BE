@@ -76,6 +76,12 @@ class DatabaseService {
     }
 
     try {
+      // Auth collection indexes
+      await safeCreateIndex(this.users, { email: 1 }, { unique: true })
+      await safeCreateIndex(this.refreshTokens, { token: 1 }, { unique: true })
+      await safeCreateIndex(this.refreshTokens, { userId: 1 })
+      await safeCreateIndex(this.refreshTokens, { expiresAt: 1 }, { expireAfterSeconds: 0 })
+
       // Products collection indexes
       await safeCreateIndex(this.products, { categoryId: 1, isActive: 1, createdAt: -1 })
       await safeCreateIndex(this.products, { categoryId: 1 })
