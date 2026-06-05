@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb'
 
 export interface OrderItem {
   productId: ObjectId
+  categoryId?: ObjectId
   name: string
   sku: string
   unit: string // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
@@ -38,6 +39,9 @@ export interface OrderAppliedCoupon {
   name?: string
   type: string
   discountAmount: number
+  eligibleSubtotal?: number
+  applicableProductIds?: ObjectId[]
+  applicableCategoryIds?: ObjectId[]
 }
 
 export interface OrderType {
