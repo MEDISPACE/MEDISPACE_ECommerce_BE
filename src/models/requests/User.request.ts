@@ -1,5 +1,5 @@
 import { JwtPayload } from 'jsonwebtoken'
-import { TokenType, UserStatus } from '~/constants/enum'
+import { TokenType, UserRole, UserStatus } from '~/constants/enum'
 
 export interface Address {
   id?: string
@@ -42,6 +42,7 @@ export interface TokenPayload extends JwtPayload {
   userId: string
   tokenType: TokenType
   verify: UserStatus
+  role?: UserRole
 }
 export interface LogoutReqBody {
   refreshToken: string
