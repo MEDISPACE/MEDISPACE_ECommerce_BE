@@ -13,6 +13,11 @@ import axios from 'axios'
 import emailService from './email.services'
 
 class UsersService {
+  private getRefreshTokenExpiresAt(expiresIn: '30d' | '90d' = '30d') {
+    const days = expiresIn === '90d' ? 90 : 30
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+  }
+
   private signAccessToken({ userId, verify, role }: { userId: string; verify: UserStatus; role: UserRole }) {
     return signToken({
       payload: {
@@ -69,7 +74,7 @@ class UsersService {
       payload: {
         userId,
         tokenType: TokenType.ForgotPasswordToken,
-        status
+        verify: status
       },
       privateKey: process.env.JWT_SECRET_FORGOT_PASSWORD_TOKEN as string,
       options: { expiresIn: '7d' }
@@ -92,43 +97,43 @@ class UsersService {
         status: UserStatus.Unverified
       })
     )
-    const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
-      userId: userId.toString(),
-      verify: UserStatus.Unverified,
-      role: UserRole.Customer
-    })
-    await databaseService.refreshTokens.insertOne(
-      new RefreshToken({
-        userId: new ObjectId(userId),
-        token: refreshToken
-      })
-    )
 
     // Send verify email
     await emailService.sendVerifyRegisterEmail(payload.email, emailVerifyToken)
 
-    return { accessToken, refreshToken }
+    return userId.toString()
   }
   async refreshToken({
     userId,
     verify,
     role,
-    refreshToken
+    refreshToken,
+    expiresIn = '30d'
   }: {
     userId: string
     verify: UserStatus
     role: UserRole
     refreshToken: string
+    expiresIn?: '30d' | '90d'
   }) {
+    const oldRefreshToken = await databaseService.refreshTokens.findOneAndDelete({ token: refreshToken })
+    if (!oldRefreshToken) {
+      throw new ErrorWithStatus({
+        message: USERS_MESSAGES.USED_REFRESH_TOKEN_OR_NOT_EXISTS,
+        status: HTTP_STATUS.UNAUTHORIZED
+      })
+    }
+
     const [newAccessToken, newRefreshToken] = await Promise.all([
       this.signAccessToken({ userId, verify, role }),
-      this.signRefreshToken({ userId, verify, role })
+      this.signRefreshToken({ userId, verify, role, expiresIn })
     ])
-    await databaseService.refreshTokens.deleteOne({ token: refreshToken })
+
     await databaseService.refreshTokens.insertOne(
       new RefreshToken({
         userId: new ObjectId(userId),
-        token: newRefreshToken as string
+        token: newRefreshToken as string,
+        expiresAt: this.getRefreshTokenExpiresAt(expiresIn)
       })
     )
     return { accessToken: newAccessToken, refreshToken: newRefreshToken }
@@ -194,7 +199,8 @@ class UsersService {
     await databaseService.refreshTokens.insertOne(
       new RefreshToken({
         userId: new ObjectId(userId),
-        token: refreshToken
+        token: refreshToken,
+        expiresAt: this.getRefreshTokenExpiresAt(refreshTokenExpiresIn)
       })
     )
     return { accessToken, refreshToken }
@@ -215,6 +221,13 @@ class UsersService {
 
     const user = await databaseService.users.findOne({ email: userInfo.email })
     if (user) {
+      if (user.status === UserStatus.Banned) {
+        throw new ErrorWithStatus({
+          message: USERS_MESSAGES.USER_BANNED,
+          status: HTTP_STATUS.FORBIDDEN
+        })
+      }
+
       const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
         userId: user._id.toString(),
         verify: user.status,
@@ -223,7 +236,8 @@ class UsersService {
       await databaseService.refreshTokens.insertOne(
         new RefreshToken({
           userId: user._id,
-          token: refreshToken
+          token: refreshToken,
+          expiresAt: this.getRefreshTokenExpiresAt('30d')
         })
       )
       return {
@@ -237,16 +251,36 @@ class UsersService {
       const nameParts = userInfo.name.split(' ')
       const firstName = nameParts[0] || ''
       const lastName = nameParts.slice(1).join(' ') || ''
-      const data = await this.register({
-        firstName,
-        lastName,
-        email: userInfo.email,
-        password: randomPassword,
-        confirm_password: randomPassword,
-        phoneNumber: '',
-        gender: 0
+      const userId = new ObjectId()
+      const [accessToken, refreshToken] = await this.signAccessAndRefreshToken({
+        userId: userId.toString(),
+        verify: UserStatus.Verified,
+        role: UserRole.Customer
       })
-      return { ...data, newUser: true, verify: UserStatus.Unverified }
+
+      await databaseService.users.insertOne(
+        new User({
+          _id: userId,
+          firstName,
+          lastName,
+          email: userInfo.email,
+          password: hashPassword(randomPassword),
+          role: UserRole.Customer,
+          status: UserStatus.Verified,
+          emailVerifyToken: '',
+          forgotPasswordToken: '',
+          phoneNumber: '',
+          gender: 0
+        })
+      )
+      await databaseService.refreshTokens.insertOne(
+        new RefreshToken({
+          userId,
+          token: refreshToken,
+          expiresAt: this.getRefreshTokenExpiresAt('30d')
+        })
+      )
+      return { accessToken, refreshToken, newUser: true, verify: UserStatus.Verified }
     }
   }
 
@@ -257,25 +291,14 @@ class UsersService {
     }
   }
   async verifyEmail(userId: string) {
-    // Fetch user to get role
-    const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
-    if (!user) throw new ErrorWithStatus({ message: USERS_MESSAGES.USER_NOT_FOUND, status: HTTP_STATUS.NOT_FOUND })
-
-    const [token] = await Promise.all([
-      this.signAccessAndRefreshToken({ userId, verify: UserStatus.Verified, role: user.role }),
-      databaseService.users.updateOne(
-        { _id: new ObjectId(userId) },
-        {
-          $set: { emailVerifyToken: '', status: UserStatus.Verified },
-          $currentDate: { updated_at: true }
-        }
-      )
-    ])
-    const [accessToken, refreshToken] = token
+    await databaseService.users.updateOne(
+      { _id: new ObjectId(userId) },
+      {
+        $set: { emailVerifyToken: '', status: UserStatus.Verified },
+        $currentDate: { updated_at: true }
+      }
+    )
     return {
-      accessToken,
-      refreshToken,
-      newUser: 1,
       status: UserStatus.Verified
     }
   }
@@ -324,10 +347,13 @@ class UsersService {
     }
   }
   async resetPassword(userId: string, newPassword: string) {
-    await databaseService.users.updateOne(
-      { _id: new ObjectId(userId) },
-      { $set: { password: hashPassword(newPassword), forgotPasswordToken: '' }, $currentDate: { updated_at: true } }
-    )
+    await Promise.all([
+      databaseService.users.updateOne(
+        { _id: new ObjectId(userId) },
+        { $set: { password: hashPassword(newPassword), forgotPasswordToken: '' }, $currentDate: { updated_at: true } }
+      ),
+      databaseService.refreshTokens.deleteMany({ userId: new ObjectId(userId) })
+    ])
     return {
       message: USERS_MESSAGES.RESET_PASSWORD_SUCCESS
     }
@@ -397,10 +423,13 @@ class UsersService {
     }
 
     // Update to new password
-    await databaseService.users.updateOne(
-      { _id: new ObjectId(userId) },
-      { $set: { password: hashPassword(newPassword) }, $currentDate: { updated_at: true } }
-    )
+    await Promise.all([
+      databaseService.users.updateOne(
+        { _id: new ObjectId(userId) },
+        { $set: { password: hashPassword(newPassword) }, $currentDate: { updated_at: true } }
+      ),
+      databaseService.refreshTokens.deleteMany({ userId: new ObjectId(userId) })
+    ])
     return {
       message: USERS_MESSAGES.CHANGE_PASSWORD_SUCCESS
     }

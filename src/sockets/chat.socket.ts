@@ -8,6 +8,7 @@ import typesenseService from '~/services/typesense.services'
 import { ObjectId } from 'mongodb'
 import { config } from 'dotenv'
 import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
+import { TokenType, UserRole, UserStatus } from '~/constants/enum'
 
 config()
 
@@ -74,9 +75,22 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
       })) as TokenPayload
 
+      if (decoded.tokenType !== TokenType.AccessToken) {
+        return next(new Error(USERS_MESSAGES.INVALID_ACCESS_TOKEN))
+      }
+
+      const user = await databaseService.users.findOne(
+        { _id: new ObjectId(decoded.userId) },
+        { projection: { role: 1, status: 1 } }
+      )
+
+      if (!user || user.status === UserStatus.Banned) {
+        return next(new Error(USERS_MESSAGES.UNAUTHENTICATED))
+      }
+
       socket.userId = decoded.userId
-      if (decoded.role === 1) socket.userRole = 'pharmacist'
-      else if (decoded.role === 2) socket.userRole = 'admin'
+      if (user.role === UserRole.Pharmacist) socket.userRole = 'pharmacist'
+      else if (user.role === UserRole.Admin) socket.userRole = 'admin'
       else socket.userRole = 'customer'
 
       next()

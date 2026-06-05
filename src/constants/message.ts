@@ -22,6 +22,7 @@ export const USERS_MESSAGES = {
   DATE_MUST_BE_ISO8601: 'Date must be in ISO 8601 format',
   LOGIN_SUCCESS: 'Login successful',
   LOGIN_FAILED: 'Login failed',
+  USER_BANNED: 'User account is banned',
   REGISTER_SUCCESS: 'Registration successful',
   REGISTER_FAILED: 'Registration failed',
   CHECK_EMAIL_FAILED: 'Check email exists failed',
