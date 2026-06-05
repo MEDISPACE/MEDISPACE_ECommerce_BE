@@ -10,14 +10,119 @@ export interface ValidateCouponResult {
   isValid: boolean
   coupon?: any
   discountAmount: number
+  eligibleSubtotal?: number
+  applicableCategoryIds?: ObjectId[]
   message: string
   discountType: CouponType | null
+}
+
+export interface CouponValidationItem {
+  productId: ObjectId | string
+  categoryId?: ObjectId | string
+  totalPrice: number
+  prescriptionRequired?: boolean
 }
 
 class CouponService {
   // ============================
   // VALIDATION & APPLICATION
   // ============================
+
+  private toIdSet(ids?: Array<ObjectId | string>) {
+    return new Set((ids || []).map((id) => id.toString()))
+  }
+
+  private async getApplicableCategoryIdSet(coupon: any) {
+    const targetCategoryIds = (coupon.applicableCategoryIds || [])
+      .filter((id: ObjectId | string) => id && ObjectId.isValid(id.toString()))
+      .map((id: ObjectId | string) => new ObjectId(id.toString()))
+
+    if (targetCategoryIds.length === 0) return new Set<string>()
+
+    const targetCategories = await databaseService.categories
+      .find({ _id: { $in: targetCategoryIds } }, { projection: { _id: 1, path: 1 } })
+      .toArray()
+
+    const descendantQueries = targetCategories
+      .filter((category: any) => category.path)
+      .map((category: any) => ({
+        path: { $regex: `^${category.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/` }
+      }))
+
+    const categories = await databaseService.categories
+      .find(
+        {
+          $or: [
+            { _id: { $in: targetCategoryIds } },
+            ...descendantQueries
+          ]
+        },
+        { projection: { _id: 1 } }
+      )
+      .toArray()
+
+    return new Set(categories.map((category: any) => category._id.toString()))
+  }
+
+  private async getEligibleSubtotal(
+    coupon: any,
+    cartSubtotal: number,
+    items?: CouponValidationItem[],
+    applicableCategoryIdSet?: Set<string>
+  ) {
+    const hasProductTarget = coupon.applicableProductIds && coupon.applicableProductIds.length > 0
+    const categoryIds = applicableCategoryIdSet || await this.getApplicableCategoryIdSet(coupon)
+    const hasCategoryTarget = categoryIds.size > 0
+
+    if (!hasProductTarget && !hasCategoryTarget) {
+      return cartSubtotal
+    }
+
+    if (!items || items.length === 0) {
+      return 0
+    }
+
+    const productIds = this.toIdSet(coupon.applicableProductIds)
+    const missingCategoryProductIds = hasCategoryTarget
+      ? items
+          .filter((item) => !item.categoryId && ObjectId.isValid(item.productId.toString()))
+          .map((item) => new ObjectId(item.productId))
+      : []
+
+    const productCategoryMap = new Map<string, string>()
+    if (missingCategoryProductIds.length > 0) {
+      const products = await databaseService.products
+        .find({ _id: { $in: missingCategoryProductIds } }, { projection: { _id: 1, categoryId: 1 } })
+        .toArray()
+      products.forEach((product: any) => {
+        if (product.categoryId) productCategoryMap.set(product._id.toString(), product.categoryId.toString())
+      })
+    }
+
+    return items.reduce((sum, item) => {
+      const itemProductId = item.productId.toString()
+      const itemCategoryId = item.categoryId?.toString() || productCategoryMap.get(itemProductId)
+      const productMatches = hasProductTarget && productIds.has(itemProductId)
+      const categoryMatches = hasCategoryTarget && itemCategoryId && categoryIds.has(itemCategoryId)
+      return productMatches || categoryMatches ? sum + Math.max(0, item.totalPrice || 0) : sum
+    }, 0)
+  }
+
+  private normalizeIdArray(ids?: Array<ObjectId | string>) {
+    if (!Array.isArray(ids)) return undefined
+    return ids
+      .filter((id) => id && ObjectId.isValid(id.toString()))
+      .map((id) => new ObjectId(id.toString()))
+  }
+
+  private normalizeCouponPayload(data: any) {
+    const normalized = { ...data }
+    if ('targetUserIds' in normalized) normalized.targetUserIds = this.normalizeIdArray(normalized.targetUserIds)
+    if ('applicableProductIds' in normalized) normalized.applicableProductIds = this.normalizeIdArray(normalized.applicableProductIds)
+    if ('applicableCategoryIds' in normalized) normalized.applicableCategoryIds = this.normalizeIdArray(normalized.applicableCategoryIds)
+    if (normalized.totalUsageLimit === null || normalized.totalUsageLimit === '') normalized.totalUsageLimit = undefined
+    return normalized
+  }
 
   /**
    * Validate coupon code & tính toán discount
@@ -27,7 +132,8 @@ class CouponService {
     code: string,
     userId: ObjectId,
     cartSubtotal: number,
-    hasPrescriptionItems: boolean = false
+    hasPrescriptionItems: boolean = false,
+    items?: CouponValidationItem[]
   ): Promise<ValidateCouponResult> {
     const now = new Date()
 
@@ -49,12 +155,31 @@ class CouponService {
       return { isValid: false, discountAmount: 0, message: 'Mã giảm giá đã hết hạn hoặc chưa đến thời gian áp dụng.', discountType: null }
     }
 
-    // 3. Kiểm tra giá trị đơn hàng tối thiểu
-    if (cartSubtotal < coupon.minOrderAmount) {
+    const applicableCategoryIdSet = await this.getApplicableCategoryIdSet(coupon)
+    const applicableCategoryIds = Array.from(applicableCategoryIdSet)
+      .filter((id) => ObjectId.isValid(id))
+      .map((id) => new ObjectId(id))
+    const eligibleSubtotal = await this.getEligibleSubtotal(coupon, cartSubtotal, items, applicableCategoryIdSet)
+
+    if (eligibleSubtotal <= 0) {
+      return {
+        isValid: false,
+        discountAmount: 0,
+        eligibleSubtotal,
+        applicableCategoryIds,
+        message: 'Mã giảm giá không áp dụng cho sản phẩm đã chọn.',
+        discountType: null
+      }
+    }
+
+    // 3. Kiểm tra giá trị đơn hàng tối thiểu trên phần sản phẩm eligible
+    if (eligibleSubtotal < coupon.minOrderAmount) {
       const formatted = coupon.minOrderAmount.toLocaleString('vi-VN')
       return {
         isValid: false,
         discountAmount: 0,
+        eligibleSubtotal,
+        applicableCategoryIds,
         message: `Đơn hàng tối thiểu ${formatted}đ để áp dụng mã này.`,
         discountType: null
       }
@@ -91,15 +216,15 @@ class CouponService {
     let discountAmount = 0
 
     if (coupon.type === 'percentage') {
-      discountAmount = Math.floor(cartSubtotal * (coupon.value / 100))
+      discountAmount = Math.floor(eligibleSubtotal * (coupon.value / 100))
       // Giới hạn tối đa nếu có maxDiscountAmount
       if (coupon.maxDiscountAmount) {
         discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount)
       }
       // Không được giảm quá subtotal
-      discountAmount = Math.min(discountAmount, cartSubtotal)
+      discountAmount = Math.min(discountAmount, eligibleSubtotal)
     } else if (coupon.type === 'fixed_amount' || coupon.type === 'fixed') {
-      discountAmount = Math.min(coupon.value, cartSubtotal) // Không giảm quá subtotal
+      discountAmount = Math.min(coupon.value, eligibleSubtotal) // Không giảm quá eligible subtotal
     } else if (coupon.type === 'free_shipping') {
       // discountAmount = 0 — shipping discount xử lý riêng bên order
       discountAmount = 0
@@ -109,6 +234,8 @@ class CouponService {
       isValid: true,
       coupon,
       discountAmount,
+      eligibleSubtotal,
+      applicableCategoryIds,
       message: 'Áp dụng mã giảm giá thành công!',
       discountType: coupon.type
     }
@@ -122,7 +249,8 @@ class CouponService {
     code: string,
     userId: ObjectId,
     sessionId?: string,
-    selectedSubtotal?: number  // Subtotal của các sản phẩm được chọn từ FE
+    selectedSubtotal?: number,  // Subtotal của các sản phẩm được chọn từ FE
+    selectedItems?: Array<{ productId: string; unit?: string }>
   ) {
     // Lấy cart
     const cartQuery = userId
@@ -145,13 +273,21 @@ class CouponService {
     const subtotalForValidation = (selectedSubtotal !== undefined && selectedSubtotal >= 0)
       ? selectedSubtotal
       : cart.subtotal
+    const validationItems = selectedItems && selectedItems.length > 0
+      ? cart.items.filter((cartItem: any) => selectedItems.some((selectedItem) => {
+          if (selectedItem.productId !== cartItem.productId.toString()) return false
+          return (selectedItem.unit || undefined) === (cartItem.unit || undefined)
+        }))
+      : cart.items
+    const hasPrescriptionItemsInSelection = validationItems.some((item: any) => item.prescriptionRequired)
 
     // Validate coupon
     const validation = await this.validateCoupon(
       code,
       userId,
       subtotalForValidation,
-      cart.requiresPrescription
+      hasPrescriptionItemsInSelection,
+      validationItems
     )
 
     if (!validation.isValid) {
@@ -191,8 +327,11 @@ class CouponService {
     const newCoupon = {
       code: coupon.code,
       discountAmount: validation.discountAmount,
+      eligibleSubtotal: validation.eligibleSubtotal,
       type: coupon.type,
-      name: coupon.name
+      name: coupon.name,
+      applicableProductIds: coupon.applicableProductIds || [],
+      applicableCategoryIds: validation.applicableCategoryIds || coupon.applicableCategoryIds || []
     }
 
     appliedCoupons.push(newCoupon)
@@ -390,14 +529,15 @@ class CouponService {
   // ============================
 
   async createCoupon(data: any, adminId: ObjectId) {
+    const normalizedData = this.normalizeCouponPayload(data)
     // Kiểm tra code trùng
-    const existing = await databaseService.coupons.findOne({ code: data.code.toUpperCase().trim() })
+    const existing = await databaseService.coupons.findOne({ code: normalizedData.code.toUpperCase().trim() })
     if (existing) {
       throw new ErrorWithStatus({ message: 'Mã coupon đã tồn tại. Vui lòng chọn mã khác.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     const coupon = new Coupon({
-      ...data,
+      ...normalizedData,
       createdBy: adminId,
       currentUsageCount: 0
     })
@@ -414,6 +554,7 @@ class CouponService {
     }
 
     // Không cho sửa các trường counter/audit do hệ thống quản lý
+    const normalizedData = this.normalizeCouponPayload(data)
     const {
       code: _code,
       currentUsageCount: _count,
@@ -421,7 +562,7 @@ class CouponService {
       createdBy: _by,
       createdAt: _at,
       ...updateData
-    } = data
+    } = normalizedData
 
     if (
       updateData.totalUsageLimit !== undefined &&
