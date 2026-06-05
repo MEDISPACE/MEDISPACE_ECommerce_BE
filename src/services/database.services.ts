@@ -87,7 +87,9 @@ class DatabaseService {
       await safeCreateIndex(this.products, { categoryId: 1 })
       await safeCreateIndex(this.products, { slug: 1 }, { unique: true })
       await safeCreateIndex(this.products, { sku: 1 }, { unique: true })
-      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text' })
+      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text', sku: 'text' }, {
+        weights: { name: 3, shortDescription: 1, sku: 2 }
+      })
       await safeCreateIndex(this.articleJourneyEvents, { articleId: 1, eventType: 1, createdAt: -1 })
       await safeCreateIndex(this.articleJourneyEvents, { sessionId: 1, createdAt: -1 })
 
