@@ -330,6 +330,67 @@ class LoyaltyService {
     }
   }
 
+  /**
+   * Admin điều chỉnh điểm thủ công.
+   * Không sửa thẳng balance ngoài luồng transaction để còn audit được lý do và người thao tác.
+   */
+  async adjustPointsByAdmin(
+    userId: ObjectId,
+    adminId: ObjectId,
+    points: number,
+    action: 'add' | 'subtract',
+    reason: string
+  ) {
+    const normalizedPoints = Math.floor(points)
+    if (normalizedPoints <= 0) {
+      throw new ErrorWithStatus({
+        message: 'Số điểm điều chỉnh phải lớn hơn 0.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const cleanReason = reason?.trim()
+    if (!cleanReason || cleanReason.length < 5) {
+      throw new ErrorWithStatus({
+        message: 'Vui lòng nhập lý do điều chỉnh điểm tối thiểu 5 ký tự.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    await this.getOrCreateAccount(userId)
+
+    const delta = action === 'subtract' ? -normalizedPoints : normalizedPoints
+    const query: any = { userId }
+    if (delta < 0) query.pointsBalance = { $gte: normalizedPoints }
+
+    const updatedAccount = await databaseService.loyaltyAccounts.findOneAndUpdate(
+      query,
+      {
+        $inc: { pointsBalance: delta },
+        $set: { updatedAt: new Date() }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!updatedAccount) {
+      throw new ErrorWithStatus({
+        message: 'Không đủ điểm để trừ hoặc tài khoản điểm đang được xử lý. Vui lòng thử lại.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const transaction = new LoyaltyTransaction({
+      userId,
+      type: 'adjust',
+      points: delta,
+      balanceAfter: updatedAccount.pointsBalance,
+      description: `${delta > 0 ? 'Cộng' : 'Trừ'} ${normalizedPoints.toLocaleString('vi-VN')} điểm bởi admin ${adminId.toString()}: ${cleanReason}`
+    })
+
+    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    return { account: updatedAccount, transaction }
+  }
+
   // ============================
   // POINT REVOCATION (RETURNS)
   // ============================

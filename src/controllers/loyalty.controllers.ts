@@ -143,3 +143,29 @@ export const getAdminLoyaltyAccountsController = async (req: Request, res: Respo
     }
   })
 }
+
+// POST /loyalty/admin/accounts/:userId/adjust-points — Admin điều chỉnh điểm thủ công
+export const adjustAdminLoyaltyPointsController = async (req: Request, res: Response) => {
+  const adminId = new ObjectId(req.decoded_authorization!.userId)
+  const userId = new ObjectId(req.params.userId)
+  const { action, points, reason } = req.body
+
+  if (!['add', 'subtract'].includes(action)) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      message: 'Loại điều chỉnh điểm không hợp lệ.'
+    })
+  }
+
+  const result = await loyaltyService.adjustPointsByAdmin(
+    userId,
+    adminId,
+    Number(points),
+    action,
+    reason
+  )
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Điều chỉnh điểm thành công.',
+    result
+  })
+}

@@ -4,7 +4,8 @@ import {
   getTransactionsController,
   previewRedeemController,
   getAdminLoyaltyStatsController,
-  getAdminLoyaltyAccountsController
+  getAdminLoyaltyAccountsController,
+  adjustAdminLoyaltyPointsController
 } from '~/controllers/loyalty.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -69,6 +70,19 @@ loyaltyRouter.get(
   verifiedUserValidator,
   adminRequired,
   wrapRequestHandler(getAdminLoyaltyAccountsController)
+)
+
+/**
+ * POST /loyalty/admin/accounts/:userId/adjust-points
+ * Admin: Cộng/trừ điểm thủ công có audit transaction
+ * Body: { action: 'add' | 'subtract', points: number, reason: string }
+ */
+loyaltyRouter.post(
+  '/admin/accounts/:userId/adjust-points',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(adjustAdminLoyaltyPointsController)
 )
 
 export default loyaltyRouter
