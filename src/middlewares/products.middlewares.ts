@@ -431,6 +431,13 @@ export const getProductsValidator = validate(
       search: searchSchema,
       sortBy: sortBySchema,
       sortOrder: sortOrderSchema,
+      inStock: {
+        optional: true,
+        isIn: {
+          options: [['true', 'false']],
+          errorMessage: 'inStock must be "true" or "false"'
+        }
+      },
       minStock: stockFilterSchema,
       maxStock: stockFilterSchema
     },

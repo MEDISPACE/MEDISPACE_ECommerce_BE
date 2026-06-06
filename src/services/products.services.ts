@@ -254,23 +254,32 @@ class ProductsService {
     }
 
     // Enhanced search - will be applied in aggregation pipeline for category/brand
+    // Sanitize search query to prevent regex injection (ReDoS)
     const searchQuery = query.search
+      ? query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      : undefined
 
-    if (query.minStock || query.maxStock) {
-      const existing = (filter.stockQuantity as Record<string, number>) || {}
-      if (query.minStock) {
-        existing.$gte = parseInt(query.minStock)
-      }
-      if (query.maxStock) {
-        existing.$lte = parseInt(query.maxStock)
-      }
-      filter.stockQuantity = existing
+    // Handle inStock filter: map to stockQuantity > 0
+    if (query.inStock === 'true') {
+      filter.stockQuantity = { ...(filter.stockQuantity as Record<string, number> || {}), $gt: 0 }
     }
 
-    // Build sort
-    const sortBy = query.sortBy || 'createdAt'
+    if (query.minStock || query.maxStock) {
+      const stockFilter: Record<string, number> = { ...(filter.stockQuantity as Record<string, number> || {}) }
+      if (query.minStock) {
+        stockFilter.$gte = parseInt(query.minStock)
+      }
+      if (query.maxStock) {
+        stockFilter.$lte = parseInt(query.maxStock)
+      }
+      filter.stockQuantity = stockFilter
+    }
+
+    // Build sort — handle 'price' specially since Product uses priceVariants[] not a flat price field
+    const rawSortBy = query.sortBy || 'createdAt'
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
-    const sortField = sortBy === 'price' ? 'sortPrice' : sortBy
+    // If sorting by 'price', we sort on computed 'calculatedPrice' field (added via $addFields)
+    const sortField = rawSortBy === 'price' ? 'calculatedPrice' : rawSortBy
     const sort: Record<string, 1 | -1> = { [sortField]: sortOrder }
 
     // Optimize query - always use efficient aggregation with minimal fields
@@ -306,21 +315,18 @@ class ProductsService {
             $addFields: {
               category: { $arrayElemAt: ['$category', 0] },
               brand: { $arrayElemAt: ['$brand', 0] },
-              sortPrice: {
+              // Compute price from default priceVariant (isDefault=true) or first variant for sorting
+              calculatedPrice: {
                 $let: {
                   vars: {
                     defaultVariant: {
-                      $first: {
-                        $filter: {
-                          input: '$priceVariants',
-                          as: 'variant',
-                          cond: { $eq: ['$$variant.isDefault', true] }
-                        }
-                      }
-                    },
-                    firstVariant: { $arrayElemAt: ['$priceVariants', 0] }
+                      $ifNull: [
+                        { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                        { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                      ]
+                    }
                   },
-                  in: { $ifNull: ['$$defaultVariant.price', '$$firstVariant.price'] }
+                  in: { $ifNull: ['$$defaultVariant.price', 0] }
                 }
               }
             }
