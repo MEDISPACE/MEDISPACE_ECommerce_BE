@@ -126,6 +126,7 @@ class DatabaseService {
       await safeCreateIndex(this.campaigns, { slug: 1 }, { unique: true })
       await safeCreateIndex(this.campaigns, { status: 1, startDate: 1, endDate: 1 })
       await safeCreateIndex(this.campaigns, { status: 1, isPublic: 1, priority: -1 })
+      await safeCreateIndex(this.typesenseSyncState, { key: 1 }, { unique: true })
 
       // LoyaltyAccounts collection indexes
       await safeCreateIndex(this.loyaltyAccounts, { userId: 1 }, { unique: true })
@@ -240,6 +241,9 @@ class DatabaseService {
   }
   get campaigns(): Collection<Campaign> {
     return this.db.collection(process.env.DB_CAMPAIGNS_COLLECTION as string)
+  }
+  get typesenseSyncState(): Collection {
+    return this.db.collection('typesense_sync_state')
   }
   get loyaltyAccounts(): Collection<LoyaltyAccount> {
     return this.db.collection(process.env.DB_LOYALTY_ACCOUNTS_COLLECTION as string)
