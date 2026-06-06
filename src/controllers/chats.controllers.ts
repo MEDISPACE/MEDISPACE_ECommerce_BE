@@ -5,8 +5,19 @@ import {
   SendMessageReqBody,
   GetMessagesReqQuery,
   MarkAsReadReqBody,
-  GetConversationsReqQuery
+  GetConversationsReqQuery,
+  AIChatReqBody,
+  AIStreamReqQuery
 } from '~/models/requests/Chat.request'
+import {
+  buildHistory,
+  checkAIRateLimit,
+  getResponseCache,
+  setResponseCache,
+  sendToAI,
+  streamFromAI,
+  saveAIReplyAsync
+} from '~/services/ai-chat.services'
 import { TokenPayload } from '~/models/requests/User.request'
 import { CHATS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
@@ -200,5 +211,141 @@ export const saveMessageFeedbackController = async (req: Request, res: Response)
   return res.json({
     message: 'Lưu feedback tin nhắn thành công'
   })
+}
+
+// ── AI Chat Controllers (Phase 3) ─────────────────────────────────────────────
+
+/**
+ * POST /api/chats/ai-message
+ * Non-streaming AI chat — trả JSON response sau khi AI hoàn thành
+ */
+export const aiChatController = async (
+  req: Request<ParamsDictionary, unknown, AIChatReqBody>,
+  res: Response
+) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { message, conversation_id, context_products } = req.body
+
+  // 1. Rate limit check (Redis, 30 msg/user/hour)
+  const rateCheck = await checkAIRateLimit(userId)
+  if (!rateCheck.allowed) {
+    return res.status(429).json({
+      message: `Bạn đã vượt giới hạn ${30} tin nhắn/giờ với AI. Vui lòng thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`,
+      resetIn: rateCheck.resetIn
+    })
+  }
+
+  // 2. Check response dedup cache
+  const cached = await getResponseCache(conversation_id, message)
+  if (cached) {
+    return res.json({
+      message: 'Phản hồi từ AI thành công',
+      result: cached,
+      cached: true
+    })
+  }
+
+  // 3. Load history từ MongoDB (bao gồm cả tin pharmacist thật)
+  const history = await buildHistory(conversation_id)
+
+  // 4. Gọi AI Service
+  const aiResponse = await sendToAI({
+    message,
+    conversation_id,
+    user_id: userId,
+    history,
+    context_products: context_products || []
+  })
+
+  // 5. Save vào MongoDB (async, không block user)
+  saveAIReplyAsync(conversation_id, message, aiResponse, userId)
+
+  // 6. Cache response (async, không block)
+  setResponseCache(conversation_id, message, aiResponse)
+
+  return res.json({
+    message: 'Phản hồi từ AI thành công',
+    result: aiResponse,
+    cached: false,
+    rateLimit: { remaining: rateCheck.remaining, resetIn: rateCheck.resetIn }
+  })
+}
+
+/**
+ * GET /api/chats/ai-stream?message=...&conversation_id=...&context_products=...
+ * SSE Streaming AI chat — forward chunks từ AI Service về FE theo thời gian thực
+ */
+export const aiStreamController = async (
+  req: Request<ParamsDictionary, unknown, unknown, AIStreamReqQuery>,
+  res: Response
+) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const { message, conversation_id, context_products: contextStr } = req.query
+
+  if (!message || !conversation_id) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({
+      message: 'message và conversation_id là bắt buộc'
+    })
+  }
+
+  // 1. Rate limit check
+  const rateCheck = await checkAIRateLimit(userId)
+  if (!rateCheck.allowed) {
+    return res.status(429).json({
+      message: `Bạn đã vượt giới hạn tin nhắn AI. Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
+    })
+  }
+
+  // 2. Parse context products
+  let contextProducts: any[] = []
+  if (contextStr) {
+    try {
+      contextProducts = JSON.parse(contextStr)
+    } catch {
+      // Ignore malformed context
+    }
+  }
+
+  // 3. Load history từ MongoDB
+  const history = await buildHistory(conversation_id)
+
+  // 4. Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no') // Nginx: disable buffering
+  res.flushHeaders()
+
+  // Heartbeat mỗi 15s để giữ connection alive qua proxy/nginx
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n')
+  }, 15_000)
+
+  // 5. Stream từ AI Service
+  await streamFromAI(
+    {
+      message,
+      conversation_id,
+      user_id: userId,
+      history,
+      context_products: contextProducts
+    },
+    (chunk) => {
+      res.write(chunk)
+    },
+    (finalResponse) => {
+      // Khi stream done: lưu MongoDB + cache (async)
+      saveAIReplyAsync(conversation_id, message, finalResponse, userId)
+      setResponseCache(conversation_id, message, finalResponse)
+    },
+    (err) => {
+      console.error('[AI Stream] Error:', err.message)
+      res.write(`data: ${JSON.stringify({ type: 'error', message: 'AI service không phản hồi. Vui lòng thử lại.' })}\n\n`)
+    }
+  )
+
+  clearInterval(heartbeat)
+  res.write('data: [DONE]\n\n')
+  res.end()
 }
 
