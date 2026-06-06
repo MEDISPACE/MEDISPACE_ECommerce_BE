@@ -33,3 +33,37 @@ export interface GetConversationsReqQuery {
   status?: 'active' | 'closed'
   type?: 'ai' | 'pharmacist'
 }
+
+// ── AI Chat (Phase 3) ─────────────────────────────────────────────────────────
+
+export interface AIChatContextProduct {
+  mongoId: string
+  name: string
+  slug: string
+  price: number
+  imageUrl?: string
+  unit?: string
+  requiresPrescription?: boolean
+}
+
+/**
+ * POST /api/chats/ai-message — Non-streaming AI chat
+ */
+export interface AIChatReqBody {
+  /** Tin nhắn của user */
+  message: string
+  /** conversation_id (MongoDB ObjectId string) */
+  conversation_id: string
+  /** Sản phẩm đang xem (FE truyền từ trang product) */
+  context_products?: AIChatContextProduct[]
+}
+
+/**
+ * GET /api/chats/ai-stream — SSE streaming AI chat
+ */
+export interface AIStreamReqQuery {
+  message: string
+  conversation_id: string
+  context_products?: string // JSON string (query param)
+}
+
