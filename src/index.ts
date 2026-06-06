@@ -42,13 +42,16 @@ config()
 
 const app = express()
 
-databaseService.connect()
+const bootstrapSearch = async () => {
+  await databaseService.connect()
+  await typesenseService.initCollections()
+}
+void bootstrapSearch()
 cleanupService.startCartCleanup()
 cleanupService.startAbandonedOrderCleanup() // Cleanup abandoned orders every hour
 cleanupService.startStaleConversationReassign() // Re-queue stale chat conversations every 5 minutes
 aiModerationService.startWorker()
 initFolder() // Tạo thư mục temp cho upload
-typesenseService.initCollections() // Initialize Typesense search index
 
 // Parse cookies
 app.use(cookieParser())

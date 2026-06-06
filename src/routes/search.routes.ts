@@ -6,6 +6,7 @@ import {
   searchArticlesController,
   searchStatusController
 } from '~/controllers/search.controllers'
+import { searchRateLimit } from '~/middlewares/search.middlewares'
 
 const searchRouter = Router()
 
@@ -13,19 +14,19 @@ const searchRouter = Router()
  * GET /search/suggest?q=
  * Autocomplete nhanh — trả về gợi ý sản phẩm khi user đang gõ
  */
-searchRouter.get('/suggest', wrapRequestHandler(suggestController))
+searchRouter.get('/suggest', searchRateLimit(30, 60_000), wrapRequestHandler(suggestController))
 
 /**
  * GET /search/products?q=&page=&limit=&categoryId=&brandId=&requiresPrescription=&inStock=&priceMin=&priceMax=&ratingMin=&sortBy=
  * Full-text search sản phẩm với filter và facet counts
  */
-searchRouter.get('/products', wrapRequestHandler(searchProductsController))
+searchRouter.get('/products', searchRateLimit(60, 60_000), wrapRequestHandler(searchProductsController))
 
 /**
  * GET /search/articles?q=&page=&limit=&categoryId=
  * Full-text search bài viết sức khỏe
  */
-searchRouter.get('/articles', wrapRequestHandler(searchArticlesController))
+searchRouter.get('/articles', searchRateLimit(60, 60_000), wrapRequestHandler(searchArticlesController))
 
 /**
  * GET /search/status
