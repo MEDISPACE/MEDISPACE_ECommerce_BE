@@ -1,5 +1,6 @@
 import Typesense from 'typesense'
 import { config } from 'dotenv'
+import databaseService from './database.services'
 
 config()
 
@@ -42,6 +43,18 @@ const productSchema = {
     { name: 'inStock', type: 'bool' as const, facet: true },
     { name: 'stockQuantity', type: 'int32' as const },
     { name: 'price', type: 'float' as const },
+    { name: 'originalPrice', type: 'float' as const },
+    { name: 'salePrice', type: 'float' as const },
+    { name: 'discountPercentage', type: 'int32' as const },
+    { name: 'defaultUnit', type: 'string' as const, optional: true },
+    { name: 'priceVariantsJson', type: 'string' as const, optional: true, index: false },
+    { name: 'maxOrderQuantity', type: 'int32' as const },
+    { name: 'campaignId', type: 'string' as const, optional: true },
+    { name: 'campaignName', type: 'string' as const, optional: true },
+    { name: 'campaignBadgeText', type: 'string' as const, optional: true },
+    { name: 'campaignBadgeColor', type: 'string' as const, optional: true, index: false },
+    { name: 'campaignEndDate', type: 'int64' as const, optional: true },
+    { name: 'searchTextNormalized', type: 'string' as const, optional: true },
     { name: 'rating', type: 'float' as const },
     { name: 'reviewCount', type: 'int32' as const },
     { name: 'featuredImage', type: 'string' as const, index: false, optional: true },
@@ -90,7 +103,12 @@ const brandSchema = {
   fields: [
     { name: 'mongoId', type: 'string' as const },
     { name: 'name', type: 'string' as const },
-    { name: 'slug', type: 'string' as const }
+    { name: 'slug', type: 'string' as const },
+    { name: 'description', type: 'string' as const, optional: true },
+    { name: 'country', type: 'string' as const, optional: true, facet: true },
+    { name: 'logo', type: 'string' as const, optional: true, index: false },
+    { name: 'isActive', type: 'bool' as const, facet: true },
+    { name: 'productCount', type: 'int32' as const }
   ]
 }
 
@@ -99,7 +117,12 @@ const categorySchema = {
   fields: [
     { name: 'mongoId', type: 'string' as const },
     { name: 'name', type: 'string' as const },
-    { name: 'slug', type: 'string' as const }
+    { name: 'slug', type: 'string' as const },
+    { name: 'description', type: 'string' as const, optional: true },
+    { name: 'isActive', type: 'bool' as const, facet: true },
+    { name: 'level', type: 'int32' as const, facet: true },
+    { name: 'productCount', type: 'int32' as const },
+    { name: 'icon', type: 'string' as const, optional: true, index: false }
   ]
 }
 
@@ -107,8 +130,21 @@ const categorySchema = {
 
 function toProductDocument(product: any): Record<string, unknown> {
   const defaultVariant = product.priceVariants?.find((v: any) => v.isDefault) || product.priceVariants?.[0]
-  const price = defaultVariant?.price || product.price || 0
+  const originalPrice = defaultVariant?.originalPrice || defaultVariant?.price || product.originalPrice || product.price || 0
+  const salePrice = defaultVariant?.salePrice || product.salePrice || originalPrice
+  const price = salePrice
   const mongoId = product._id?.toString() || ''
+  const searchableText = [
+    product.name,
+    product.sku,
+    product.brand?.name,
+    product.category?.name,
+    product.details?.activeIngredients,
+    product.details?.indications,
+    product.details?.manufacturer
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return {
     id: mongoId,
@@ -127,6 +163,28 @@ function toProductDocument(product: any): Record<string, unknown> {
     inStock: (product.stockQuantity || 0) > 0,
     stockQuantity: product.stockQuantity || 0,
     price,
+    originalPrice,
+    salePrice,
+    discountPercentage: defaultVariant?.discountPercent || product.discountPercentage || 0,
+    defaultUnit: defaultVariant?.unit || product.unit || '',
+    priceVariantsJson: JSON.stringify(
+      (product.priceVariants || []).map((variant: any) => ({
+        unit: variant.unit,
+        price: variant.price,
+        originalPrice: variant.originalPrice,
+        salePrice: variant.salePrice,
+        discountPercent: variant.discountPercent,
+        isDefault: Boolean(variant.isDefault),
+        quantityPerUnit: variant.quantityPerUnit
+      }))
+    ),
+    maxOrderQuantity: product.maxOrderQuantity || 10,
+    campaignId: product.campaign?._id?.toString?.() || '',
+    campaignName: product.campaign?.name || '',
+    campaignBadgeText: product.campaign?.badgeText || '',
+    campaignBadgeColor: product.campaign?.badgeColor || '',
+    campaignEndDate: product.campaign?.endDate ? new Date(product.campaign.endDate).getTime() : undefined,
+    searchTextNormalized: normalizeVietnamese(searchableText),
     rating: product.rating || 0,
     reviewCount: product.reviewCount || 0,
     featuredImage: product.featuredImage || '',
@@ -140,6 +198,14 @@ function toProductDocument(product: any): Record<string, unknown> {
     storageInstructions: product.details?.storageInstructions || product.storageInstructions || '',
     createdAt: product.createdAt ? new Date(product.createdAt).getTime() : Date.now()
   }
+}
+
+function normalizeVietnamese(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
 }
 
 function toArticleDocument(article: any): Record<string, unknown> {
@@ -202,8 +268,82 @@ function toCategoryDocument(category: any): Record<string, unknown> {
 
 class TypesenseService {
   private isAvailable = false
+  private retryQueue: Array<{ description: string; run: () => Promise<void>; attempts: number }> = []
+  private isFlushingRetries = false
+  private readonly maxRetryAttempts = 5
+  private readonly maxQueueSize = 500
+  private isReconciling = false
 
-  private async ensureCollections(): Promise<void> {
+  private async markDirty(reason: string): Promise<void> {
+    try {
+      await databaseService.typesenseSyncState.updateOne(
+        { key: 'global' },
+        { $set: { key: 'global', dirty: true, reason, updatedAt: new Date() } },
+        { upsert: true }
+      )
+    } catch (err) {
+      console.error('[Typesense] Could not persist dirty sync marker:', (err as Error)?.message)
+    }
+  }
+
+  private enqueueRetry(description: string, run: () => Promise<void>, attempts = 0): void {
+    if (attempts >= this.maxRetryAttempts) {
+      console.error(`[Typesense] Dropping retry after ${attempts} attempts: ${description}`)
+      return
+    }
+    if (this.retryQueue.length >= this.maxQueueSize) {
+      console.error(`[Typesense] Queue full (${this.maxQueueSize}), dropping: ${description}`)
+      return
+    }
+    this.retryQueue.push({ description, run, attempts })
+  }
+
+  private async runOrQueue(description: string, run: () => Promise<void>, attempts = 0): Promise<void> {
+    if (!this.isAvailable) {
+      await this.markDirty(description)
+      this.enqueueRetry(description, run, attempts)
+      return
+    }
+
+    try {
+      await run()
+    } catch (err) {
+      console.error(`[Typesense] ${description} error:`, (err as Error)?.message)
+      await this.markDirty(description)
+      this.enqueueRetry(description, run, attempts + 1)
+    }
+  }
+
+  private async flushRetries(): Promise<void> {
+    if (!this.isAvailable || this.isFlushingRetries || this.retryQueue.length === 0) return
+    this.isFlushingRetries = true
+    const pending = this.retryQueue.splice(0)
+    const requeued: typeof pending = []
+
+    try {
+      for (const item of pending) {
+        if (item.attempts >= this.maxRetryAttempts) {
+          console.error(`[Typesense] Dropping retry after ${item.attempts} attempts: ${item.description}`)
+          continue
+        }
+
+        try {
+          await item.run()
+        } catch (err) {
+          console.error(`[Typesense] ${item.description} retry error:`, (err as Error)?.message)
+          requeued.push({ ...item, attempts: item.attempts + 1 })
+        }
+      }
+    } finally {
+      if (requeued.length > 0) {
+        this.retryQueue.unshift(...requeued)
+      }
+      this.isFlushingRetries = false
+    }
+  }
+
+  private async ensureCollections(): Promise<boolean> {
+    let needsReconciliation = false
     const collections = [
       { name: PRODUCTS_COLLECTION, schema: productSchema },
       { name: ARTICLES_COLLECTION, schema: articleSchema },
@@ -217,12 +357,31 @@ class TypesenseService {
         const existingFieldNames = new Set((collection.fields || []).map((field: any) => field.name))
         const schemaFieldNames = (schema.fields || []).map((field: any) => field.name)
         const missingFields = schemaFieldNames.filter((fieldName: string) => !existingFieldNames.has(fieldName))
+        const expectedFields = new Map((schema.fields || []).map((field: any) => [field.name, field]))
+        const incompatibleFields = (collection.fields || [])
+          .filter((field: any) => {
+            const expected = expectedFields.get(field.name)
+            if (!expected) return false
+            return (
+              field.type !== expected.type ||
+              Boolean(field.facet) !== Boolean(expected.facet) ||
+              Boolean(field.optional) !== Boolean(expected.optional) ||
+              Boolean(field.infix) !== Boolean(expected.infix) ||
+              field.index === false !== (expected.index === false)
+            )
+          })
+          .map((field: any) => field.name)
 
-        if (missingFields.length > 0) {
-          console.log(`[Typesense] Collection "${name}" schema missing fields: ${missingFields.join(', ')}. Recreating.`)
+        if (missingFields.length > 0 || incompatibleFields.length > 0) {
+          const reasons = [
+            missingFields.length ? `missing fields: ${missingFields.join(', ')}` : '',
+            incompatibleFields.length ? `incompatible fields: ${incompatibleFields.join(', ')}` : ''
+          ].filter(Boolean)
+          console.log(`[Typesense] Collection "${name}" schema ${reasons.join('; ')}. Recreating.`)
           await client.collections(name).delete()
           await client.collections().create(schema as any)
           console.log(`[Typesense] Recreated collection "${name}".`)
+          needsReconciliation = true
           continue
         }
 
@@ -230,8 +389,88 @@ class TypesenseService {
       } catch {
         await client.collections().create(schema as any)
         console.log(`[Typesense] Created collection "${name}".`)
+        needsReconciliation = true
       }
     }
+    return needsReconciliation
+  }
+
+  private async loadProducts(): Promise<any[]> {
+    const products = await databaseService.products
+      .aggregate([
+        { $lookup: { from: process.env.DB_CATEGORIES_COLLECTION || 'categories', localField: 'categoryId', foreignField: '_id', as: 'category' } },
+        { $lookup: { from: process.env.DB_BRANDS_COLLECTION || 'brands', localField: 'brandId', foreignField: '_id', as: 'brand' } },
+        { $lookup: { from: process.env.DB_PRODUCT_DETAILS_COLLECTION || 'productDetails', localField: '_id', foreignField: 'productId', as: 'details' } },
+        { $addFields: { category: { $arrayElemAt: ['$category', 0] }, brand: { $arrayElemAt: ['$brand', 0] }, details: { $arrayElemAt: ['$details', 0] } } }
+      ])
+      .toArray()
+    const { default: campaignService } = await import('./campaigns.services')
+    return campaignService.enrichProductsWithCampaigns(products)
+  }
+
+  private async reconcileAll(): Promise<void> {
+    if (!this.isAvailable || this.isReconciling) return
+    this.isReconciling = true
+    try {
+      // A full source-of-truth rebuild supersedes stale in-memory operations.
+      this.retryQueue = []
+      await Promise.all(
+        [PRODUCTS_COLLECTION, ARTICLES_COLLECTION, BRANDS_COLLECTION, CATEGORIES_COLLECTION].map((name) =>
+          client.collections(name).documents().delete({ filter_by: 'mongoId:!=__typesense_never__' })
+        )
+      )
+      const articles = await databaseService.articles
+        .aggregate([
+          { $lookup: { from: process.env.DB_HEALTH_CATEGORIES_COLLECTION || 'healthCategories', localField: 'categoryId', foreignField: '_id', as: 'category' } },
+          { $addFields: { category: { $arrayElemAt: ['$category', 0] } } }
+        ])
+        .toArray()
+      const [products, brands, categories] = await Promise.all([
+        this.loadProducts(),
+        databaseService.brands.find({}).toArray(),
+        databaseService.categories.find({}).toArray()
+      ])
+      await Promise.all([
+        this.bulkIndexProducts(products),
+        this.bulkIndexArticles(articles),
+        this.bulkIndexBrands(brands),
+        this.bulkIndexCategories(categories)
+      ])
+      if (this.retryQueue.length > 0) throw new Error(`${this.retryQueue.length} Typesense operations are still queued`)
+      const campaignFingerprint = await this.getCampaignFingerprint()
+      this.retryQueue = []
+      await databaseService.typesenseSyncState.updateOne(
+        { key: 'global' },
+        { $set: { key: 'global', dirty: false, reconciledAt: new Date(), campaignFingerprint }, $unset: { reason: '' } },
+        { upsert: true }
+      )
+      console.log('[Typesense] Full reconciliation completed.')
+    } catch (err) {
+      await this.markDirty(`reconciliation: ${(err as Error)?.message}`)
+      console.error('[Typesense] Full reconciliation failed:', (err as Error)?.message)
+    } finally {
+      this.isReconciling = false
+    }
+  }
+
+  private async reconcileIfNeeded(force = false): Promise<void> {
+    const state = await databaseService.typesenseSyncState.findOne({ key: 'global' })
+    const campaignFingerprint = await this.getCampaignFingerprint()
+    if (force || state?.dirty || state?.campaignFingerprint !== campaignFingerprint) await this.reconcileAll()
+  }
+
+  private async getCampaignFingerprint(): Promise<string> {
+    const now = new Date()
+    const campaigns = await databaseService.campaigns
+      .find(
+        { status: 'active', startDate: { $lte: now }, endDate: { $gte: now } },
+        { projection: { _id: 1, updatedAt: 1, startDate: 1, endDate: 1 } }
+      )
+      .sort({ _id: 1 })
+      .toArray()
+    return campaigns
+      .map((campaign) => `${campaign._id}:${campaign.updatedAt?.getTime?.() || ''}:${campaign.startDate}:${campaign.endDate}`)
+      .join('|')
   }
 
   private startHealthCheck(): void {
@@ -241,7 +480,10 @@ class TypesenseService {
         if (!this.isAvailable) {
           this.isAvailable = true
           await this.ensureCollections()
+          await this.reconcileIfNeeded(true)
         }
+        await this.reconcileIfNeeded()
+        await this.flushRetries()
       } catch {
         this.isAvailable = false
       }
@@ -253,124 +495,122 @@ class TypesenseService {
       await client.health.retrieve()
       this.isAvailable = true
       await this.ensureCollections()
+      await this.reconcileIfNeeded(true)
+      await this.flushRetries()
     } catch {
       this.isAvailable = false
     }
     this.startHealthCheck()
   }
 
-  async indexProduct(product: any): Promise<void> {
-    if (!this.isAvailable) return
-    try {
-      await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(product))
-    } catch (err) {
-      console.error('[Typesense] indexProduct error:', (err as Error)?.message)
+  async dropCollections(collectionNames: string[]): Promise<void> {
+    for (const collectionName of collectionNames) {
+      try {
+        await client.collections(collectionName).delete()
+        console.log(`[Typesense] Dropped collection "${collectionName}".`)
+      } catch {
+        // Collection may not exist yet.
+      }
     }
+  }
+
+  async getCollectionFieldNames(collectionName: string): Promise<Set<string>> {
+    const collection = await client.collections(collectionName).retrieve()
+    return new Set((collection.fields || []).map((field: any) => field.name))
+  }
+
+  async indexProduct(product: any): Promise<void> {
+    await this.runOrQueue(`indexProduct ${product?._id?.toString?.() || product?.mongoId || ''}`, async () => {
+      const { default: campaignService } = await import('./campaigns.services')
+      const enriched = await campaignService.enrichProductWithCampaign(product)
+      await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(enriched))
+    })
   }
 
   async removeProduct(mongoId: string): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`removeProduct ${mongoId}`, async () => {
       await client.collections(PRODUCTS_COLLECTION).documents().delete({ filter_by: `mongoId:=${mongoId}` })
-    } catch (err) {
-      console.error('[Typesense] removeProduct error:', (err as Error)?.message)
-    }
+    })
   }
 
   async bulkIndexProducts(products: any[]): Promise<void> {
-    if (!this.isAvailable || !products.length) return
-    try {
-      await client.collections(PRODUCTS_COLLECTION).documents().import(products.map(toProductDocument), { action: 'upsert' })
-    } catch (err) {
-      console.error('[Typesense] bulkIndexProducts error:', (err as Error)?.message)
-    }
+    if (!products.length) return
+    await this.runOrQueue(`bulkIndexProducts ${products.length}`, async () => {
+      const { default: campaignService } = await import('./campaigns.services')
+      const enriched = await campaignService.enrichProductsWithCampaigns(products)
+      const result = await client.collections(PRODUCTS_COLLECTION).documents().import(enriched.map(toProductDocument), { action: 'upsert' })
+      const failed = result.filter((r: any) => !r.success).length
+      console.log(`[Typesense] Bulk indexed ${products.length - failed}/${products.length} products.`)
+      if (failed > 0) throw new Error(`${failed} product documents failed to import`)
+    })
   }
 
   async indexArticle(article: any): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`indexArticle ${article?._id?.toString?.() || article?.mongoId || ''}`, async () => {
       await client.collections(ARTICLES_COLLECTION).documents().upsert(toArticleDocument(article))
-    } catch (err) {
-      console.error('[Typesense] indexArticle error:', (err as Error)?.message)
-    }
+    })
   }
 
   async removeArticle(mongoId: string): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`removeArticle ${mongoId}`, async () => {
       await client.collections(ARTICLES_COLLECTION).documents().delete({ filter_by: `mongoId:=${mongoId}` })
-    } catch (err) {
-      console.error('[Typesense] removeArticle error:', (err as Error)?.message)
-    }
+    })
   }
 
   async bulkIndexArticles(articles: any[]): Promise<void> {
-    if (!this.isAvailable || !articles.length) return
-    try {
-      await client.collections(ARTICLES_COLLECTION).documents().import(articles.map(toArticleDocument), { action: 'upsert' })
-    } catch (err) {
-      console.error('[Typesense] bulkIndexArticles error:', (err as Error)?.message)
-    }
+    if (!articles.length) return
+    await this.runOrQueue(`bulkIndexArticles ${articles.length}`, async () => {
+      const result = await client.collections(ARTICLES_COLLECTION).documents().import(articles.map(toArticleDocument), { action: 'upsert' })
+      const failed = result.filter((r: any) => !r.success).length
+      console.log(`[Typesense] Bulk indexed ${articles.length - failed}/${articles.length} articles.`)
+      if (failed > 0) throw new Error(`${failed} article documents failed to import`)
+    })
   }
 
   async indexBrand(brand: any): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`indexBrand ${brand?._id?.toString?.() || brand?.mongoId || ''}`, async () => {
       await client.collections(BRANDS_COLLECTION).documents().upsert(toBrandDocument(brand))
-    } catch (err) {
-      console.error('[Typesense] indexBrand error:', (err as Error)?.message)
-    }
+    })
   }
 
   async removeBrand(mongoId: string): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`removeBrand ${mongoId}`, async () => {
       await client.collections(BRANDS_COLLECTION).documents().delete({ filter_by: `mongoId:=${mongoId}` })
-    } catch (err) {
-      console.error('[Typesense] removeBrand error:', (err as Error)?.message)
-    }
+    })
   }
 
   async bulkIndexBrands(brands: any[]): Promise<void> {
-    if (!this.isAvailable || !brands.length) return
-    try {
+    if (!brands.length) return
+    await this.runOrQueue(`bulkIndexBrands ${brands.length}`, async () => {
       const docs = brands.map(toBrandDocument)
       const result = await client.collections(BRANDS_COLLECTION).documents().import(docs, { action: 'upsert' })
       const failed = result.filter((r: any) => !r.success).length
       console.log(`[Typesense] Bulk indexed ${docs.length - failed}/${docs.length} brands.`)
-    } catch (err) {
-      console.error('[Typesense] bulkIndexBrands error:', (err as Error)?.message)
-    }
+      if (failed > 0) throw new Error(`${failed} brand documents failed to import`)
+    })
   }
 
   async indexCategory(category: any): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`indexCategory ${category?._id?.toString?.() || category?.mongoId || ''}`, async () => {
       await client.collections(CATEGORIES_COLLECTION).documents().upsert(toCategoryDocument(category))
-    } catch (err) {
-      console.error('[Typesense] indexCategory error:', (err as Error)?.message)
-    }
+    })
   }
 
   async removeCategory(mongoId: string): Promise<void> {
-    if (!this.isAvailable) return
-    try {
+    await this.runOrQueue(`removeCategory ${mongoId}`, async () => {
       await client.collections(CATEGORIES_COLLECTION).documents().delete({ filter_by: `mongoId:=${mongoId}` })
-    } catch (err) {
-      console.error('[Typesense] removeCategory error:', (err as Error)?.message)
-    }
+    })
   }
 
   async bulkIndexCategories(categories: any[]): Promise<void> {
-    if (!this.isAvailable || !categories.length) return
-    try {
+    if (!categories.length) return
+    await this.runOrQueue(`bulkIndexCategories ${categories.length}`, async () => {
       const docs = categories.map(toCategoryDocument)
       const result = await client.collections(CATEGORIES_COLLECTION).documents().import(docs, { action: 'upsert' })
       const failed = result.filter((r: any) => !r.success).length
       console.log(`[Typesense] Bulk indexed ${docs.length - failed}/${docs.length} categories.`)
-    } catch (err) {
-      console.error('[Typesense] bulkIndexCategories error:', (err as Error)?.message)
-    }
+      if (failed > 0) throw new Error(`${failed} category documents failed to import`)
+    })
   }
 
   async suggest(q: string): Promise<any> {
@@ -380,7 +620,7 @@ class TypesenseService {
       // Stage 1: match by name/sku/brandName → "exact concept" matches
       // Stage 2: match by activeIngredients/indications → "ingredient" matches
       // Merge deduped, name-matches come first for relevance
-      const results = await client.multiSearch.perform({
+      const results = (await client.multiSearch.perform({
         searches: [
           // Products by name/brand/sku (high precision)
           // OTC (requiresPrescription=false=0) được ưu tiên hơn thuốc kê đơn
@@ -442,7 +682,7 @@ class TypesenseService {
             prefix: true
           }
         ]
-      })
+      })) as any
 
       // Merge products: name-matches first, then ingredient-matches, deduped by mongoId
       const seen = new Set<string>()
@@ -466,14 +706,6 @@ class TypesenseService {
         }
       }
 
-      // Stable sort: OTC (requiresPrescription=false) luôn lên trước kê đơn
-      // Giữ nguyên thứ tự tương đối trong từng nhóm (stable sort)
-      productHits.sort((a, b) => {
-        const aRx = a.document.requiresPrescription ? 1 : 0
-        const bRx = b.document.requiresPrescription ? 1 : 0
-        return aRx - bRx
-      })
-
       return {
         products: productHits,
         brands: results.results[2].hits || [],
@@ -491,6 +723,7 @@ class TypesenseService {
     page?: number
     limit?: number
     categoryId?: string
+    categoryIds?: string[]
     brandId?: string
     requiresPrescription?: boolean
     inStock?: boolean
@@ -501,10 +734,11 @@ class TypesenseService {
   }): Promise<any> {
     if (!this.isAvailable) return null
 
-    const { q, page = 1, limit = 20, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
+    const { q, page = 1, limit = 20, categoryId, categoryIds, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
 
     const filters: string[] = ['isActive:=true']
-    if (categoryId) filters.push(`categoryId:=${categoryId}`)
+    if (categoryIds?.length) filters.push(`categoryId:=[${categoryIds.join(',')}]`)
+    else if (categoryId) filters.push(`categoryId:=${categoryId}`)
     if (brandId) filters.push(`brandId:=${brandId}`)
     if (requiresPrescription !== undefined) filters.push(`requiresPrescription:=${requiresPrescription}`)
     if (inStock) filters.push('inStock:=true')
@@ -516,17 +750,21 @@ class TypesenseService {
     // Mặc định: ưu tiên OTC trước kê đơn (requiresPrescription:asc → false=0 trước true=1)
     // Trừ khi user đã filter requiresPrescription cụ thể thì bỏ qua ưu tiên này
     const rxSort = requiresPrescription !== undefined ? '' : 'requiresPrescription:asc,'
+    // Khi q='*' (browse mode), _text_match không có ý nghĩa → bỏ qua
+    // Typesense giới hạn tối đa 3 sort fields
+    const isTextSearch = q && q !== '*'
+    const textMatchPrefix = isTextSearch ? '_text_match:desc,' : ''
 
-    let sortByStr = `_text_match:desc,${rxSort}rating:desc,reviewCount:desc,stockQuantity:desc`
-    if (sortBy === 'price_asc') sortByStr = `${rxSort}price:asc`
-    else if (sortBy === 'price_desc') sortByStr = `${rxSort}price:desc`
-    else if (sortBy === 'newest') sortByStr = `${rxSort}createdAt:desc`
+    let sortByStr = `${textMatchPrefix}${rxSort}rating:desc`.replace(/,$/, '')
+    if (sortBy === 'price_asc') sortByStr = `${rxSort}price:asc`.replace(/,$/, '')
+    else if (sortBy === 'price_desc') sortByStr = `${rxSort}price:desc`.replace(/,$/, '')
+    else if (sortBy === 'newest') sortByStr = `${rxSort}createdAt:desc`.replace(/,$/, '')
     else if (sortBy === 'rating') sortByStr = `${rxSort}rating:desc,reviewCount:desc`
 
     try {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({
-        q: q || '*',
-        query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode',
+        q: q && q !== '*' ? `${q} ${normalizeVietnamese(q)}` : '*',
+        query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode,searchTextNormalized',
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
         sort_by: sortByStr,
@@ -567,6 +805,25 @@ class TypesenseService {
 
   getAvailability(): boolean {
     return this.isAvailable
+  }
+
+  async requestReconciliation(reason: string): Promise<void> {
+    await this.markDirty(reason)
+    if (this.isAvailable) void this.reconcileAll()
+  }
+
+  async getConsistencyStatus(): Promise<Record<string, unknown>> {
+    if (!this.isAvailable) return { healthy: false, dirty: true }
+    const [state, collections] = await Promise.all([
+      databaseService.typesenseSyncState.findOne({ key: 'global' }),
+      Promise.all(
+        [PRODUCTS_COLLECTION, ARTICLES_COLLECTION, BRANDS_COLLECTION, CATEGORIES_COLLECTION].map(async (name) => {
+          const collection = await client.collections(name).retrieve()
+          return [name, collection.num_documents || 0] as const
+        })
+      )
+    ])
+    return { healthy: true, dirty: Boolean(state?.dirty), counts: Object.fromEntries(collections), lastReconciledAt: state?.reconciledAt }
   }
 }
 
