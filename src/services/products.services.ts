@@ -150,10 +150,7 @@ class ProductsService {
       .catch(() => {})
 
     // Update category product count
-    await databaseService.categories.updateOne(
-      { _id: new ObjectId(payload.categoryId) },
-      { $inc: { productCount: 1 }, $set: { updatedAt: new Date() } }
-    )
+    await categoriesService.updateProductCount(new ObjectId(payload.categoryId), 1)
 
     // Update brand product count if brand exists
     if (payload.brandId) {
@@ -198,7 +195,8 @@ class ProductsService {
         // For parent category with path '/thuc-pham-chuc-nang', we want to find:
         // - Categories with path STARTING with '/thuc-pham-chuc-nang' (subcategories)
         // - Or the parent category itself (by _id)
-        const categoryPath = targetCategory.path
+        const categoryPath =
+          targetCategory.path === '/' ? `/${targetCategory.slug}` : `${targetCategory.path}/${targetCategory.slug}`
 
         // Escape special regex characters in the path
         const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -208,7 +206,7 @@ class ProductsService {
           .find({
             $or: [
               { _id: targetCategory._id }, // Include the category itself
-              { path: { $regex: `^${escapedPath}/` } } // All direct descendants (path starts with parent path + /)
+              { path: { $regex: `^${escapedPath}(?:/|$)` } } // All descendants include this category in their ancestor path
             ]
           })
           .toArray()
@@ -240,24 +238,40 @@ class ProductsService {
       filter.requiresPrescription = query.requiresPrescription === 'true'
     }
 
+    if (query.inStock === 'true') {
+      filter.stockQuantity = { ...(filter.stockQuantity as Record<string, number>), $gt: 0 }
+    }
+
+    if (query.minPrice || query.maxPrice) {
+      const priceFilter: Record<string, number> = {}
+      if (query.minPrice) priceFilter.$gte = parseFloat(query.minPrice)
+      if (query.maxPrice) priceFilter.$lte = parseFloat(query.maxPrice)
+      filter['priceVariants.price'] = priceFilter
+    }
+
+    if (query.ratingMin) {
+      filter.rating = { $gte: parseFloat(query.ratingMin) }
+    }
+
     // Enhanced search - will be applied in aggregation pipeline for category/brand
     const searchQuery = query.search
 
     if (query.minStock || query.maxStock) {
-      const stockFilter: Record<string, number> = {}
+      const existing = (filter.stockQuantity as Record<string, number>) || {}
       if (query.minStock) {
-        stockFilter.$gte = parseInt(query.minStock)
+        existing.$gte = parseInt(query.minStock)
       }
       if (query.maxStock) {
-        stockFilter.$lte = parseInt(query.maxStock)
+        existing.$lte = parseInt(query.maxStock)
       }
-      filter.stockQuantity = stockFilter
+      filter.stockQuantity = existing
     }
 
     // Build sort
     const sortBy = query.sortBy || 'createdAt'
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
-    const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder }
+    const sortField = sortBy === 'price' ? 'sortPrice' : sortBy
+    const sort: Record<string, 1 | -1> = { [sortField]: sortOrder }
 
     // Optimize query - always use efficient aggregation with minimal fields
 
@@ -291,7 +305,24 @@ class ProductsService {
           {
             $addFields: {
               category: { $arrayElemAt: ['$category', 0] },
-              brand: { $arrayElemAt: ['$brand', 0] }
+              brand: { $arrayElemAt: ['$brand', 0] },
+              sortPrice: {
+                $let: {
+                  vars: {
+                    defaultVariant: {
+                      $first: {
+                        $filter: {
+                          input: '$priceVariants',
+                          as: 'variant',
+                          cond: { $eq: ['$$variant.isDefault', true] }
+                        }
+                      }
+                    },
+                    firstVariant: { $arrayElemAt: ['$priceVariants', 0] }
+                  },
+                  in: { $ifNull: ['$$defaultVariant.price', '$$firstVariant.price'] }
+                }
+              }
             }
           },
           // Enhanced search filter after lookup
@@ -588,15 +619,9 @@ class ProductsService {
     // Update product counts if category or brand changed
     if (payload.categoryId && payload.categoryId !== product.categoryId.toString()) {
       // Decrease old category count
-      await databaseService.categories.updateOne(
-        { _id: product.categoryId },
-        { $inc: { productCount: -1 }, $set: { updatedAt: new Date() } }
-      )
+      await categoriesService.updateProductCount(product.categoryId, -1)
       // Increase new category count
-      await databaseService.categories.updateOne(
-        { _id: new ObjectId(payload.categoryId) },
-        { $inc: { productCount: 1 }, $set: { updatedAt: new Date() } }
-      )
+      await categoriesService.updateProductCount(new ObjectId(payload.categoryId), 1)
     }
 
     if (payload.brandId && payload.brandId !== product.brandId?.toString()) {
@@ -700,10 +725,7 @@ class ProductsService {
     typesenseService.removeProduct(productId).catch(() => {})
 
     // Update category product count
-    await databaseService.categories.updateOne(
-      { _id: product.categoryId },
-      { $inc: { productCount: -1 }, $set: { updatedAt: new Date() } }
-    )
+    await categoriesService.updateProductCount(product.categoryId, -1)
 
     // Update brand product count if exists
     if (product.brandId) {

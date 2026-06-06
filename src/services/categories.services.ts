@@ -375,6 +375,17 @@ class CategoriesService {
     typesenseService.removeCategory(categoryId).catch(() => {})
     return { message: CATEGORIES_MESSAGES.DELETE_CATEGORY_SUCCESS }
   }
+
+  async updateProductCount(categoryId: ObjectId, increment: number) {
+    await databaseService.categories.updateOne(
+      { _id: categoryId },
+      { $inc: { productCount: increment }, $set: { updatedAt: new Date() } }
+    )
+    const updated = await databaseService.categories.findOne({ _id: categoryId })
+    if (updated) {
+      typesenseService.indexCategory(updated).catch(() => {})
+    }
+  }
 }
 
 const categoriesService = new CategoriesService()
