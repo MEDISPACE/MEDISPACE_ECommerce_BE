@@ -9,7 +9,9 @@ import {
   getAvailablePharmacistController,
   deleteConversationController,
   assignConversationController,
-  saveMessageFeedbackController
+  saveMessageFeedbackController,
+  aiChatController,
+  aiStreamController
 } from '~/controllers/chats.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { sendMessageValidator, rateLimitMessageValidator } from '~/middlewares/chats.middlewares'
@@ -134,6 +136,41 @@ chatsRouter.post(
   accessTokenValidator,
   verifiedUserValidator,
   wrapRequestHandler(saveMessageFeedbackController)
+)
+
+// ── AI Chat routes (Phase 3) ────────────────────────────────────────────
+
+/**
+ * AI Chat — Non-streaming
+ * Path: /ai-message
+ * Method: POST
+ * Body: { message, conversation_id, context_products? }
+ * Response: { reply, classification, is_escalated, products_suggested, suggested_questions }
+ */
+chatsRouter.post(
+  '/ai-message',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(aiChatController)
+)
+
+/**
+ * AI Chat — SSE Streaming (FE dùng EventSource hoặc fetch stream)
+ * Path: /ai-stream
+ * Method: GET
+ * Query: { message, conversation_id, context_products? (JSON string) }
+ * Response: text/event-stream
+ *
+ * SSE Event format:
+ *   data: {"type":"chunk","content":"text..."}
+ *   data: {"type":"done","reply":"...","classification":"...", ...}
+ *   data: [DONE]
+ */
+chatsRouter.get(
+  '/ai-stream',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(aiStreamController)
 )
 
 export default chatsRouter
