@@ -241,10 +241,18 @@ class ProductsService {
     }
 
     // Enhanced search - will be applied in aggregation pipeline for category/brand
+    // Sanitize search query to prevent regex injection (ReDoS)
     const searchQuery = query.search
+      ? query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      : undefined
+
+    // Handle inStock filter: map to stockQuantity > 0
+    if (query.inStock === 'true') {
+      filter.stockQuantity = { ...(filter.stockQuantity as Record<string, number> || {}), $gt: 0 }
+    }
 
     if (query.minStock || query.maxStock) {
-      const stockFilter: Record<string, number> = {}
+      const stockFilter: Record<string, number> = { ...(filter.stockQuantity as Record<string, number> || {}) }
       if (query.minStock) {
         stockFilter.$gte = parseInt(query.minStock)
       }
@@ -254,10 +262,12 @@ class ProductsService {
       filter.stockQuantity = stockFilter
     }
 
-    // Build sort
-    const sortBy = query.sortBy || 'createdAt'
+    // Build sort — handle 'price' specially since Product uses priceVariants[] not a flat price field
+    const rawSortBy = query.sortBy || 'createdAt'
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
-    const sort: Record<string, 1 | -1> = { [sortBy]: sortOrder }
+    // If sorting by 'price', we sort on computed 'calculatedPrice' field (added via $addFields)
+    const sortField = rawSortBy === 'price' ? 'calculatedPrice' : rawSortBy
+    const sort: Record<string, 1 | -1> = { [sortField]: sortOrder }
 
     // Optimize query - always use efficient aggregation with minimal fields
 
@@ -291,7 +301,21 @@ class ProductsService {
           {
             $addFields: {
               category: { $arrayElemAt: ['$category', 0] },
-              brand: { $arrayElemAt: ['$brand', 0] }
+              brand: { $arrayElemAt: ['$brand', 0] },
+              // Compute price from default priceVariant (isDefault=true) or first variant for sorting
+              calculatedPrice: {
+                $let: {
+                  vars: {
+                    defaultVariant: {
+                      $ifNull: [
+                        { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                        { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                      ]
+                    }
+                  },
+                  in: { $ifNull: ['$$defaultVariant.price', 0] }
+                }
+              }
             }
           },
           // Enhanced search filter after lookup
