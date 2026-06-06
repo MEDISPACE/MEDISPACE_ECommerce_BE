@@ -7,24 +7,10 @@
 import { config } from 'dotenv'
 config()
 
-import { MongoClient, ObjectId } from 'mongodb'
+import { MongoClient } from 'mongodb'
 import typesenseService from '../services/typesense.services'
 
 const MONGO_URI = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/${process.env.DB_NAME}?retryWrites=true&w=majority`
-
-import Typesense from 'typesense'
-
-const tsClient = new Typesense.Client({
-  nodes: [
-    {
-      host: process.env.TYPESENSE_HOST || 'localhost',
-      port: Number(process.env.TYPESENSE_PORT) || 7700,
-      protocol: 'http'
-    }
-  ],
-  apiKey: process.env.TYPESENSE_API_KEY || 'medispace-ts-secret',
-  connectionTimeoutSeconds: 5
-})
 
 async function seed() {
   console.log('[Seed] Connecting to MongoDB...')
@@ -36,14 +22,7 @@ async function seed() {
   const force = process.argv.includes('--force')
   if (force) {
     console.log('[Seed] --force mode: dropping existing collections...')
-    try {
-      await tsClient.collections('products').delete()
-      console.log('[Seed] Dropped "products".')
-    } catch {}
-    try {
-      await tsClient.collections('articles').delete()
-      console.log('[Seed] Dropped "articles".')
-    } catch {}
+    await typesenseService.dropCollections(['products', 'articles', 'brands', 'categories'])
   }
 
   // query_suggestions luôn drop và tạo lại để tránh data cũ lẫn lộn
@@ -54,15 +33,16 @@ async function seed() {
 
   if (!force) {
     try {
-      const articlesCollection = await tsClient.collections('articles').retrieve()
-      const articleFields = new Set((articlesCollection.fields || []).map((field: any) => field.name))
+      const articleFields = await typesenseService.getCollectionFieldNames('articles')
       const requiredArticleFields = ['riskLevel', 'targetAudiences', 'symptoms', 'activeIngredients', 'healthTopics']
       const missingArticleFields = requiredArticleFields.filter((field) => !articleFields.has(field))
       if (missingArticleFields.length > 0) {
         console.log(`[Seed] Recreating "articles" because schema is missing: ${missingArticleFields.join(', ')}`)
-        await tsClient.collections('articles').delete()
+        await typesenseService.dropCollections(['articles'])
       }
-    } catch {}
+    } catch {
+      // Collection may not exist yet.
+    }
   }
 
   // ── Init Typesense collections ──────────────────────────────────────────────

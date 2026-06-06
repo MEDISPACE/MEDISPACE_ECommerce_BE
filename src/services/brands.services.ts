@@ -201,6 +201,10 @@ class BrandsService {
       { _id: brandId },
       { $inc: { productCount: increment }, $set: { updatedAt: new Date() } }
     )
+    const updated = await databaseService.brands.findOne({ _id: brandId })
+    if (updated) {
+      typesenseService.indexBrand(updated).catch(() => {})
+    }
   }
 }
 
