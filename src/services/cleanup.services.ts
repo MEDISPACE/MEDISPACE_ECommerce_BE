@@ -1,5 +1,6 @@
 import * as cron from 'node-cron'
 import databaseService from './database.services'
+import orderService from './orders.services'
 
 // Time in hours after which unpaid online payment orders will be cancelled
 const ABANDONED_ORDER_TIMEOUT_HOURS = 24
@@ -70,38 +71,32 @@ class CleanupService {
       })
       .toArray()
 
-    // Restore stock for each order before cancelling
+    let cancelledCount = 0
+
+    // Use OrderService so stock, loyalty points, and coupon usage are released consistently.
     for (const order of ordersToCancel) {
-      for (const item of order.items || []) {
-        const product = await databaseService.products.findOne({ _id: item.productId })
-        if (product) {
-          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
-          const quantityPerUnit = variant?.quantityPerUnit || 1
-          const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne({ _id: item.productId }, { $inc: { stockQuantity: stockToRestore } })
-        }
+      try {
+        await orderService.updateOrderStatus(
+          order._id!,
+          'cancelled'
+        )
+        await databaseService.orders.updateOne(
+          { _id: order._id },
+          {
+            $set: {
+              cancelReason: 'Đơn hàng tự động hủy do không hoàn tất thanh toán trong thời gian quy định',
+              cancelledAt: new Date(),
+              updatedAt: new Date()
+            }
+          }
+        )
+        cancelledCount += 1
+      } catch (error) {
+        console.error(`[CleanupService] Failed to cancel abandoned order ${order._id}:`, error)
       }
     }
 
-    // Now update all orders to cancelled status
-    const result = await databaseService.orders.updateMany(
-      {
-        paymentStatus: 'pending',
-        paymentMethod: { $in: ['vnpay', 'payos', 'bank_transfer'] },
-        orderStatus: { $nin: ['cancelled', 'delivered'] },
-        createdAt: { $lt: cutoffTime }
-      },
-      {
-        $set: {
-          orderStatus: 'cancelled',
-          cancelReason: 'Đơn hàng tự động hủy do không hoàn tất thanh toán trong thời gian quy định',
-          cancelledAt: new Date(),
-          updatedAt: new Date()
-        }
-      }
-    )
-
-    return { cancelledCount: result.modifiedCount || 0 }
+    return { cancelledCount }
   }
 
   // Get abandoned order statistics

@@ -67,6 +67,10 @@ export const getOrderConfirmationContent = (order: any) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount)
   }
 
+  const appliedCoupons = order.appliedCoupons || []
+  const pointsRedeemed = order.pointsRedeemed || 0
+  const pointsRedeemAmount = order.pointsRedeemAmount || 0
+
   const itemsHtml = order.items
     .map(
       (item: any) => `
@@ -143,11 +147,43 @@ export const getOrderConfirmationContent = (order: any) => {
           <td style="padding: 5px 10px; text-align: right;">${formatCurrency(order.shippingFee)}</td>
         </tr>
         ${
-          order.discountAmount > 0
+          order.discountAmount > 0 || appliedCoupons.length > 0
             ? `
         <tr>
           <td colspan="3" style="padding: 5px 10px; text-align: right; color: green;">Giảm giá:</td>
-          <td style="padding: 5px 10px; text-align: right; color: green;">-${formatCurrency(order.discountAmount)}</td>
+          <td style="padding: 5px 10px; text-align: right; color: green;">-${formatCurrency(order.discountAmount || 0)}</td>
+        </tr>
+        ${appliedCoupons
+          .map(
+            (coupon: any) => `
+        <tr>
+          <td colspan="3" style="padding: 3px 10px; text-align: right; color: #4b5563; font-size: 12px;">
+            Mã ${coupon.code}${coupon.name ? ` - ${coupon.name}` : ''}:
+          </td>
+          <td style="padding: 3px 10px; text-align: right; color: green; font-size: 12px;">
+            ${
+              coupon.type === 'free_shipping'
+                ? coupon.discountAmount > 0
+                  ? `-${formatCurrency(coupon.discountAmount)}`
+                  : 'Freeship'
+                : `-${formatCurrency(coupon.discountAmount || 0)}`
+            }
+          </td>
+        </tr>
+        `
+          )
+          .join('')}
+        `
+            : ''
+        }
+        ${
+          pointsRedeemAmount > 0
+            ? `
+        <tr>
+          <td colspan="3" style="padding: 5px 10px; text-align: right; color: #7c3aed;">
+            Điểm thưởng (${pointsRedeemed.toLocaleString('vi-VN')} điểm):
+          </td>
+          <td style="padding: 5px 10px; text-align: right; color: #7c3aed;">-${formatCurrency(pointsRedeemAmount)}</td>
         </tr>
         `
             : ''

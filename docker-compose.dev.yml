@@ -17,7 +17,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: builder
     container_name: medispace-backend-dev
+    command: npx nodemon --watch src --ext ts,js,json --exec "tsx ./src/index.ts"
     ports:
       - "8000:8000"
     env_file:
@@ -28,10 +30,11 @@ services:
       TYPESENSE_PORT: 8108
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
+      CHAT_AI_URL: http://chat-ai-service:8003
       REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads
-      - ./src:/app/src        # Hot-reload: mount source để ts-node-dev pick up
+      - ./src:/app/src        # Hot-reload: mount source để tsx pick up
     depends_on:
       - redis
       - typesense
@@ -77,6 +80,36 @@ services:
     restart: unless-stopped
     networks:
       - medispace-dev-net
+
+  # ── Chat AI Service (Python / FastAPI / Gemma) ───────────────────────
+  chat-ai-service:
+    build:
+      context: ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service
+      dockerfile: Dockerfile
+    container_name: medispace-chat-ai-dev
+    ports:
+      - "8003:8003"
+    env_file:
+      - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/.env
+    environment:
+      # █ Khi chạy trong Docker, dùng service name thay vì localhost
+      TYPESENSE_URL: http://typesense:8108
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-medispace-ts-secret}
+    volumes:
+      - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/src:/app/src       # Hot-reload guardrails/agents
+      - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/tests:/app/tests   # Sync test files
+    depends_on:
+      - typesense
+      - redis
+    restart: unless-stopped
+    networks:
+      - medispace-dev-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ── Redis ─────────────────────────────────────────────────────────────────
   redis:

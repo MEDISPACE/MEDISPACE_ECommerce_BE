@@ -11,6 +11,7 @@ import { hashPassword } from '~/utils/crypto'
 import { ShippingMethod } from '~/constants/enum'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
+import orderService from './orders.services'
 
 class PharmacistService {
   // Get dashboard statistics
@@ -582,66 +583,13 @@ class PharmacistService {
 
   // Update order status
   async updateOrderStatus(orderId: string, newStatus: string, trackingNumber?: string, notes?: string) {
-    const orderObjectId = new ObjectId(orderId)
-
-    const order = await databaseService.orders.findOne({ _id: orderObjectId })
-
-    if (!order) {
+    const result = await orderService.updateOrderStatus(new ObjectId(orderId), newStatus, trackingNumber, notes)
+    if (!result) {
       throw new ErrorWithStatus({
         message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
       })
     }
-
-    const updateData: Record<string, unknown> = {
-      orderStatus: newStatus,
-      updatedAt: new Date()
-    }
-
-    // Add shipping info if status is shipped
-    if (newStatus === 'shipped' && trackingNumber) {
-      updateData.trackingNumber = trackingNumber
-      updateData.shippedAt = new Date()
-    }
-
-    // Add delivery timestamp if delivered
-    if (newStatus === 'delivered') {
-      updateData.deliveredAt = new Date()
-
-      // Auto-update payment status for COD orders
-      if (order.paymentMethod === 'cod' && order.paymentStatus === 'pending') {
-        updateData.paymentStatus = 'paid'
-        updateData.paidAt = new Date()
-      }
-    }
-
-    // Add notes if provided
-    if (notes) {
-      updateData.notes = notes
-    }
-
-    // Restore stock when order is cancelled
-    if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
-      for (const item of order.items || []) {
-        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
-        if (product) {
-          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
-          const quantityPerUnit = variant?.quantityPerUnit || 1
-          const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne(
-            { _id: new ObjectId(item.productId) },
-            { $inc: { stockQuantity: stockToRestore } }
-          )
-        }
-      }
-    }
-
-    const result = await databaseService.orders.findOneAndUpdate(
-      { _id: orderObjectId },
-      { $set: updateData },
-      { returnDocument: 'after' }
-    )
-
     return result
   }
 

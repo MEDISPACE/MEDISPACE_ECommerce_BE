@@ -22,6 +22,7 @@ export const USERS_MESSAGES = {
   DATE_MUST_BE_ISO8601: 'Date must be in ISO 8601 format',
   LOGIN_SUCCESS: 'Login successful',
   LOGIN_FAILED: 'Login failed',
+  USER_BANNED: 'User account is banned',
   REGISTER_SUCCESS: 'Registration successful',
   REGISTER_FAILED: 'Registration failed',
   CHECK_EMAIL_FAILED: 'Check email exists failed',
@@ -171,6 +172,7 @@ export const PRODUCTS_MESSAGES = {
   // Product Messages
   PRODUCT_NOT_FOUND: 'Product not found',
   PRODUCT_ALREADY_EXISTS: 'Product with this name or SKU already exists',
+  PRODUCT_SLUG_ALREADY_EXISTS: 'Product slug already exists',
   SKU_ALREADY_EXISTS: 'SKU already exists',
   BARCODE_ALREADY_EXISTS: 'Barcode already exists',
   CATEGORY_NOT_FOUND: 'Category not found',
@@ -587,6 +589,8 @@ export const ARTICLES_MESSAGES = {
   SEARCH_LENGTH_INVALID: 'Search query must be between 1 and 100 characters',
   SORT_BY_INVALID: 'Sort by must be createdAt, publishedAt, viewCount, or title',
   SORT_ORDER_INVALID: 'Sort order must be asc or desc',
+  ARTICLE_PERMISSION_DENIED: 'You do not have permission to manage this article',
+  ARTICLE_PUBLISH_PERMISSION_DENIED: 'Only admin can publish, archive, feature, or pin articles',
 
   // Success Messages
   CREATE_ARTICLE_SUCCESS: 'Article created successfully',
@@ -597,7 +601,14 @@ export const ARTICLES_MESSAGES = {
   PUBLISH_ARTICLE_SUCCESS: 'Article published successfully',
   ARCHIVE_ARTICLE_SUCCESS: 'Article archived successfully',
   INCREMENT_VIEW_SUCCESS: 'Article view count updated',
-  GET_RELATED_ARTICLES_SUCCESS: 'Get related articles successfully'
+  GET_RELATED_ARTICLES_SUCCESS: 'Get related articles successfully',
+  GET_RELATED_PRODUCTS_SUCCESS: 'Get related products successfully',
+  TRACK_JOURNEY_EVENT_SUCCESS: 'Article journey event tracked successfully',
+  GET_JOURNEY_ANALYTICS_SUCCESS: 'Get article journey analytics successfully',
+  GET_ADMIN_INSIGHTS_SUCCESS: 'Get article admin insights successfully',
+  ARTICLE_AI_ASSIST_SUCCESS: 'Article AI assistance generated successfully',
+  ARTICLE_AI_ASK_SUCCESS: 'Article AI answer generated successfully',
+  GET_PERSONALIZED_ARTICLES_SUCCESS: 'Get personalized articles successfully'
 } as const
 
 export const HEALTH_CATEGORIES_MESSAGES = {
