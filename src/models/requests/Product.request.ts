@@ -68,7 +68,7 @@ export interface GetProductsQuery {
   requiresPrescription?: string
   inStock?: string
   search?: string
-  sortBy?: 'name' | 'createdAt' | 'stockQuantity' | 'sku' | 'price'
+  sortBy?: 'name' | 'createdAt' | 'stockQuantity' | 'sku' | 'price' | 'rating' | 'reviewCount'
   sortOrder?: 'asc' | 'desc'
   minStock?: string
   maxStock?: string
