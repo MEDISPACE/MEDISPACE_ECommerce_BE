@@ -5,6 +5,8 @@ import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ReviewStatus } from '~/constants/enum'
 import { REVIEWS_MESSAGES } from '~/constants/message'
+import productsService from './products.services'
+import typesenseService from './typesense.services'
 
 /**
  * Review Service for Medical E-commerce
@@ -636,6 +638,13 @@ class ReviewService {
         }
       }
     )
+
+    try {
+      const updatedProduct = await productsService.getProductById(productId.toString())
+      typesenseService.indexProduct(updatedProduct).catch(() => {})
+    } catch {
+      // Rating update should not fail review moderation if product re-indexing cannot run.
+    }
   }
 
   /**

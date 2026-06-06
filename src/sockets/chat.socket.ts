@@ -10,6 +10,8 @@ import { config } from 'dotenv'
 import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
 import { TokenType, UserRole, UserStatus } from '~/constants/enum'
 
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 config()
 
 // ── Socket Rate Limiting (Task 1.2) ─────────────────────────────────────────
@@ -275,9 +277,10 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         stockQuantity: { $gt: 0 }
                       }
                       if (query) {
+                        const safeQuery = escapeRegex(query)
                         mongoFilter.$or = [
-                          { name: { $regex: query, $options: 'i' } },
-                          { sku: { $regex: query, $options: 'i' } }
+                          { name: { $regex: safeQuery, $options: 'i' } },
+                          { sku: { $regex: safeQuery, $options: 'i' } }
                         ]
                       }
                       const products = await databaseService.products
