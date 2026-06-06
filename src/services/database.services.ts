@@ -23,11 +23,18 @@ import CouponRedemption from '~/models/schemas/CouponRedemption.schema'
 import Campaign from '~/models/schemas/Campaign.schema'
 import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
 import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
+import LoyaltyProgramConfig from '~/models/schemas/LoyaltyProgramConfig.schema'
 import Notification from '~/models/schemas/Notification.schema'
+import {
+  ensureCriticalLoyaltyCouponIndexes,
+  verifyCriticalLoyaltyCouponIndexes
+} from './loyaltyCouponIndexes.services'
 
 config()
 
-const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
+const uri =
+  process.env.MONGODB_URI ||
+  `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/?retryWrites=true&w=majority&appName=MediSpaceDB`
 
 class DatabaseService {
   private client: MongoClient
@@ -56,20 +63,36 @@ class DatabaseService {
       try {
         await collection.createIndex(indexSpec, { background: true, ...options })
       } catch (error: any) {
-        // Ignore duplicate key errors (index already exists or duplicate data)
-        if (error.code !== 11000 && error.code !== 85) {
-          // Silent - index already exists or duplicate data
+        if (error.code === 11000 || error.code === 85) {
+          console.warn('⚠️ Non-critical MongoDB index was not created:', {
+            collection: collection.collectionName,
+            indexSpec,
+            code: error.code,
+            message: error.message
+          })
+        } else {
+          throw error
         }
       }
     }
 
     try {
+      // Auth collection indexes
+      await safeCreateIndex(this.users, { email: 1 }, { unique: true })
+      await safeCreateIndex(this.refreshTokens, { token: 1 }, { unique: true })
+      await safeCreateIndex(this.refreshTokens, { userId: 1 })
+      await safeCreateIndex(this.refreshTokens, { expiresAt: 1 }, { expireAfterSeconds: 0 })
+
       // Products collection indexes
       await safeCreateIndex(this.products, { categoryId: 1, isActive: 1, createdAt: -1 })
       await safeCreateIndex(this.products, { categoryId: 1 })
       await safeCreateIndex(this.products, { slug: 1 }, { unique: true })
       await safeCreateIndex(this.products, { sku: 1 }, { unique: true })
-      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text' })
+      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text', sku: 'text' }, {
+        weights: { name: 3, shortDescription: 1, sku: 2 }
+      })
+      await safeCreateIndex(this.articleJourneyEvents, { articleId: 1, eventType: 1, createdAt: -1 })
+      await safeCreateIndex(this.articleJourneyEvents, { sessionId: 1, createdAt: -1 })
 
       // Categories collection indexes
       await safeCreateIndex(this.categories, { slug: 1 }, { unique: true })
@@ -95,6 +118,7 @@ class DatabaseService {
 
       // CouponRedemptions collection indexes
       await safeCreateIndex(this.couponRedemptions, { couponId: 1, userId: 1 })
+      await safeCreateIndex(this.couponRedemptions, { couponCode: 1, userId: 1, orderId: 1 }, { unique: true })
       await safeCreateIndex(this.couponRedemptions, { orderId: 1 })
       await safeCreateIndex(this.couponRedemptions, { userId: 1, createdAt: -1 })
 
@@ -110,16 +134,45 @@ class DatabaseService {
       // LoyaltyTransactions collection indexes
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, createdAt: -1 })
       await safeCreateIndex(this.loyaltyTransactions, { userId: 1, type: 1 })
-      await safeCreateIndex(this.loyaltyTransactions, { userId: 1, orderId: 1, type: 1 })
       await safeCreateIndex(this.loyaltyTransactions, { type: 1, isExpired: 1, expiresAt: 1 })
+      await safeCreateIndex(this.loyaltyProgramConfigs, { status: 1, version: -1 })
+      await safeCreateIndex(this.loyaltyProgramConfigs, { version: 1 }, { unique: true })
+
+      await ensureCriticalLoyaltyCouponIndexes(this.db)
+      await verifyCriticalLoyaltyCouponIndexes(this.db)
 
       // Notifications collection indexes
       await safeCreateIndex(this.notifications, { userId: 1, isRead: 1, createdAt: -1 })
       await safeCreateIndex(this.notifications, { userId: 1, targetRole: 1, createdAt: -1 })
       await safeCreateIndex(this.notifications, { targetRole: 1, createdAt: -1 })
 
+      // Community & Moderation indexes (MVP)
+      await safeCreateIndex(this.communityRooms, { slug: 1 }, { unique: true })
+      await safeCreateIndex(this.communityRooms, { visibility: 1, status: 1, createdAt: -1 })
+
+      await safeCreateIndex(this.communityRoomMembers, { roomId: 1, userId: 1 }, { unique: true })
+      await safeCreateIndex(this.communityRoomMembers, { roomId: 1, status: 1, updatedAt: -1 })
+      await safeCreateIndex(this.communityRoomMembers, { userId: 1, status: 1, updatedAt: -1 })
+
+      await safeCreateIndex(this.communityMessages, { roomId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityMessages, { senderId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityMessages, { status: 1, createdAt: -1 })
+
+      await safeCreateIndex(this.moderationFindings, { status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationFindings, { roomId: 1, status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationFindings, { messageId: 1 }, { unique: true })
+
+      await safeCreateIndex(this.moderationReports, { messageId: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationReports, { messageId: 1, reporterId: 1 }, { unique: true })
+      await safeCreateIndex(this.moderationActions, { messageId: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationAppeals, { status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationAppeals, { roomId: 1, userId: 1, status: 1, createdAt: -1 })
+      await safeCreateIndex(this.moderationAiJobs, { status: 1, lockedUntil: 1, createdAt: 1 })
+      await safeCreateIndex(this.moderationAiJobs, { messageId: 1, promptVersion: 1 }, { unique: true })
+
     } catch (error) {
-      // Silent - indexes may already exist
+      console.error('❌ MongoDB index creation/verification failed:', error)
+      throw error
     }
   }
   get users(): Collection<User> {
@@ -170,6 +223,9 @@ class DatabaseService {
   get articles(): Collection<Article> {
     return this.db.collection(process.env.DB_ARTICLES_COLLECTION as string)
   }
+  get articleJourneyEvents(): Collection {
+    return this.db.collection(process.env.DB_ARTICLE_JOURNEY_EVENTS_COLLECTION || 'articleJourneyEvents')
+  }
   get healthCategories(): Collection<HealthCategory> {
     return this.db.collection(process.env.DB_HEALTH_CATEGORIES_COLLECTION as string)
   }
@@ -191,8 +247,44 @@ class DatabaseService {
   get loyaltyTransactions(): Collection<LoyaltyTransaction> {
     return this.db.collection(process.env.DB_LOYALTY_TRANSACTIONS_COLLECTION as string)
   }
+  get loyaltyProgramConfigs(): Collection<LoyaltyProgramConfig> {
+    return this.db.collection(process.env.DB_LOYALTY_PROGRAM_CONFIGS_COLLECTION || 'loyalty_program_configs')
+  }
   get notifications(): Collection<Notification> {
     return this.db.collection('notifications')
+  }
+
+  // ── Community / Moderation (MVP) ───────────────────────────────────────────
+  get communityRooms(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms')
+  }
+
+  get communityRoomMembers(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_ROOM_MEMBERS_COLLECTION || 'communityRoomMembers')
+  }
+
+  get communityMessages(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages')
+  }
+
+  get moderationFindings(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_FINDINGS_COLLECTION || 'moderationFindings')
+  }
+
+  get moderationReports(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_REPORTS_COLLECTION || 'moderationReports')
+  }
+
+  get moderationActions(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_ACTIONS_COLLECTION || 'moderationActions')
+  }
+
+  get moderationAppeals(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_APPEALS_COLLECTION || 'moderationAppeals')
+  }
+
+  get moderationAiJobs(): Collection {
+    return this.db.collection(process.env.DB_MODERATION_AI_JOBS_COLLECTION || 'moderationAiJobs')
   }
 }
 

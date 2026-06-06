@@ -16,7 +16,7 @@ const getUserAndSession = (req: Request) => {
 // POST /coupons/validate — Preview discount (không áp dụng vào cart)
 export const validateCouponController = async (req: Request, res: Response) => {
   const { userId } = getUserAndSession(req)
-  const { code, cartSubtotal, hasPrescriptionItems } = req.body
+  const { code, cartSubtotal, hasPrescriptionItems, items } = req.body
 
   if (!userId) {
     return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -28,7 +28,8 @@ export const validateCouponController = async (req: Request, res: Response) => {
     code,
     userId,
     cartSubtotal || 0,
-    hasPrescriptionItems || false
+    hasPrescriptionItems || false,
+    Array.isArray(items) ? items : undefined
   )
 
   return res.status(HTTP_STATUS.OK).json({ message: result.message, result })
@@ -37,7 +38,7 @@ export const validateCouponController = async (req: Request, res: Response) => {
 // POST /coupons/apply — Áp dụng coupon vào cart
 export const applyCouponController = async (req: Request, res: Response) => {
   const { userId, sessionId } = getUserAndSession(req)
-  const { code, selectedSubtotal } = req.body
+  const { code, selectedSubtotal, selectedItems } = req.body
 
   if (!userId) {
     return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -53,7 +54,8 @@ export const applyCouponController = async (req: Request, res: Response) => {
     code,
     userId,
     sessionId,
-    typeof selectedSubtotal === 'number' ? selectedSubtotal : undefined
+    typeof selectedSubtotal === 'number' ? selectedSubtotal : undefined,
+    Array.isArray(selectedItems) ? selectedItems : undefined
   )
 
   return res.status(HTTP_STATUS.OK).json({

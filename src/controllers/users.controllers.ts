@@ -22,6 +22,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { UserStatus } from '~/constants/enum'
 import { pick } from 'lodash'
 import { config } from 'dotenv'
+import { ErrorWithStatus } from '~/models/Error'
 config()
 
 export const registerController = async (
@@ -30,8 +31,8 @@ export const registerController = async (
   next: NextFunction
 ) => {
   try {
-    const existingUser = await usersService.register(req.body)
-    return res.json({ message: USERS_MESSAGES.REGISTER_SUCCESS, userId: existingUser })
+    const userId = await usersService.register(req.body)
+    return res.json({ message: USERS_MESSAGES.REGISTER_SUCCESS, userId })
   } catch (error) {
     next(error)
   }
@@ -67,24 +68,29 @@ export const loginController = async (req: Request<ParamsDictionary, unknown, Lo
 
 export const oauthController = async (req: Request, res: Response) => {
   const { code } = req.query as { code: string }
-  const result = await usersService.oauth(code)
+  const clientRedirectUri = process.env.CLIENT_REDIRECT_URI as string
+  let result
 
-  // Set refresh token as httpOnly cookie (30 days for OAuth)
+  try {
+    result = await usersService.oauth(code)
+  } catch (error) {
+    const errorCode = error instanceof ErrorWithStatus && error.message === USERS_MESSAGES.USER_BANNED ? 'banned' : 'oauth_failed'
+    return res.redirect(`${clientRedirectUri}?error=${encodeURIComponent(errorCode)}`)
+  }
+
   res.cookie('refreshToken', result.refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
-    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    sameSite: 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000
   })
 
-  // Redirect to frontend with access token as URL parameter
-  const redirectUrl = `${process.env.CLIENT_REDIRECT_URI}?accessToken=${result.accessToken}`
-  return res.redirect(redirectUrl)
+  return res.redirect(`${clientRedirectUri}?accessToken=${encodeURIComponent(result.accessToken)}`)
 }
 
 export const logoutController = async (req: Request<ParamsDictionary, unknown, LogoutReqBody>, res: Response) => {
   // Refresh token is now obtained from cookie in middleware, not from body
-  const result = await usersService.logout(req.cookies?.refreshToken)
+  const result = await usersService.logout(req.refreshToken as string)
 
   // Clear refresh token cookie
   res.clearCookie('refreshToken', {
@@ -143,14 +149,25 @@ export const refreshTokenController = async (
 ) => {
   // Refresh token is now obtained from cookie in middleware, not from body
   const { userId, verify, role } = req.decodedRefreshToken as TokenPayload
-  const result = await usersService.refreshToken({ userId, verify, role, refreshToken: req.cookies?.refreshToken })
+  const refreshTokenExpiresIn = req.decodedRefreshToken?.exp && req.decodedRefreshToken?.iat
+    ? req.decodedRefreshToken.exp - req.decodedRefreshToken.iat > 31 * 24 * 60 * 60
+      ? '90d'
+      : '30d'
+    : '30d'
+  const result = await usersService.refreshToken({
+    userId,
+    verify,
+    role: role!,
+    refreshToken: req.refreshToken as string,
+    expiresIn: refreshTokenExpiresIn
+  })
 
   // Set new refresh token as httpOnly cookie
   res.cookie('refreshToken', result.refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
-    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days default
+    maxAge: refreshTokenExpiresIn === '90d' ? 90 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
   })
 
   // Return only access token in response
@@ -165,6 +182,11 @@ export const forgotPasswordController = async (
   req: Request<ParamsDictionary, unknown, ForgotPasswordReqBody>,
   res: Response
 ) => {
+  if (!req.user) {
+    return res.json({
+      message: USERS_MESSAGES.FORGOT_PASSWORD_EMAIL_SENT
+    })
+  }
   const { _id, status } = req.user as User
   const result = await usersService.forgotPassword({ userId: (_id as ObjectId).toString(), status })
 

@@ -18,10 +18,10 @@ import {
   updateCategoryValidator,
   getCategoriesValidator,
   categoryIdValidator,
-  toggleCategoryStatusValidator,
-  adminRequired,
-  pharmacistOrAdminRequired
+  toggleCategoryStatusValidator
 } from '~/middlewares/categories.middlewares'
+import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
+import { adminOrPharmacistRequired, adminRequired } from '~/middlewares/admin.middlewares'
 
 const categoriesRouter = Router()
 
@@ -32,7 +32,14 @@ const categoriesRouter = Router()
  * Body: CreateCategoryReqBody
  * Header: { Authorization: Bearer <access_token> }
  */
-categoriesRouter.post('/', adminRequired, createCategoryValidator, wrapRequestHandler(createCategoryController))
+categoriesRouter.post(
+  '/',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  createCategoryValidator,
+  wrapRequestHandler(createCategoryController)
+)
 
 /**
  * Description: Get categories with pagination and filters
@@ -55,7 +62,13 @@ categoriesRouter.get('/tree', wrapRequestHandler(getCategoryTreeController))
  * Method: GET
  * Header: { Authorization: Bearer <access_token> }
  */
-categoriesRouter.get('/admin-tree', adminRequired, wrapRequestHandler(getAdminCategoryTreeController))
+categoriesRouter.get(
+  '/admin-tree',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getAdminCategoryTreeController)
+)
 
 /**
  * Description: Get category by ID
@@ -103,6 +116,8 @@ categoriesRouter.get('/:categoryId/children', categoryIdValidator, wrapRequestHa
  */
 categoriesRouter.patch(
   '/:categoryId',
+  accessTokenValidator,
+  verifiedUserValidator,
   adminRequired,
   updateCategoryValidator,
   wrapRequestHandler(updateCategoryController)
@@ -118,7 +133,9 @@ categoriesRouter.patch(
  */
 categoriesRouter.patch(
   '/:categoryId/toggle-status',
-  pharmacistOrAdminRequired,
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminOrPharmacistRequired,
   toggleCategoryStatusValidator,
   wrapRequestHandler(toggleCategoryStatusController)
 )
@@ -132,6 +149,8 @@ categoriesRouter.patch(
  */
 categoriesRouter.delete(
   '/:categoryId',
+  accessTokenValidator,
+  verifiedUserValidator,
   adminRequired,
   categoryIdValidator,
   wrapRequestHandler(deleteCategoryController)

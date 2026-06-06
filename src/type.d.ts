@@ -8,5 +8,6 @@ declare module 'express-serve-static-core' {
     decodedRefreshToken?: TokenPayload
     decodedEmailVerifyToken?: TokenPayload
     decodedForgotPasswordToken?: TokenPayload
+    refreshToken?: string
   }
 }

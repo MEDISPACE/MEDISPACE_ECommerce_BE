@@ -4,7 +4,11 @@ import {
   getTransactionsController,
   previewRedeemController,
   getAdminLoyaltyStatsController,
-  getAdminLoyaltyAccountsController
+  getAdminLoyaltyAccountsController,
+  adjustAdminLoyaltyPointsController,
+  getAdminLoyaltyProgramConfigController,
+  saveAdminLoyaltyProgramDraftController,
+  publishAdminLoyaltyProgramConfigController
 } from '~/controllers/loyalty.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -69,6 +73,43 @@ loyaltyRouter.get(
   verifiedUserValidator,
   adminRequired,
   wrapRequestHandler(getAdminLoyaltyAccountsController)
+)
+
+/**
+ * POST /loyalty/admin/accounts/:userId/adjust-points
+ * Admin: Cộng/trừ điểm thủ công có audit transaction
+ * Body: { action: 'add' | 'subtract', points: number, reason: string }
+ */
+loyaltyRouter.post(
+  '/admin/accounts/:userId/adjust-points',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(adjustAdminLoyaltyPointsController)
+)
+
+loyaltyRouter.get(
+  '/admin/program-config',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(getAdminLoyaltyProgramConfigController)
+)
+
+loyaltyRouter.put(
+  '/admin/program-config/draft',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(saveAdminLoyaltyProgramDraftController)
+)
+
+loyaltyRouter.post(
+  '/admin/program-config/publish',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
+  wrapRequestHandler(publishAdminLoyaltyProgramConfigController)
 )
 
 export default loyaltyRouter

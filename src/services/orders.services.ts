@@ -17,6 +17,150 @@ import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 
 class OrderService {
+  private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
+
+  private assertOrderStatusTransition(order: any, newStatus: string) {
+    const currentStatus = order.orderStatus
+
+    if (currentStatus === newStatus) return
+
+    if (currentStatus === 'cancelled') {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng đã hủy, không thể chuyển trạng thái.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (currentStatus === 'returned') {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng đã hoàn trả, không thể chuyển trạng thái.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (currentStatus === 'delivered' && newStatus !== 'returned') {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng đã giao, không thể chuyển về trạng thái khác.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (newStatus === 'cancelled' && currentStatus === 'delivered') {
+      throw new ErrorWithStatus({
+        message: 'Không thể hủy đơn hàng đã giao.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (newStatus === 'delivered' && order.paymentStatus === 'failed') {
+      throw new ErrorWithStatus({
+        message: 'Không thể giao đơn hàng có thanh toán thất bại.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+  }
+
+  private shouldRestoreBenefitsOnCancel(order: any) {
+    return order.orderStatus !== 'cancelled' && order.orderStatus !== 'delivered' && order.orderStatus !== 'returned'
+  }
+
+  private allocateAmountAcrossItems(totalAmount: number, items: any[]) {
+    const normalizedTotal = Math.max(0, Math.floor(totalAmount || 0))
+    if (normalizedTotal <= 0 || items.length === 0) return items.map(() => 0)
+
+    const subtotal = items.reduce((sum, item) => sum + Math.max(0, item.totalPrice || 0), 0)
+    if (subtotal <= 0) return items.map(() => 0)
+
+    const allocations = items.map((item) => Math.floor((normalizedTotal * Math.max(0, item.totalPrice || 0)) / subtotal))
+    let remainder = normalizedTotal - allocations.reduce((sum, amount) => sum + amount, 0)
+
+    for (let i = 0; i < allocations.length && remainder > 0; i += 1) {
+      if ((items[i].totalPrice || 0) > 0) {
+        allocations[i] += 1
+        remainder -= 1
+      }
+    }
+
+    return allocations
+  }
+
+  private getCouponEligibleItems(items: any[], coupon: any) {
+    const productIds = new Set((coupon.applicableProductIds || []).map((id: any) => id.toString()))
+    const categoryIds = new Set((coupon.applicableCategoryIds || []).map((id: any) => id.toString()))
+    const hasProductTarget = productIds.size > 0
+    const hasCategoryTarget = categoryIds.size > 0
+
+    if (!hasProductTarget && !hasCategoryTarget) return items
+
+    return items.filter((item) => {
+      const productMatches = hasProductTarget && productIds.has(item.productId?.toString())
+      const categoryMatches = hasCategoryTarget && item.categoryId && categoryIds.has(item.categoryId.toString())
+      return productMatches || categoryMatches
+    })
+  }
+
+  private attachBenefitAllocations(items: any[], appliedCoupons: any[], pointsRedeemAmount: number) {
+    const couponAllocationsByItem = items.map(() => [] as any[])
+    const discountTotals = items.map(() => 0)
+
+    for (const coupon of appliedCoupons.filter((c: any) => c.type !== 'free_shipping' && c.discountAmount > 0)) {
+      const eligibleItems = this.getCouponEligibleItems(items, coupon)
+      const allocations = this.allocateAmountAcrossItems(coupon.discountAmount, eligibleItems)
+      eligibleItems.forEach((eligibleItem, eligibleIndex) => {
+        const amount = allocations[eligibleIndex]
+        if (amount <= 0) return
+        const index = items.findIndex((item) =>
+          item.productId?.toString() === eligibleItem.productId?.toString() &&
+          item.unit === eligibleItem.unit
+        )
+        if (index < 0) return
+        couponAllocationsByItem[index].push({
+          code: coupon.code,
+          type: coupon.type,
+          amount
+        })
+        discountTotals[index] += amount
+      })
+    }
+
+    const pointAllocations = this.allocateAmountAcrossItems(pointsRedeemAmount, items)
+
+    return items.map((item, index) => ({
+      ...item,
+      couponAllocations: couponAllocationsByItem[index],
+      discountAllocation: discountTotals[index],
+      pointsAllocation: pointAllocations[index]
+    }))
+  }
+
+  private async restoreStockForOrder(order: any) {
+    await this.restoreStockForItems(order.items || [])
+  }
+
+  private async restoreStockForItems(items: any[]) {
+    for (const item of items) {
+      const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
+      if (product) {
+        const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
+        const quantityPerUnit = variant?.quantityPerUnit || 1
+        const stockToRestore = item.quantity * quantityPerUnit
+        await databaseService.products.updateOne(
+          { _id: new ObjectId(item.productId) },
+          { $inc: { stockQuantity: stockToRestore } }
+        )
+      }
+    }
+  }
+
+  private async releaseOrderBenefits(order: any) {
+    if (!order?._id || !order?.userId) return
+
+    await Promise.all([
+      couponService.releaseCouponRedemptionsForOrder(order._id as ObjectId),
+      loyaltyService.refundRedeemedPointsForOrder(order.userId, order._id as ObjectId, order.orderNumber)
+    ])
+  }
+
   // Create order from cart
   async createOrder(userId: ObjectId, payload: any) {
     const {
@@ -75,6 +219,7 @@ class OrderService {
 
         orderItems.push({
           productId: product._id,
+          categoryId: product.categoryId,
           name: product.name,
           sku: product.sku,
           unit: item.unit || product.unit,
@@ -83,7 +228,7 @@ class OrderService {
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * item.quantity,
           campaignId: campaign?._id,
-          prescriptionRequired: product.prescriptionRequired,
+          prescriptionRequired: product.requiresPrescription,
           image:
             product.featuredImage ||
             product.image ||
@@ -147,6 +292,7 @@ class OrderService {
 
         orderItems.push({
           ...cartItem,
+          categoryId: product.categoryId,
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * cartItem.quantity,
@@ -218,15 +364,19 @@ class OrderService {
           cartCoupon.code,
           userId,
           subtotal,
-          hasPrescriptionItems
+          hasPrescriptionItems,
+          orderItems
         )
         if (validation.isValid) {
           // Tính lại discountAmount theo subtotal hiện tại (trường hợp items thay đổi)
           appliedCoupons.push({
             code: cartCoupon.code,
             discountAmount: validation.discountAmount,
+            eligibleSubtotal: validation.eligibleSubtotal,
             type: cartCoupon.type,
-            name: (cartCoupon as any).name || validation.coupon?.name || cartCoupon.code
+            name: (cartCoupon as any).name || validation.coupon?.name || cartCoupon.code,
+            applicableProductIds: validation.coupon?.applicableProductIds || [],
+            applicableCategoryIds: validation.applicableCategoryIds || validation.coupon?.applicableCategoryIds || []
           })
         } else {
           console.log(`[Order] Coupon ${cartCoupon.code} no longer valid at checkout: ${validation.message}`)
@@ -236,13 +386,16 @@ class OrderService {
     } else if (payload.couponCodes && payload.couponCodes.length > 0) {
       // Direct buy: validate coupon codes được gửi lên
       for (const code of payload.couponCodes) {
-        const validation = await couponService.validateCoupon(code, userId, subtotal, hasPrescriptionItems)
+        const validation = await couponService.validateCoupon(code, userId, subtotal, hasPrescriptionItems, orderItems)
         if (validation.isValid && validation.coupon) {
           appliedCoupons.push({
             code: validation.coupon.code,
             discountAmount: validation.discountAmount,
+            eligibleSubtotal: validation.eligibleSubtotal,
             type: validation.coupon.type,
-            name: validation.coupon.name
+            name: validation.coupon.name,
+            applicableProductIds: validation.coupon.applicableProductIds || [],
+            applicableCategoryIds: validation.applicableCategoryIds || validation.coupon.applicableCategoryIds || []
           })
         }
       }
@@ -257,7 +410,14 @@ class OrderService {
     freeShippingApplied = appliedCoupons.some((c: any) => c.type === 'free_shipping')
 
     // Apply freeship coupon
+    let shippingDiscountAmount = 0
     if (freeShippingApplied) {
+      shippingDiscountAmount = shippingFee
+      appliedCoupons = appliedCoupons.map((coupon: any) =>
+        coupon.type === 'free_shipping'
+          ? { ...coupon, discountAmount: shippingDiscountAmount }
+          : coupon
+      )
       shippingFee = 0
     }
 
@@ -286,6 +446,8 @@ class OrderService {
       }
     }
 
+    orderItems = this.attachBenefitAllocations(orderItems, appliedCoupons, pointsRedeemAmount)
+
     const totalAmount = Math.max(0, subtotal + taxAmount + shippingFee - discountAmount - pointsRedeemAmount)
 
     // Check prescription requirement logic if needed
@@ -305,6 +467,8 @@ class OrderService {
       shippingFee,
       discountAmount,
       totalAmount,
+      appliedCoupons,
+      shippingDiscountAmount,
       notes,
       estimatedDeliveryDate,
       pointsRedeemed,
@@ -313,7 +477,27 @@ class OrderService {
 
     const result = await databaseService.orders.insertOne(order)
 
+    // Giữ chỗ lượt dùng coupon trước khi trừ stock.
+    // Nếu các bước sau fail, releaseOrderBenefits sẽ hoàn lại lượt dùng và điểm.
+    try {
+      if (appliedCoupons && appliedCoupons.length > 0) {
+        for (const coupon of appliedCoupons) {
+          await couponService.recordCouponRedemption(
+            coupon.code,
+            userId,
+            result.insertedId,
+            coupon.discountAmount || 0
+          )
+        }
+      }
+    } catch (error) {
+      await databaseService.orders.deleteOne({ _id: result.insertedId })
+      await loyaltyService.refundRedeemedPointsForOrder(userId, orderId, orderNumber)
+      throw error
+    }
+
     // Deduct stock for each order item (atomic update to prevent race condition / stock going negative)
+    const deductedItems: any[] = []
     for (const item of orderItems) {
       const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
       if (product) {
@@ -329,12 +513,15 @@ class OrderService {
 
         if (deductResult.modifiedCount === 0) {
           // Stock không đủ (do concurrent order) — roll back đơn hàng và thông báo
+          await this.restoreStockForItems(deductedItems)
           await databaseService.orders.deleteOne({ _id: result.insertedId })
+          await this.releaseOrderBenefits({ ...order, _id: result.insertedId })
           throw new ErrorWithStatus({
             message: `Sản phẩm "${item.name}" vừa hết hàng. Vui lòng kiểm tra lại giỏ hàng.`,
             status: HTTP_STATUS.CONFLICT
           })
         }
+        deductedItems.push(item)
 
         // Low-stock alert: check tồn kho sau khi trừ, cảnh báo nếu ≤ 30 (fire-and-forget)
         const LOW_STOCK_THRESHOLD = 30
@@ -392,18 +579,6 @@ class OrderService {
         paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
       } catch (error) {
         // error suppressed
-      }
-    }
-
-    // Ghi nhận coupon redemption (fire-and-forget, không block response)
-    if (appliedCoupons && appliedCoupons.length > 0) {
-      for (const coupon of appliedCoupons) {
-        couponService.recordCouponRedemption(
-          coupon.code,
-          userId,
-          result.insertedId,
-          coupon.discountAmount || 0
-        ).catch(() => { /* silent */ })
       }
     }
 
@@ -526,7 +701,7 @@ class OrderService {
   }
 
   // Update order status (admin only)
-  async updateOrderStatus(orderId: ObjectId, newStatus: string, trackingNumber?: string) {
+  async updateOrderStatus(orderId: ObjectId, newStatus: string, trackingNumber?: string, notes?: string) {
     const order = await databaseService.orders.findOne({ _id: orderId })
 
     if (!order) {
@@ -534,6 +709,12 @@ class OrderService {
         message: ORDERS_MESSAGES.ORDER_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
       })
+    }
+
+    this.assertOrderStatusTransition(order, newStatus)
+
+    if (order.orderStatus === newStatus) {
+      return order
     }
 
     // Update order
@@ -545,6 +726,10 @@ class OrderService {
     if (newStatus === 'shipped' && trackingNumber) {
       updateData.trackingNumber = trackingNumber
       updateData.shippedAt = new Date()
+    }
+
+    if (notes) {
+      updateData.notes = notes
     }
 
     if (newStatus === 'delivered') {
@@ -570,19 +755,9 @@ class OrderService {
     }
 
     // Restore stock when order is cancelled
-    if (newStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
-      for (const item of order.items || []) {
-        const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
-        if (product) {
-          const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
-          const quantityPerUnit = variant?.quantityPerUnit || 1
-          const stockToRestore = item.quantity * quantityPerUnit
-          await databaseService.products.updateOne(
-            { _id: new ObjectId(item.productId) },
-            { $inc: { stockQuantity: stockToRestore } }
-          )
-        }
-      }
+    if (newStatus === 'cancelled' && this.shouldRestoreBenefitsOnCancel(order)) {
+      await this.restoreStockForOrder(order)
+      await this.releaseOrderBenefits(order)
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
@@ -617,6 +792,24 @@ class OrderService {
       })
     }
 
+    if (order.paymentStatus === newStatus) {
+      return order
+    }
+
+    if (newStatus === 'paid' && this.terminalOrderStatuses.has(order.orderStatus)) {
+      throw new ErrorWithStatus({
+        message: 'Không thể ghi nhận thanh toán cho đơn hàng đã kết thúc.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (newStatus === 'failed' && (order.paymentStatus === 'paid' || order.orderStatus === 'delivered' || order.orderStatus === 'returned')) {
+      throw new ErrorWithStatus({
+        message: 'Không thể đánh dấu thất bại cho đơn hàng đã thanh toán/giao/hoàn tất.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
     const updateData: any = {
       paymentStatus: newStatus,
       updatedAt: new Date()
@@ -629,6 +822,17 @@ class OrderService {
       if (order.orderStatus === 'pending' || order.orderStatus === 'pending_payment') {
         updateData.orderStatus = 'confirmed'
       }
+    }
+
+    if (newStatus === 'failed' && order.paymentStatus !== 'failed') {
+      updateData.orderStatus = 'cancelled'
+      updateData.cancelledAt = new Date()
+      updateData.cancelReason = 'Thanh toán không thành công'
+
+      if (this.shouldRestoreBenefitsOnCancel(order)) {
+        await this.restoreStockForOrder(order)
+      }
+      await this.releaseOrderBenefits(order)
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })

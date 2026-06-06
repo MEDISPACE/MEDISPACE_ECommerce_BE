@@ -1,5 +1,10 @@
 import { ObjectId } from 'mongodb'
 
+export interface ArticleReference {
+  title: string
+  url?: string
+}
+
 interface ArticleType {
   _id?: ObjectId
   title: string
@@ -21,6 +26,17 @@ interface ArticleType {
   metaTitle?: string
   metaDescription?: string
   metaKeywords?: string[]
+  references?: ArticleReference[]
+  reviewedBy?: string
+  reviewedByTitle?: string
+  reviewedAt?: Date
+  lastMedicallyReviewedAt?: Date
+  contentVersion?: number
+  riskLevel?: 'general' | 'medication' | 'disease' | 'emergency-sensitive'
+  targetAudiences?: string[]
+  symptoms?: string[]
+  activeIngredients?: string[]
+  healthTopics?: string[]
 
   status: 'draft' | 'pending' | 'published' | 'archived'
   isPublished: boolean
@@ -57,6 +73,17 @@ export default class Article {
   metaTitle?: string
   metaDescription?: string
   metaKeywords?: string[]
+  references?: ArticleReference[]
+  reviewedBy?: string
+  reviewedByTitle?: string
+  reviewedAt?: Date
+  lastMedicallyReviewedAt?: Date
+  contentVersion?: number
+  riskLevel?: 'general' | 'medication' | 'disease' | 'emergency-sensitive'
+  targetAudiences?: string[]
+  symptoms?: string[]
+  activeIngredients?: string[]
+  healthTopics?: string[]
 
   status: 'draft' | 'pending' | 'published' | 'archived'
   isPublished: boolean
@@ -93,6 +120,17 @@ export default class Article {
     this.metaTitle = article.metaTitle
     this.metaDescription = article.metaDescription
     this.metaKeywords = article.metaKeywords || []
+    this.references = article.references || []
+    this.reviewedBy = article.reviewedBy
+    this.reviewedByTitle = article.reviewedByTitle
+    this.reviewedAt = article.reviewedAt
+    this.lastMedicallyReviewedAt = article.lastMedicallyReviewedAt
+    this.contentVersion = article.contentVersion || 1
+    this.riskLevel = article.riskLevel || 'general'
+    this.targetAudiences = article.targetAudiences || []
+    this.symptoms = article.symptoms || []
+    this.activeIngredients = article.activeIngredients || []
+    this.healthTopics = article.healthTopics || []
 
     this.status = article.status || 'draft'
     this.isPublished = article.isPublished || false

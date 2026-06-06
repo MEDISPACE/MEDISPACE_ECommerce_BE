@@ -17,7 +17,8 @@ import {
   updateStockValidator
 } from '~/middlewares/products.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
-import { accessTokenValidator } from '~/middlewares/users.middlewares'
+import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
+import { adminOrPharmacistRequired, adminRequired } from '~/middlewares/admin.middlewares'
 
 const productsRouter = Router()
 
@@ -28,7 +29,14 @@ const productsRouter = Router()
  * Body: CreateProductReqBody
  * Headers: { Authorization: Bearer <access_token> } (Admin/Pharmacist)
  */
-productsRouter.post('/', accessTokenValidator, createProductValidator, wrapRequestHandler(createProductController))
+productsRouter.post(
+  '/',
+  accessTokenValidator,
+  verifiedUserValidator,
+  adminOrPharmacistRequired,
+  createProductValidator,
+  wrapRequestHandler(createProductController)
+)
 
 /**
  * Description: Get products with pagination and filters
@@ -57,6 +65,8 @@ productsRouter.get('/:productId', productIdValidator, wrapRequestHandler(getProd
 productsRouter.patch(
   '/:productId',
   accessTokenValidator,
+  verifiedUserValidator,
+  adminOrPharmacistRequired,
   productIdValidator,
   updateProductValidator,
   wrapRequestHandler(updateProductController)
@@ -73,6 +83,8 @@ productsRouter.patch(
 productsRouter.patch(
   '/:productId/toggle-status',
   accessTokenValidator,
+  verifiedUserValidator,
+  adminOrPharmacistRequired,
   productIdValidator,
   toggleProductStatusValidator,
   wrapRequestHandler(toggleProductStatusController)
@@ -89,6 +101,8 @@ productsRouter.patch(
 productsRouter.patch(
   '/:productId/stock',
   accessTokenValidator,
+  verifiedUserValidator,
+  adminOrPharmacistRequired,
   productIdValidator,
   updateStockValidator,
   wrapRequestHandler(updateStockController)
@@ -104,6 +118,8 @@ productsRouter.patch(
 productsRouter.delete(
   '/:productId',
   accessTokenValidator,
+  verifiedUserValidator,
+  adminRequired,
   productIdValidator,
   wrapRequestHandler(deleteProductController)
 )

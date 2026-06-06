@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb'
 
 export interface OrderItem {
   productId: ObjectId
+  categoryId?: ObjectId
   name: string
   sku: string
   unit: string // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
@@ -12,6 +13,13 @@ export interface OrderItem {
   campaignId?: ObjectId  // Campaign ID
   prescriptionRequired: boolean
   image?: string
+  discountAllocation?: number
+  pointsAllocation?: number
+  couponAllocations?: {
+    code: string
+    type: string
+    amount: number
+  }[]
 }
 
 export interface ShippingAddress {
@@ -24,6 +32,16 @@ export interface ShippingAddress {
   district: string
   province: string
   postalCode?: string
+}
+
+export interface OrderAppliedCoupon {
+  code: string
+  name?: string
+  type: string
+  discountAmount: number
+  eligibleSubtotal?: number
+  applicableProductIds?: ObjectId[]
+  applicableCategoryIds?: ObjectId[]
 }
 
 export interface OrderType {
@@ -44,6 +62,8 @@ export interface OrderType {
   shippingFee: number
   discountAmount: number
   totalAmount: number
+  appliedCoupons?: OrderAppliedCoupon[]
+  shippingDiscountAmount?: number
 
   notes?: string
   trackingNumber?: string
@@ -78,6 +98,8 @@ export default class Order {
   shippingFee: number
   discountAmount: number
   totalAmount: number
+  appliedCoupons: OrderAppliedCoupon[]
+  shippingDiscountAmount: number
 
   notes?: string
   trackingNumber?: string
@@ -113,6 +135,8 @@ export default class Order {
     this.shippingFee = order.shippingFee || 0
     this.discountAmount = order.discountAmount || 0
     this.totalAmount = order.totalAmount
+    this.appliedCoupons = order.appliedCoupons || []
+    this.shippingDiscountAmount = order.shippingDiscountAmount || 0
 
     this.notes = order.notes
     this.trackingNumber = order.trackingNumber
