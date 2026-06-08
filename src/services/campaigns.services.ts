@@ -26,7 +26,7 @@ export interface CampaignPriceResult {
 class CampaignService {
   private async syncSearchPrices(reason: string): Promise<void> {
     try {
-      const { default: typesenseService } = await import('./typesense.services')
+      const { default: typesenseService } = await import('./typesense.services.js')
       await typesenseService.requestReconciliation(reason)
     } catch (err) {
       console.error('[Campaign] Could not request Typesense reconciliation:', (err as Error)?.message)
