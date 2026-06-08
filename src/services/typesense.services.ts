@@ -430,7 +430,7 @@ class TypesenseService {
         { $addFields: { category: { $arrayElemAt: ['$category', 0] }, brand: { $arrayElemAt: ['$brand', 0] }, details: { $arrayElemAt: ['$details', 0] } } }
       ])
       .toArray()
-    const { default: campaignService } = await import('./campaigns.services')
+    const { default: campaignService } = await import('./campaigns.services.js')
     return campaignService.enrichProductsWithCampaigns(products)
   }
 
@@ -547,7 +547,7 @@ class TypesenseService {
 
   async indexProduct(product: any): Promise<void> {
     await this.runOrQueue(`indexProduct ${product?._id?.toString?.() || product?.mongoId || ''}`, async () => {
-      const { default: campaignService } = await import('./campaigns.services')
+      const { default: campaignService } = await import('./campaigns.services.js')
       const enriched = await campaignService.enrichProductWithCampaign(product)
       await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(enriched))
     })
@@ -562,7 +562,7 @@ class TypesenseService {
   async bulkIndexProducts(products: any[]): Promise<void> {
     if (!products.length) return
     await this.runOrQueue(`bulkIndexProducts ${products.length}`, async () => {
-      const { default: campaignService } = await import('./campaigns.services')
+      const { default: campaignService } = await import('./campaigns.services.js')
       const enriched = await campaignService.enrichProductsWithCampaigns(products)
       const result = await client.collections(PRODUCTS_COLLECTION).documents().import(enriched.map(toProductDocument), { action: 'upsert' })
       const failed = result.filter((r: any) => !r.success).length
