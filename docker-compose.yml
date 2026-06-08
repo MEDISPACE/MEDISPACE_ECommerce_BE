@@ -164,12 +164,6 @@ services:
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8108/health | grep -q ok || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
