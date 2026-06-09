@@ -63,6 +63,8 @@ export const searchProductsController = async (req: Request, res: Response) => {
     }
     if (params.requiresPrescription !== undefined) {
       mongoFilter.requiresPrescription = params.requiresPrescription
+    } else if (params.priceMin !== undefined || params.priceMax !== undefined || sortBy === 'price_asc' || sortBy === 'price_desc') {
+      mongoFilter.requiresPrescription = false
     }
     if (inStock === 'true') {
       mongoFilter.stockQuantity = { $gt: 0 }

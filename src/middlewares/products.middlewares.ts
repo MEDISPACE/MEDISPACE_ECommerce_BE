@@ -229,6 +229,14 @@ const stockFilterSchema = {
   }
 }
 
+const priceFilterSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: 'Price must be a positive number'
+  }
+}
+
 // Validators
 export const createProductValidator = validate(
   checkSchema(
@@ -439,7 +447,10 @@ export const getProductsValidator = validate(
         }
       },
       minStock: stockFilterSchema,
-      maxStock: stockFilterSchema
+      maxStock: stockFilterSchema,
+      minPrice: priceFilterSchema,
+      maxPrice: priceFilterSchema,
+      ratingMin: priceFilterSchema
     },
     ['query']
   )
