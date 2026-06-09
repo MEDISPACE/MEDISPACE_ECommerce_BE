@@ -236,6 +236,12 @@ class ProductsService {
 
     if (query.requiresPrescription !== undefined) {
       filter.requiresPrescription = query.requiresPrescription === 'true'
+    } else if (query.minPrice || query.maxPrice || query.sortBy === 'price') {
+      filter.requiresPrescription = false
+    }
+
+    if (query.ratingMin) {
+      filter.rating = { $gte: parseFloat(query.ratingMin) }
     }
 
     if (query.inStock === 'true') {
@@ -331,6 +337,19 @@ class ProductsService {
               }
             }
           },
+          // Price range filter
+          ...(query.minPrice || query.maxPrice
+            ? [
+                {
+                  $match: {
+                    calculatedPrice: {
+                      ...(query.minPrice ? { $gte: parseFloat(query.minPrice) } : {}),
+                      ...(query.maxPrice ? { $lte: parseFloat(query.maxPrice) } : {})
+                    }
+                  }
+                }
+              ]
+            : []),
           // Enhanced search filter after lookup
           ...(searchQuery
             ? [
@@ -379,48 +398,83 @@ class ProductsService {
           { $limit: limit }
         ])
         .toArray(),
-      // Count with search filter
-      searchQuery
+      // Count with search/price filters
+      (searchQuery || query.minPrice || query.maxPrice)
         ? databaseService.products
             .aggregate([
               { $match: filter },
-              {
-                $lookup: {
-                  from: 'categories',
-                  localField: 'categoryId',
-                  foreignField: '_id',
-                  as: 'category',
-                  pipeline: [{ $project: { name: 1 } }]
-                }
-              },
-              {
-                $lookup: {
-                  from: 'brands',
-                  localField: 'brandId',
-                  foreignField: '_id',
-                  as: 'brand',
-                  pipeline: [{ $project: { name: 1 } }]
-                }
-              },
-              {
-                $addFields: {
-                  category: { $arrayElemAt: ['$category', 0] },
-                  brand: { $arrayElemAt: ['$brand', 0] }
-                }
-              },
-              {
-                $match: {
-                  $or: [
-                    { name: { $regex: searchQuery, $options: 'i' } },
-                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
-                    { longDescription: { $regex: searchQuery, $options: 'i' } },
-                    { sku: { $regex: searchQuery, $options: 'i' } },
-                    { ingredients: { $regex: searchQuery, $options: 'i' } },
-                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
-                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+              // Compute calculatedPrice if price filters are applied
+              ...(query.minPrice || query.maxPrice
+                ? [
+                    {
+                      $addFields: {
+                        calculatedPrice: {
+                          $let: {
+                            vars: {
+                              defaultVariant: {
+                                $ifNull: [
+                                  { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                                  { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                                ]
+                              }
+                            },
+                            in: { $ifNull: ['$$defaultVariant.price', 0] }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      $match: {
+                        calculatedPrice: {
+                          ...(query.minPrice ? { $gte: parseFloat(query.minPrice) } : {}),
+                          ...(query.maxPrice ? { $lte: parseFloat(query.maxPrice) } : {})
+                        }
+                      }
+                    }
                   ]
-                }
-              },
+                : []),
+              // Perform lookups only if searchQuery is present
+              ...(searchQuery
+                ? [
+                    {
+                      $lookup: {
+                        from: 'categories',
+                        localField: 'categoryId',
+                        foreignField: '_id',
+                        as: 'category',
+                        pipeline: [{ $project: { name: 1 } }]
+                      }
+                    },
+                    {
+                      $lookup: {
+                        from: 'brands',
+                        localField: 'brandId',
+                        foreignField: '_id',
+                        as: 'brand',
+                        pipeline: [{ $project: { name: 1 } }]
+                      }
+                    },
+                    {
+                      $addFields: {
+                        category: { $arrayElemAt: ['$category', 0] },
+                        brand: { $arrayElemAt: ['$brand', 0] }
+                      }
+                    },
+                    {
+                      $match: {
+                        $or: [
+                          { name: { $regex: searchQuery, $options: 'i' } },
+                          { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                          { longDescription: { $regex: searchQuery, $options: 'i' } },
+                          { sku: { $regex: searchQuery, $options: 'i' } },
+                          { ingredients: { $regex: searchQuery, $options: 'i' } },
+                          { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                          { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                        ]
+                      }
+                    }
+                  ]
+                : []),
               { $count: 'total' }
             ])
             .toArray()
