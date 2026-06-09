@@ -72,6 +72,9 @@ export interface GetProductsQuery {
   sortOrder?: 'asc' | 'desc'
   minStock?: string
   maxStock?: string
+  minPrice?: string
+  maxPrice?: string
+  ratingMin?: string
 }
 
 // Product Detail Request Types
