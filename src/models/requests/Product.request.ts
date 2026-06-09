@@ -67,14 +67,14 @@ export interface GetProductsQuery {
   isActive?: string
   requiresPrescription?: string
   inStock?: string
-  minPrice?: string
-  maxPrice?: string
-  ratingMin?: string
   search?: string
   sortBy?: 'name' | 'createdAt' | 'stockQuantity' | 'sku' | 'price' | 'rating' | 'reviewCount'
   sortOrder?: 'asc' | 'desc'
   minStock?: string
   maxStock?: string
+  minPrice?: string
+  maxPrice?: string
+  ratingMin?: string
 }
 
 // Product Detail Request Types
