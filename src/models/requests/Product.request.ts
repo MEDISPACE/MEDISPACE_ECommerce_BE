@@ -75,6 +75,7 @@ export interface GetProductsQuery {
   minPrice?: string
   maxPrice?: string
   ratingMin?: string
+  bypassTypesense?: string
 }
 
 // Product Detail Request Types
