@@ -178,6 +178,153 @@ class ProductsService {
 
     const startTime = Date.now()
 
+    // ─── TYPESENSE SEARCH DELEGATION ──────────────────────────────────────────
+    if (query.search && query.bypassTypesense !== 'true' && typesenseService.getAvailability()) {
+      try {
+        let categoryIds: string[] | undefined
+        if (query.categoryId) {
+          try {
+            let targetCategory
+            if (ObjectId.isValid(query.categoryId)) {
+              targetCategory = await categoriesService.getCategoryById(query.categoryId)
+            } else {
+              targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
+            }
+            if (targetCategory) {
+              const categoryPath =
+                targetCategory.path === '/' ? `/${targetCategory.slug}` : `${targetCategory.path}/${targetCategory.slug}`
+              const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              const descendantCategories = await databaseService.categories
+                .find({
+                  $or: [
+                    { _id: targetCategory._id },
+                    { path: { $regex: `^${escapedPath}(?:/|$)` } }
+                  ]
+                })
+                .toArray()
+              categoryIds = descendantCategories.map((cat) => cat._id.toString())
+            }
+          } catch (error) {
+            console.error('[Typesense Delegation] Error mapping category:', error)
+          }
+        }
+
+        let tsSortBy: string | undefined
+        if (query.sortBy === 'price') {
+          tsSortBy = query.sortOrder === 'desc' ? 'price_desc' : 'price_asc'
+        } else if (query.sortBy === 'createdAt') {
+          tsSortBy = 'newest'
+        } else if (query.sortBy === 'rating') {
+          tsSortBy = 'rating'
+        }
+
+        const tsResult = await typesenseService.searchProducts({
+          q: query.search,
+          page,
+          limit,
+          categoryId: query.categoryId,
+          categoryIds,
+          brandId: query.brandId,
+          requiresPrescription: query.requiresPrescription === 'true' ? true : query.requiresPrescription === 'false' ? false : undefined,
+          inStock: query.inStock === 'true',
+          priceMin: query.minPrice ? parseFloat(query.minPrice) : undefined,
+          priceMax: query.maxPrice ? parseFloat(query.maxPrice) : undefined,
+          ratingMin: query.ratingMin ? parseFloat(query.ratingMin) : undefined,
+          sortBy: tsSortBy
+        })
+
+        if (tsResult && tsResult.hits && tsResult.hits.length > 0) {
+          const mongoIds = tsResult.hits.map((hit: any) => new ObjectId(hit.document.mongoId))
+          const products = await databaseService.products
+            .aggregate([
+              { $match: { _id: { $in: mongoIds } } },
+              {
+                $lookup: {
+                  from: 'categories',
+                  localField: 'categoryId',
+                  foreignField: '_id',
+                  as: 'category',
+                  pipeline: [{ $project: { _id: 1, name: 1, slug: 1 } }]
+                }
+              },
+              {
+                $lookup: {
+                  from: 'brands',
+                  localField: 'brandId',
+                  foreignField: '_id',
+                  as: 'brand',
+                  pipeline: [{ $project: { _id: 1, name: 1, slug: 1, logo: 1 } }]
+                }
+              },
+              {
+                $addFields: {
+                  category: { $arrayElemAt: ['$category', 0] },
+                  brand: { $arrayElemAt: ['$brand', 0] }
+                }
+              },
+              {
+                $project: {
+                  _id: 1,
+                  name: 1,
+                  slug: 1,
+                  sku: 1,
+                  shortDescription: 1,
+                  categoryId: 1,
+                  brandId: 1,
+                  priceVariants: 1,
+                  stockQuantity: 1,
+                  status: 1,
+                  isActive: 1,
+                  requiresPrescription: 1,
+                  featuredImage: 1,
+                  images: 1,
+                  rating: 1,
+                  reviewCount: 1,
+                  createdAt: 1,
+                  category: 1,
+                  brand: 1,
+                  packaging: 1
+                }
+              }
+            ])
+            .toArray()
+
+          // Maintain Typesense ordering
+          const productsMap = new Map(products.map((p) => [p._id.toString(), p]))
+          const sortedProducts = tsResult.hits
+            .map((hit: any) => productsMap.get(hit.document.mongoId))
+            .filter(Boolean)
+
+          console.log(`[Typesense Delegation] Search for "${query.search}" returned ${tsResult.found} documents (Page ${page}).`)
+
+          return {
+            products: sortedProducts,
+            pagination: {
+              page,
+              limit,
+              totalPages: Math.ceil(tsResult.found / limit),
+              totalCount: tsResult.found
+            }
+          }
+        } else if (tsResult && tsResult.hits && tsResult.hits.length === 0) {
+          // If Typesense explicitly returned 0 results, return empty product list
+          console.log(`[Typesense Delegation] Search for "${query.search}" returned 0 documents.`)
+          return {
+            products: [],
+            pagination: {
+              page,
+              limit,
+              totalPages: 0,
+              totalCount: 0
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Typesense Delegation] Failed, falling back to MongoDB search:', error)
+      }
+    }
+    // ─── END TYPESENSE SEARCH DELEGATION ──────────────────────────────────────
+
     // Build filter
     const filter: Record<string, unknown> = {}
 

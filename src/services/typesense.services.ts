@@ -15,7 +15,7 @@ const client = new Typesense.Client({
     }
   ],
   apiKey: process.env.TYPESENSE_API_KEY || 'medispace-ts-secret',
-  connectionTimeoutSeconds: 5
+  connectionTimeoutSeconds: 60
 })
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
@@ -789,6 +789,7 @@ class TypesenseService {
     ratingMin?: number
     sortBy?: string
   }): Promise<any> {
+    console.log('[Typesense] searchProducts called, isAvailable =', this.isAvailable)
     if (!this.isAvailable) return null
 
     const { q, page = 1, limit = 20, categoryId, categoryIds, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
@@ -834,7 +835,8 @@ class TypesenseService {
         per_page: limit,
         num_typos: 2
       })
-    } catch {
+    } catch (err) {
+      console.error('[Typesense] searchProducts error:', err)
       return null
     }
   }

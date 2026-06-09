@@ -450,7 +450,14 @@ export const getProductsValidator = validate(
       maxStock: stockFilterSchema,
       minPrice: priceFilterSchema,
       maxPrice: priceFilterSchema,
-      ratingMin: priceFilterSchema
+      ratingMin: priceFilterSchema,
+      bypassTypesense: {
+        optional: true,
+        isIn: {
+          options: [['true', 'false']],
+          errorMessage: 'bypassTypesense must be "true" or "false"'
+        }
+      }
     },
     ['query']
   )

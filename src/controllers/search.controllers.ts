@@ -29,7 +29,7 @@ export const suggestController = async (req: Request, res: Response) => {
   const q = (req.query.q as string) || ''
 
   if (!q || q.trim().length < 2) {
-    return res.json({ products: [], brands: [], categories: [], articles: [], querySuggestions: [] })
+    return res.json({ products: [], brands: [], categories: [], articles: [] })
   }
 
   // Chạy song song: product/brand/category results + query text completions
@@ -43,6 +43,7 @@ export const suggestController = async (req: Request, res: Response) => {
 
 // ─── GET /search/products?q=&page=&limit=&... ─────────────────────────────────
 export const searchProductsController = async (req: Request, res: Response) => {
+  console.log('[SearchController] searchProductsController called with query:', req.query)
   const { q, page, limit, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, minPrice, maxPrice, ratingMin, sortBy } =
     req.query as Record<string, string>
   const effectivePriceMin = priceMin ?? minPrice
