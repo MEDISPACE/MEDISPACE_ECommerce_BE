@@ -53,7 +53,15 @@ export const searchProductsController = async (req: Request, res: Response) => {
   if (categoryId && ObjectId.isValid(categoryId)) {
     const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryId) })
     if (category) {
-      const fullPath = category.path === '/' ? `/${category.slug}` : `${category.path}/${category.slug}`
+      let fullPath = category.path
+      if (!fullPath.startsWith('/')) {
+        fullPath = '/' + fullPath
+      }
+      if (fullPath === '/') {
+        fullPath = `/${category.slug}`
+      } else if (!fullPath.endsWith(`/${category.slug}`)) {
+        fullPath = `${fullPath}/${category.slug}`
+      }
       const escapedPath = escapeRegex(fullPath)
       categoryIds = (
         await databaseService.categories
