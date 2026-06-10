@@ -16,6 +16,7 @@ services:
       TYPESENSE_PORT: 8108
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
+      ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
       REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads
@@ -67,10 +68,11 @@ services:
   ml-service:
     image: ${DOCKERHUB_USERNAME}/medispace-ml:latest
     container_name: medispace-ml
-    ports:
-      - "8002:8002"
     env_file:
       - .env
+    environment:
+      ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
+      BE_SERVICE_URLS: http://backend:8000
     restart: unless-stopped
     networks:
       - medispace-net
