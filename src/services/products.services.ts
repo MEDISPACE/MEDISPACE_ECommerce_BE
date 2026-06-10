@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
 import cacheService from './cache.services'
+import recommendationsService from './recommendations.services'
 import Product from '~/models/schemas/Product.schema'
 import { CreateProductReqBody, UpdateProductReqBody, GetProductsQuery } from '~/models/requests/Product.request'
 import { PRODUCTS_MESSAGES } from '~/constants/message'
@@ -168,6 +169,7 @@ class ProductsService {
     const patterns = ['products:*']
     if (slug) patterns.push(`products:slug:${slug}`)
     await cacheService.invalidate(...patterns)
+    void recommendationsService.notifyCatalogChanged()
   }
 
   // Get products with pagination and filters

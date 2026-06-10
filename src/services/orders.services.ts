@@ -15,6 +15,7 @@ import loyaltyService from './loyalty.services'
 import campaignsService from './campaigns.services'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
+import recommendationsService from './recommendations.services'
 
 class OrderService {
   private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
@@ -761,6 +762,9 @@ class OrderService {
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
+    if (newStatus === 'delivered' && order.userId) {
+      void recommendationsService.recordRealtimeEvent(order.userId.toString())
+    }
 
     const updatedOrder = await databaseService.orders.findOne({ _id: orderId })
 
