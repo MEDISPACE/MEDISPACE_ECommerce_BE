@@ -1,11 +1,86 @@
 import axios from 'axios'
 import { ObjectId } from 'mongodb'
+import { randomUUID } from 'crypto'
 import databaseService from './database.services'
 import cacheService from './cache.services'
+import recommendationPolicyService, {
+  RecommendationCandidate,
+  RecommendationPolicyContext
+} from './recommendation-policy.services'
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8002'
-const ML_SERVICE_TOKEN = process.env.ML_SERVICE_TOKEN || 'medispace-local-ml-token'
+const ML_SERVICE_TOKEN = process.env.ML_SERVICE_TOKEN || (process.env.NODE_ENV === 'production' ? '' : 'medispace-local-ml-token')
 const ML_TIMEOUT_MS = 3000 // 3s timeout, sau đó dùng fallback
+const CANDIDATE_POOL_MULTIPLIER = 3
+const DEFAULT_EXPERIMENT_ID = process.env.RECOMMENDATION_EXPERIMENT_ID || 'recommendation-platform-v2-control'
+const DEFAULT_MODEL_VERSION = process.env.RECOMMENDATION_MODEL_VERSION || 'fallback-v1'
+
+interface MLRecommendationResponse {
+  algorithm: string
+  products: Array<string | RecommendationCandidate>
+  model_version?: string
+  source?: string
+}
+
+const normalizeCandidates = (products: Array<string | RecommendationCandidate> = []): RecommendationCandidate[] =>
+  products.map((product, index) => typeof product === 'string'
+    ? { productId: product, score: Math.max(0, 1 - index / Math.max(products.length, 1)) }
+    : product)
+
+const recommendationResult = (
+  algorithm: string,
+  products: any[],
+  metadata: { modelVersion?: string; experimentId?: string } = {}
+) => {
+  const requestId = randomUUID()
+  const attributionToken = randomUUID()
+  const variant = parseInt(attributionToken.replace(/-/g, '').slice(-2), 16) % 2 === 0 ? 'control' : 'diversified'
+  const rankedProducts = variant === 'diversified' ? diversifyByCategory(products) : products
+  const uniqueCategories = new Set(rankedProducts.map((product) => product.category?.[0]?.name).filter(Boolean)).size
+  const diversity = rankedProducts.length > 0 ? uniqueCategories / rankedProducts.length : 0
+  const novelty = rankedProducts.length > 0
+    ? rankedProducts.reduce((sum, product) => sum + 1 / (1 + Math.log1p(product.reviewCount || 0)), 0) / rankedProducts.length
+    : 0
+  void databaseService.db.collection('recommendationQualityEvents').insertOne({
+    requestId,
+    attributionToken,
+    algorithm,
+    modelVersion: metadata.modelVersion || DEFAULT_MODEL_VERSION,
+    experimentId: metadata.experimentId || DEFAULT_EXPERIMENT_ID,
+    variant,
+    resultCount: rankedProducts.length,
+    diversity,
+    novelty,
+    timestamp: new Date()
+  }).catch(() => {})
+  return {
+    requestId,
+    attributionToken,
+    algorithm,
+    modelVersion: metadata.modelVersion || DEFAULT_MODEL_VERSION,
+    experiment: {
+      id: metadata.experimentId || DEFAULT_EXPERIMENT_ID,
+      variant
+    },
+    products: rankedProducts
+  }
+}
+
+const diversifyByCategory = (products: any[]) => {
+  const groups = new Map<string, any[]>()
+  for (const product of products) {
+    const category = product.category?.[0]?.name || 'uncategorized'
+    groups.set(category, [...(groups.get(category) || []), product])
+  }
+  const diversified: any[] = []
+  while (diversified.length < products.length) {
+    for (const group of groups.values()) {
+      const product = group.shift()
+      if (product) diversified.push(product)
+    }
+  }
+  return diversified
+}
 
 // ─── Circuit Breaker ────────────────────────────────────────────────────────
 /**
@@ -114,66 +189,11 @@ function isValidObjectId(id: string): boolean {
  * Giữ nguyên thứ tự từ ML service (đã rank theo relevance).
  */
 async function enrichProductIds(
-  productIds: string[],
+  rawCandidates: Array<string | RecommendationCandidate>,
   limit?: number,
-  options: { allowPrescription?: boolean } = {}
+  options: RecommendationPolicyContext = {}
 ): Promise<any[]> {
-  if (!productIds || productIds.length === 0) return []
-
-  // Validate và convert sang ObjectId — loại bỏ ID không hợp lệ
-  const ids = productIds.filter(isValidObjectId).map((id) => new ObjectId(id))
-
-  if (ids.length === 0) return []
-
-  const productFilter: Record<string, unknown> = {
-    _id: { $in: ids },
-    isActive: true,
-    stockQuantity: { $gt: 0 }
-  }
-  if (!options.allowPrescription) {
-    productFilter.requiresPrescription = { $ne: true }
-  }
-
-  const products = await databaseService.products
-    .aggregate([
-      { $match: productFilter },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'categoryId',
-          foreignField: '_id',
-          as: 'category'
-        }
-      },
-      {
-        $lookup: {
-          from: 'brands',
-          localField: 'brandId',
-          foreignField: '_id',
-          as: 'brand'
-        }
-      },
-      {
-        $project: {
-          _id: 1,
-          name: 1,
-          slug: 1,
-          featuredImage: 1,
-          priceVariants: 1,
-          rating: 1,
-          reviewCount: 1,
-          stockQuantity: 1,
-          requiresPrescription: 1,
-          'category.name': 1,
-          'brand.name': 1
-        }
-      }
-    ])
-    .toArray()
-
-  // Giữ nguyên thứ tự từ ML service (đã được rank theo relevance)
-  const productMap = new Map(products.map((p) => [p._id.toString(), p]))
-  const enriched = ids.map((id) => productMap.get(id.toString())).filter(Boolean)
+  const enriched = await recommendationPolicyService.apply(normalizeCandidates(rawCandidates), options)
   return limit === undefined ? enriched : enriched.slice(0, limit)
 }
 
@@ -195,23 +215,39 @@ async function getFallbackTrending(limit: number = 12): Promise<any[]> {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class RecommendationsService {
+  async recordRealtimeEvent(userId?: string) {
+    if (!userId || !isValidObjectId(userId)) return
+    await callMLPost('/events/invalidate-user', { user_id: userId })
+  }
+
+  async notifyCatalogChanged() {
+    await callMLPost('/train', {})
+    await cacheService.invalidate('recommendations:*')
+  }
+
+  async getPopular(limit: number = 12) {
+    const products = await getFallbackTrending(limit)
+    return recommendationResult('popular_rating_reviews', products)
+  }
+
   /**
    * GET /recommendations/related/:productId
    * Sản phẩm liên quan — TF-IDF Content-Based
    */
   async getRelated(productId: string, limit: number = 8, diverse: boolean = true, lambdaMmr: number = 0.7) {
     if (!isValidObjectId(productId)) {
-      return { algorithm: 'fallback_invalid_id', products: [] }
+      return recommendationResult('fallback_invalid_id', [])
     }
 
-    const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/related/${productId}?limit=${limit}&diverse=${diverse}&lambda_mmr=${lambdaMmr}`
+    const poolLimit = Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 36)
+    const data = await callML<MLRecommendationResponse>(
+      `/recommend/related/${productId}?limit=${poolLimit}&diverse=${diverse}&lambda_mmr=${lambdaMmr}`
     )
 
     if (!data || data.products.length === 0) {
       // Fallback: lấy sản phẩm cùng category
       const product = await databaseService.products.findOne({ _id: new ObjectId(productId) })
-      if (!product) return { algorithm: 'fallback_empty', products: [] }
+      if (!product) return recommendationResult('fallback_empty', [])
 
       const fallback = await databaseService.products
         .find({
@@ -227,11 +263,11 @@ class RecommendationsService {
           rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
         })
         .toArray()
-      return { algorithm: 'fallback_category', products: fallback }
+      return recommendationResult('fallback_category', fallback)
     }
 
     const enriched = await enrichProductIds(data.products, limit)
-    return { algorithm: data.algorithm, products: enriched }
+    return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
   /**
@@ -240,19 +276,20 @@ class RecommendationsService {
    */
   async getBoughtTogether(productId: string, limit: number = 6) {
     if (!isValidObjectId(productId)) {
-      return { algorithm: 'fallback_invalid_id', products: [] }
+      return recommendationResult('fallback_invalid_id', [])
     }
 
-    const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/bought-together/${productId}?limit=${limit}`
+    const poolLimit = Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 30)
+    const data = await callML<MLRecommendationResponse>(
+      `/recommend/bought-together/${productId}?limit=${poolLimit}`
     )
 
     if (!data || data.products.length === 0) {
-      return { algorithm: 'fallback_empty', products: [] }
+      return recommendationResult('fallback_empty', [])
     }
 
     const enriched = await enrichProductIds(data.products, limit)
-    return { algorithm: data.algorithm, products: enriched }
+    return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
   /**
@@ -261,12 +298,13 @@ class RecommendationsService {
    */
   async getTrending(categoryId?: string, limit: number = 12) {
     if (categoryId && !isValidObjectId(categoryId)) {
-      return { algorithm: 'fallback_invalid_category', products: [] }
+      return recommendationResult('fallback_invalid_category', [])
     }
     const cacheKey = `recommendations:trending:${categoryId || 'all'}:${limit}`
     return cacheService.getOrSet(cacheKey, async () => {
-      const query = categoryId ? `?category_id=${categoryId}&limit=${limit}` : `?limit=${limit}`
-      const data = await callML<{ algorithm: string; products: string[] }>(`/recommend/trending${query}`)
+      const poolLimit = Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 60)
+      const query = categoryId ? `?category_id=${categoryId}&limit=${poolLimit}` : `?limit=${poolLimit}`
+      const data = await callML<MLRecommendationResponse>(`/recommend/trending${query}`)
 
       if (!data || data.products.length === 0) {
         const filter: Record<string, unknown> = {
@@ -284,11 +322,11 @@ class RecommendationsService {
             rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
           })
           .toArray()
-        return { algorithm: 'fallback_rating', products: fallback }
+        return recommendationResult('fallback_rating', fallback)
       }
 
       const enriched = await enrichProductIds(data.products, limit)
-      return { algorithm: data.algorithm, products: enriched }
+      return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
     }, 300) // 5 phút
   }
 
@@ -299,20 +337,21 @@ class RecommendationsService {
   async getForYou(userId: string, limit: number = 12) {
     if (!isValidObjectId(userId)) {
       const fallback = await getFallbackTrending(limit)
-      return { algorithm: 'fallback_invalid_user', products: fallback }
+      return recommendationResult('fallback_invalid_user', fallback)
     }
 
-    const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/for-you/${userId}?limit=${limit}`
+    const poolLimit = Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 60)
+    const data = await callML<MLRecommendationResponse>(
+      `/recommend/for-you/${userId}?limit=${poolLimit}`
     )
 
     if (!data || data.products.length === 0) {
       const fallback = await getFallbackTrending(limit)
-      return { algorithm: 'fallback_rating', products: fallback }
+      return recommendationResult('fallback_rating', fallback)
     }
 
     const enriched = await enrichProductIds(data.products, limit)
-    return { algorithm: data.algorithm, products: enriched }
+    return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
   /**
@@ -322,26 +361,26 @@ class RecommendationsService {
   async getPostPurchase(orderProductIds: string[], limit: number = 8) {
     if (!orderProductIds || orderProductIds.length === 0) {
       const fallback = await getFallbackTrending(limit)
-      return { algorithm: 'fallback_rating', products: fallback }
+      return recommendationResult('fallback_rating', fallback)
     }
 
     // Lọc các ID không hợp lệ trước khi gửi ML
     const validIds = orderProductIds.filter(isValidObjectId)
     if (validIds.length === 0) {
-      return { algorithm: 'fallback_empty', products: [] }
+      return recommendationResult('fallback_empty', [])
     }
 
-    const data = await callMLPost<{ algorithm: string; products: string[] }>(
+    const data = await callMLPost<MLRecommendationResponse>(
       '/recommend/post-purchase',
-      { product_ids: validIds, limit }
+      { product_ids: validIds, limit: Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 36) }
     )
 
     if (!data || data.products.length === 0) {
-      return { algorithm: 'fallback_empty', products: [] }
+      return recommendationResult('fallback_empty', [])
     }
 
-    const enriched = await enrichProductIds(data.products, limit)
-    return { algorithm: data.algorithm, products: enriched }
+    const enriched = await enrichProductIds(data.products, limit, { excludedProductIds: validIds })
+    return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
   /**
@@ -371,23 +410,29 @@ class RecommendationsService {
     prescriptionProductIds = Array.isArray(prescriptionProductIds)
       ? prescriptionProductIds.filter((v) => typeof v === 'string' && isValidObjectId(v)).slice(0, 50)
       : []
-    const data = await callMLPost<{ algorithm: string; products: string[] }>(
+    const data = await callMLPost<MLRecommendationResponse>(
       '/recommend/pharmacist',
       {
         chronic_diseases: chronicDiseases,
         allergies,
         current_medications: currentMedications,
         prescription_product_ids: prescriptionProductIds,
-        limit
+        limit: Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 45)
       }
     )
 
     if (!data || data.products.length === 0) {
-      return { algorithm: 'fallback_empty', products: [] }
+      return recommendationResult('fallback_empty', [])
     }
 
-    const enriched = await enrichProductIds(data.products, limit, { allowPrescription: true })
-    return { algorithm: data.algorithm, products: enriched }
+    const enriched = await enrichProductIds(data.products, limit, {
+      audience: 'pharmacist',
+      allergies,
+      chronicDiseases,
+      currentMedications,
+      excludedProductIds: prescriptionProductIds
+    })
+    return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
   /**
@@ -396,19 +441,20 @@ class RecommendationsService {
    */
   async getReplenishment(userId: string, limit: number = 5) {
     if (!isValidObjectId(userId)) {
-      return { algorithm: 'fallback_invalid_user', products: [] }
+      return recommendationResult('fallback_invalid_user', [])
     }
 
-    const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/replenishment/${userId}?limit=${limit}`
+    const poolLimit = Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 24)
+    const data = await callML<MLRecommendationResponse>(
+      `/recommend/replenishment/${userId}?limit=${poolLimit}`
     )
 
     if (!data || data.products.length === 0) {
-      return { algorithm: 'fallback_empty', products: [] }
+      return recommendationResult('fallback_empty', [])
     }
 
     const enriched = await enrichProductIds(data.products, limit)
-    return { algorithm: data.algorithm, products: enriched }
+    return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
   /**
