@@ -281,6 +281,24 @@ export const accessTokenValidator = validate(
     ['headers']
   )
 )
+
+export const optionalAccessTokenValidator = async (req: Request, _res: Response, next: NextFunction) => {
+  const accessToken = req.headers.authorization?.split(' ')[1]
+  if (!accessToken) return next()
+
+  try {
+    const decoded = await verifyToken({
+      token: accessToken,
+      secretOrPublicKey: process.env.JWT_SECRET_ACCESS_TOKEN as string
+    })
+    if (decoded.tokenType === TokenType.AccessToken) {
+      req.decoded_authorization = decoded
+    }
+  } catch {
+    // Optional authentication must not block anonymous analytics events.
+  }
+  next()
+}
 export const refreshTokenValidator = validate(
   checkSchema(
     {

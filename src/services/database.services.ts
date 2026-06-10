@@ -93,6 +93,10 @@ class DatabaseService {
       })
       await safeCreateIndex(this.articleJourneyEvents, { articleId: 1, eventType: 1, createdAt: -1 })
       await safeCreateIndex(this.articleJourneyEvents, { sessionId: 1, createdAt: -1 })
+      const recommendationEvents = this.db.collection('recommendationEvents')
+      await safeCreateIndex(recommendationEvents, { userId: 1, timestamp: -1 })
+      await safeCreateIndex(recommendationEvents, { productId: 1, timestamp: -1 })
+      await safeCreateIndex(recommendationEvents, { timestamp: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 })
 
       // Categories collection indexes
       await safeCreateIndex(this.categories, { slug: 1 }, { unique: true })
@@ -104,6 +108,10 @@ class DatabaseService {
 
       // Reviews collection indexes
       await safeCreateIndex(this.reviews, { productId: 1, createdAt: -1 })
+
+      // Orders collection indexes used by recommendation training and replenishment.
+      await safeCreateIndex(this.orders, { orderStatus: 1, createdAt: -1 })
+      await safeCreateIndex(this.orders, { userId: 1, orderStatus: 1, deliveredAt: -1 })
 
       // Return Requests collection indexes
       await safeCreateIndex(this.returnRequests, { userId: 1, createdAt: -1 })
