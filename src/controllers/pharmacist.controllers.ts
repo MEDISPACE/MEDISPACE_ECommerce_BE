@@ -67,7 +67,19 @@ export const getPharmacistProfileController = async (req: Request, res: Response
 // Get patient medical information
 export const getMedicalInfoController = async (req: Request<{ customerId: string }>, res: Response) => {
   const { customerId } = req.params
-  const result = await pharmacistService.getMedicalInfo(customerId)
+  const [medicalInfo, recentMedications] = await Promise.all([
+    pharmacistService.getMedicalInfo(customerId),
+    pharmacistService.getRecentMedications(customerId, 90)
+  ])
+  const result = {
+    ...medicalInfo,
+    currentMedications: recentMedications.map((medication) => ({
+      name: medication.drug_name,
+      dosage: medication.dosage,
+      frequency: medication.instructions || '',
+      startDate: medication.prescribed_date
+    }))
+  }
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_MEDICAL_INFO_SUCCESS,
     result
@@ -77,11 +89,11 @@ export const getMedicalInfoController = async (req: Request<{ customerId: string
 // Update patient medical information
 export const updateMedicalInfoController = async (req: Request<{ customerId: string }>, res: Response) => {
   const { customerId } = req.params
-  const { blood_type, allergies, chronic_diseases } = req.body
+  const { blood_type, bloodType, allergies, chronic_diseases, chronicDiseases } = req.body
   const result = await pharmacistService.updateMedicalInfo(customerId, {
-    blood_type,
+    blood_type: blood_type ?? bloodType,
     allergies,
-    chronic_diseases
+    chronic_diseases: chronic_diseases ?? chronicDiseases
   })
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.UPDATE_MEDICAL_INFO_SUCCESS,
@@ -92,8 +104,8 @@ export const updateMedicalInfoController = async (req: Request<{ customerId: str
 // Add allergy to patient
 export const addAllergyController = async (req: Request<{ customerId: string }>, res: Response) => {
   const { customerId } = req.params
-  const { allergy } = req.body
-  const result = await pharmacistService.addAllergy(customerId, allergy)
+  const { allergy, allergen } = req.body
+  const result = await pharmacistService.addAllergy(customerId, allergy ?? allergen)
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.ADD_ALLERGY_SUCCESS,
     result
