@@ -4,6 +4,7 @@ import databaseService from './database.services'
 import cacheService from './cache.services'
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8002'
+const ML_SERVICE_TOKEN = process.env.ML_SERVICE_TOKEN || 'medispace-local-ml-token'
 const ML_TIMEOUT_MS = 3000 // 3s timeout, sau đó dùng fallback
 
 // ─── Circuit Breaker ────────────────────────────────────────────────────────
@@ -36,9 +37,9 @@ class MLCircuitBreaker {
     try {
       const result = await fn()
       if (this.state === 'HALF_OPEN') {
-        this.reset()
         console.info('[CircuitBreaker] ML service recovered → CLOSED')
       }
+      this.reset()
       return result
     } catch (err) {
       this.recordFailure()
@@ -76,13 +77,24 @@ const circuitBreaker = new MLCircuitBreaker()
 async function callML<T = string[]>(path: string): Promise<T | null> {
   return circuitBreaker.call(async () => {
     const res = await axios.get(`${ML_SERVICE_URL}${path}`, {
-      timeout: ML_TIMEOUT_MS
+      timeout: ML_TIMEOUT_MS,
+      headers: ML_SERVICE_TOKEN ? { 'x-service-token': ML_SERVICE_TOKEN } : undefined
     })
     return res.data as T
   }).catch(() => {
     console.warn(`[Recommendations] ML call failed: ${path}`)
     return null
   })
+}
+
+async function callMLPost<T>(path: string, body: unknown): Promise<T | null> {
+  return circuitBreaker.call(async () => {
+    const res = await axios.post(`${ML_SERVICE_URL}${path}`, body, {
+      timeout: ML_TIMEOUT_MS,
+      headers: ML_SERVICE_TOKEN ? { 'x-service-token': ML_SERVICE_TOKEN } : undefined
+    })
+    return res.data as T
+  }).catch(() => null)
 }
 
 /**
@@ -101,19 +113,30 @@ function isValidObjectId(id: string): boolean {
  * Enrich danh sách productIds thành full product objects.
  * Giữ nguyên thứ tự từ ML service (đã rank theo relevance).
  */
-async function enrichProductIds(productIds: string[], limit?: number): Promise<any[]> {
+async function enrichProductIds(
+  productIds: string[],
+  limit?: number,
+  options: { allowPrescription?: boolean } = {}
+): Promise<any[]> {
   if (!productIds || productIds.length === 0) return []
 
   // Validate và convert sang ObjectId — loại bỏ ID không hợp lệ
-  const ids = (limit ? productIds.slice(0, limit) : productIds)
-    .filter(isValidObjectId)
-    .map((id) => new ObjectId(id))
+  const ids = productIds.filter(isValidObjectId).map((id) => new ObjectId(id))
 
   if (ids.length === 0) return []
 
+  const productFilter: Record<string, unknown> = {
+    _id: { $in: ids },
+    isActive: true,
+    stockQuantity: { $gt: 0 }
+  }
+  if (!options.allowPrescription) {
+    productFilter.requiresPrescription = { $ne: true }
+  }
+
   const products = await databaseService.products
     .aggregate([
-      { $match: { _id: { $in: ids }, isActive: true } },
+      { $match: productFilter },
       {
         $lookup: {
           from: 'categories',
@@ -150,7 +173,8 @@ async function enrichProductIds(productIds: string[], limit?: number): Promise<a
 
   // Giữ nguyên thứ tự từ ML service (đã được rank theo relevance)
   const productMap = new Map(products.map((p) => [p._id.toString(), p]))
-  return ids.map((id) => productMap.get(id.toString())).filter(Boolean)
+  const enriched = ids.map((id) => productMap.get(id.toString())).filter(Boolean)
+  return limit === undefined ? enriched : enriched.slice(0, limit)
 }
 
 /**
@@ -158,12 +182,12 @@ async function enrichProductIds(productIds: string[], limit?: number): Promise<a
  */
 async function getFallbackTrending(limit: number = 12): Promise<any[]> {
   return databaseService.products
-    .find({ isActive: true, stockQuantity: { $gt: 0 } })
+    .find({ isActive: true, stockQuantity: { $gt: 0 }, requiresPrescription: { $ne: true } })
     .sort({ rating: -1, reviewCount: -1 })
     .limit(limit)
     .project({
       _id: 1, name: 1, slug: 1, featuredImage: 1,
-      priceVariants: 1, rating: 1, reviewCount: 1, stockQuantity: 1
+      priceVariants: 1, rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
     })
     .toArray()
 }
@@ -175,13 +199,13 @@ class RecommendationsService {
    * GET /recommendations/related/:productId
    * Sản phẩm liên quan — TF-IDF Content-Based
    */
-  async getRelated(productId: string, limit: number = 8) {
+  async getRelated(productId: string, limit: number = 8, diverse: boolean = true, lambdaMmr: number = 0.7) {
     if (!isValidObjectId(productId)) {
       return { algorithm: 'fallback_invalid_id', products: [] }
     }
 
     const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/related/${productId}?limit=${limit}`
+      `/recommend/related/${productId}?limit=${limit}&diverse=${diverse}&lambda_mmr=${lambdaMmr}`
     )
 
     if (!data || data.products.length === 0) {
@@ -190,9 +214,18 @@ class RecommendationsService {
       if (!product) return { algorithm: 'fallback_empty', products: [] }
 
       const fallback = await databaseService.products
-        .find({ categoryId: product.categoryId, isActive: true, _id: { $ne: product._id } })
+        .find({
+          categoryId: product.categoryId,
+          isActive: true,
+          stockQuantity: { $gt: 0 },
+          requiresPrescription: { $ne: true },
+          _id: { $ne: product._id }
+        })
         .limit(limit)
-        .project({ _id: 1, name: 1, slug: 1, featuredImage: 1, priceVariants: 1, rating: 1, stockQuantity: 1 })
+        .project({
+          _id: 1, name: 1, slug: 1, featuredImage: 1, priceVariants: 1,
+          rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
+        })
         .toArray()
       return { algorithm: 'fallback_category', products: fallback }
     }
@@ -227,13 +260,30 @@ class RecommendationsService {
    * Xu hướng / bán chạy — NMF
    */
   async getTrending(categoryId?: string, limit: number = 12) {
+    if (categoryId && !isValidObjectId(categoryId)) {
+      return { algorithm: 'fallback_invalid_category', products: [] }
+    }
     const cacheKey = `recommendations:trending:${categoryId || 'all'}:${limit}`
     return cacheService.getOrSet(cacheKey, async () => {
       const query = categoryId ? `?category_id=${categoryId}&limit=${limit}` : `?limit=${limit}`
       const data = await callML<{ algorithm: string; products: string[] }>(`/recommend/trending${query}`)
 
       if (!data || data.products.length === 0) {
-        const fallback = await getFallbackTrending(limit)
+        const filter: Record<string, unknown> = {
+          isActive: true,
+          stockQuantity: { $gt: 0 },
+          requiresPrescription: { $ne: true }
+        }
+        if (categoryId && isValidObjectId(categoryId)) filter.categoryId = new ObjectId(categoryId)
+        const fallback = await databaseService.products
+          .find(filter)
+          .sort({ rating: -1, reviewCount: -1 })
+          .limit(limit)
+          .project({
+            _id: 1, name: 1, slug: 1, featuredImage: 1, priceVariants: 1,
+            rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
+          })
+          .toArray()
         return { algorithm: 'fallback_rating', products: fallback }
       }
 
@@ -281,9 +331,9 @@ class RecommendationsService {
       return { algorithm: 'fallback_empty', products: [] }
     }
 
-    const orderIdsParam = validIds.join(',')
-    const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/post-purchase?order_ids=${orderIdsParam}&limit=${limit}`
+    const data = await callMLPost<{ algorithm: string; products: string[] }>(
+      '/recommend/post-purchase',
+      { product_ids: validIds, limit }
     )
 
     if (!data || data.products.length === 0) {
@@ -311,23 +361,32 @@ class RecommendationsService {
     prescriptionProductIds?: string[]
     limit?: number
   }) {
-    const params = new URLSearchParams({
-      chronic_diseases: chronicDiseases.join(','),
-      allergies: allergies.join(','),
-      current_medications: currentMedications.join(','),
-      prescription_product_ids: prescriptionProductIds.join(','),
-      limit: String(limit)
-    })
-
-    const data = await callML<{ algorithm: string; products: string[] }>(
-      `/recommend/pharmacist?${params}`
+    const sanitizeMedicalTerms = (values: unknown) =>
+      Array.isArray(values)
+        ? values.filter((v): v is string => typeof v === 'string').map((v) => v.trim().slice(0, 100)).filter(Boolean).slice(0, 50)
+        : []
+    chronicDiseases = sanitizeMedicalTerms(chronicDiseases)
+    allergies = sanitizeMedicalTerms(allergies)
+    currentMedications = sanitizeMedicalTerms(currentMedications)
+    prescriptionProductIds = Array.isArray(prescriptionProductIds)
+      ? prescriptionProductIds.filter((v) => typeof v === 'string' && isValidObjectId(v)).slice(0, 50)
+      : []
+    const data = await callMLPost<{ algorithm: string; products: string[] }>(
+      '/recommend/pharmacist',
+      {
+        chronic_diseases: chronicDiseases,
+        allergies,
+        current_medications: currentMedications,
+        prescription_product_ids: prescriptionProductIds,
+        limit
+      }
     )
 
     if (!data || data.products.length === 0) {
       return { algorithm: 'fallback_empty', products: [] }
     }
 
-    const enriched = await enrichProductIds(data.products, limit)
+    const enriched = await enrichProductIds(data.products, limit, { allowPrescription: true })
     return { algorithm: data.algorithm, products: enriched }
   }
 
