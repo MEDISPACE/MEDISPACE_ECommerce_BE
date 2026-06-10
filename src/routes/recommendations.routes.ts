@@ -10,7 +10,10 @@ import {
   getReplenishmentController,
   trackRecommendationEventController
 } from '~/controllers/recommendations.controllers'
-import { accessTokenValidator } from '~/middlewares/users.middlewares'
+import { accessTokenValidator, optionalAccessTokenValidator } from '~/middlewares/users.middlewares'
+import { authenticatePharmacist } from '~/middlewares/pharmacists.middlewares'
+import { adminRequired } from '~/middlewares/admin.middlewares'
+import { searchRateLimit } from '~/middlewares/search.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const recommendationsRouter = Router()
@@ -67,7 +70,12 @@ recommendationsRouter.post('/post-purchase', wrapRequestHandler(getPostPurchaseC
  * Body: { chronicDiseases?, allergies?, currentMedications?, prescriptionProductIds? }
  * Auth: Required (Pharmacist)
  */
-recommendationsRouter.post('/pharmacist', accessTokenValidator, wrapRequestHandler(getPharmacistSuggestionsController))
+recommendationsRouter.post(
+  '/pharmacist',
+  accessTokenValidator,
+  authenticatePharmacist,
+  wrapRequestHandler(getPharmacistSuggestionsController)
+)
 
 /**
  * Description: Predictive Replenishment — sản phẩm cần mua lại theo chu kỳ
@@ -85,14 +93,19 @@ recommendationsRouter.get('/replenishment', accessTokenValidator, wrapRequestHan
  * Body: { productId, algorithm, section, position }
  * Auth: Optional (userId từ token nếu có)
  */
-recommendationsRouter.post('/track', wrapRequestHandler(trackRecommendationEventController))
+recommendationsRouter.post(
+  '/track',
+  searchRateLimit(120, 60_000),
+  optionalAccessTokenValidator,
+  wrapRequestHandler(trackRecommendationEventController)
+)
 
 /**
  * Description: ML service status (admin debug)
  * Path: /recommendations/ml-status
  * Method: GET
- * Auth: Public
+ * Auth: Admin
  */
-recommendationsRouter.get('/ml-status', wrapRequestHandler(getMLStatusController))
+recommendationsRouter.get('/ml-status', accessTokenValidator, adminRequired, wrapRequestHandler(getMLStatusController))
 
 export default recommendationsRouter

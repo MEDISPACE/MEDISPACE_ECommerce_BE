@@ -30,6 +30,7 @@ services:
       TYPESENSE_PORT: 8108
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
+      ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:-medispace-dev-ml-token}
       CHAT_AI_URL: http://chat-ai-service:8003
       REDIS_URL: redis://redis:6379
     volumes:
@@ -56,6 +57,7 @@ services:
       - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/.env
     environment:
       BE_SERVICE_URLS: http://backend:8000   # Dev chỉ cần gọi internal
+      ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:-medispace-dev-ml-token}
     volumes:
       - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/src:/app/src      # Hot-reload src
       - ../MEDISPACE_Python_Services/MEDISPACE_ML_Service/tests:/app/tests  # Sync test files

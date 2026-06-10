@@ -99,7 +99,11 @@ app.use('/admin/moderation', adminModerationRouter)
 // ─── Internal endpoints (ML Service → BE webhook) ─────────────────────────────
 // Called by ML service after retraining to invalidate stale Redis recommendation cache
 import cacheService from './services/cache.services'
-app.post('/internal/flush-recommendation-cache', async (_req, res) => {
+app.post('/internal/flush-recommendation-cache', async (req, res) => {
+  const expectedToken = process.env.ML_SERVICE_TOKEN || 'medispace-local-ml-token'
+  if (req.headers['x-service-token'] !== expectedToken) {
+    return res.status(401).json({ message: 'Unauthorized internal request' })
+  }
   await cacheService.invalidate('recommendations:*')
   console.log('[BE] Recommendation cache flushed by ML service webhook.')
   res.json({ message: 'cache flushed' })
