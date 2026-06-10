@@ -191,8 +191,15 @@ class ProductsService {
               targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
             }
             if (targetCategory) {
-              const categoryPath =
-                targetCategory.path === '/' ? `/${targetCategory.slug}` : `${targetCategory.path}/${targetCategory.slug}`
+              let categoryPath = targetCategory.path
+              if (!categoryPath.startsWith('/')) {
+                categoryPath = '/' + categoryPath
+              }
+              if (categoryPath === '/') {
+                categoryPath = `/${targetCategory.slug}`
+              } else if (!categoryPath.endsWith(`/${targetCategory.slug}`)) {
+                categoryPath = `${categoryPath}/${targetCategory.slug}`
+              }
               const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
               const descendantCategories = await databaseService.categories
                 .find({
@@ -342,8 +349,15 @@ class ProductsService {
         // For parent category with path '/thuc-pham-chuc-nang', we want to find:
         // - Categories with path STARTING with '/thuc-pham-chuc-nang' (subcategories)
         // - Or the parent category itself (by _id)
-        const categoryPath =
-          targetCategory.path === '/' ? `/${targetCategory.slug}` : `${targetCategory.path}/${targetCategory.slug}`
+        let categoryPath = targetCategory.path
+        if (!categoryPath.startsWith('/')) {
+          categoryPath = '/' + categoryPath
+        }
+        if (categoryPath === '/') {
+          categoryPath = `/${targetCategory.slug}`
+        } else if (!categoryPath.endsWith(`/${targetCategory.slug}`)) {
+          categoryPath = `${categoryPath}/${targetCategory.slug}`
+        }
 
         // Escape special regex characters in the path
         const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
