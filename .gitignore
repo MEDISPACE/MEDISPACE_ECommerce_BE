@@ -18,5 +18,6 @@ coverage/
 !src/tests/orders.benefits.test.ts
 !src/tests/returnRequests.allocations.test.ts
 !src/tests/loyaltyCoupon.integration.test.ts
+!src/tests/recommendations.services.spec.ts
 
 note.txt
