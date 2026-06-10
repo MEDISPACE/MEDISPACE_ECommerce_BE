@@ -3,14 +3,23 @@ import { ObjectId } from 'mongodb'
 import recommendationsService from '~/services/recommendations.services'
 import databaseService from '~/services/database.services'
 
+const parseLimit = (value: unknown, fallback: number, max: number) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(Math.max(Math.trunc(parsed), 1), max)
+}
+
 /**
  * GET /recommendations/related/:productId
  * San pham lien quan — dung tren ProductDetailPage
  */
 export const getRelatedController = async (req: Request, res: Response) => {
   const { productId } = req.params
-  const limit = Number(req.query.limit) || 8
-  const result = await recommendationsService.getRelated(productId, limit)
+  const limit = parseLimit(req.query.limit, 8, 12)
+  const diverse = req.query.diverse !== 'false'
+  const rawLambda = Number(req.query.lambda_mmr)
+  const lambdaMmr = Number.isFinite(rawLambda) ? Math.min(Math.max(rawLambda, 0), 1) : 0.7
+  const result = await recommendationsService.getRelated(productId, limit, diverse, lambdaMmr)
   return res.json({ message: 'Get related products success', data: result })
 }
 
@@ -20,7 +29,7 @@ export const getRelatedController = async (req: Request, res: Response) => {
  */
 export const getBoughtTogetherController = async (req: Request, res: Response) => {
   const { productId } = req.params
-  const limit = Number(req.query.limit) || 6
+  const limit = parseLimit(req.query.limit, 6, 10)
   const result = await recommendationsService.getBoughtTogether(productId, limit)
   return res.json({ message: 'Get bought together success', data: result })
 }
@@ -31,7 +40,7 @@ export const getBoughtTogetherController = async (req: Request, res: Response) =
  */
 export const getTrendingController = async (req: Request, res: Response) => {
   const categoryId = req.query.categoryId as string | undefined
-  const limit = Number(req.query.limit) || 12
+  const limit = parseLimit(req.query.limit, 12, 20)
   const result = await recommendationsService.getTrending(categoryId, limit)
   return res.json({ message: 'Get trending products success', data: result })
 }
@@ -42,7 +51,7 @@ export const getTrendingController = async (req: Request, res: Response) => {
  */
 export const getForYouController = async (req: Request, res: Response) => {
   const userId = req.decoded_authorization?.userId as string
-  const limit = Number(req.query.limit) || 12
+  const limit = parseLimit(req.query.limit, 12, 20)
   const result = await recommendationsService.getForYou(userId, limit)
   return res.json({ message: 'Get personalized recommendations success', data: result })
 }
@@ -53,9 +62,11 @@ export const getForYouController = async (req: Request, res: Response) => {
  * Body: { productIds: string[] }
  */
 export const getPostPurchaseController = async (req: Request, res: Response) => {
-  const { productIds } = req.body as { productIds: string[] }
-  const limit = Number(req.query.limit) || 8
-  const result = await recommendationsService.getPostPurchase(productIds || [], limit)
+  const productIds = Array.isArray(req.body?.productIds)
+    ? req.body.productIds.filter((id: unknown): id is string => typeof id === 'string').slice(0, 50)
+    : []
+  const limit = parseLimit(req.query.limit, 8, 12)
+  const result = await recommendationsService.getPostPurchase(productIds, limit)
   return res.json({ message: 'Get post-purchase recommendations success', data: result })
 }
 
@@ -66,7 +77,7 @@ export const getPostPurchaseController = async (req: Request, res: Response) => 
  */
 export const getPharmacistSuggestionsController = async (req: Request, res: Response) => {
   const { chronicDiseases, allergies, currentMedications, prescriptionProductIds } = req.body
-  const limit = Number(req.query.limit) || 10
+  const limit = parseLimit(req.query.limit, 10, 15)
   const result = await recommendationsService.getPharmacistSuggestions({
     chronicDiseases,
     allergies,
@@ -92,7 +103,7 @@ export const getMLStatusController = async (req: Request, res: Response) => {
  */
 export const getReplenishmentController = async (req: Request, res: Response) => {
   const userId = req.decoded_authorization?.userId as string
-  const limit = Number(req.query.limit) || 5
+  const limit = parseLimit(req.query.limit, 5, 8)
   const result = await recommendationsService.getReplenishment(userId, limit)
   return res.json({ message: 'Get replenishment recommendations success', data: result })
 }
@@ -113,17 +124,21 @@ export const trackRecommendationEventController = async (req: Request, res: Resp
   const userId = req.decoded_authorization?.userId
 
   // Validate productId
-  if (!productId) {
-    return res.status(400).json({ message: 'productId is required' })
+  if (!productId || !ObjectId.isValid(productId)) {
+    return res.status(400).json({ message: 'A valid productId is required' })
   }
 
   try {
+    const allowedSections = new Set([
+      'trending', 'related', 'bundle', 'bought-together', 'for-you',
+      'post-purchase', 'replenishment', 'recommendation'
+    ])
     await databaseService.db.collection('recommendationEvents').insertOne({
       userId: userId ? new ObjectId(userId as string) : null,
       productId: new ObjectId(productId),
-      algorithm: algorithm || 'unknown',
-      section: section || 'unknown',
-      position: typeof position === 'number' ? position : -1,
+      algorithm: typeof algorithm === 'string' ? algorithm.slice(0, 64) : 'unknown',
+      section: allowedSections.has(section) ? section : 'unknown',
+      position: typeof position === 'number' ? Math.min(Math.max(Math.trunc(position), 0), 100) : -1,
       eventType: 'click',
       timestamp: new Date()
     })
