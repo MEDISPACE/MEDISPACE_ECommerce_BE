@@ -104,7 +104,7 @@ class NotificationService {
     userId: ObjectId,
     page = 1,
     limit = 20,
-    filter?: 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder'
+    filter?: 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder' | 'review'
   ) {
     const skip = (page - 1) * limit
     const query: Record<string, unknown> = { userId }
@@ -327,6 +327,59 @@ class NotificationService {
         message: `Yêu cầu hoàn hàng ${requestNumber} cần được xử lý.`,
         actionUrl: '/admin/returns',
         metadata: { requestNumber },
+      },
+      io
+    )
+  }
+
+  /**
+   * Trigger: Review moderation result → notify customer
+   *
+   * Logic:
+   * - REJECTED (always): Customer must know why their review was rejected.
+   * - APPROVED from pending (manual moderation): Customer was waiting, let them know it's live.
+   * - APPROVED auto (auto-approved on submit): Toast was already shown on submit — skip.
+   *
+   * @param userId       - Customer who wrote the review
+   * @param reviewId     - ID of the review
+   * @param productName  - Name of the reviewed product (for context in message)
+   * @param newStatus    - 'approved' | 'rejected'
+   * @param wasAutoApproved - true if review was auto-approved on submit (no notification needed)
+   * @param moderationNotes - Rejection reason (required when rejected)
+   * @param io           - Socket.IO server instance for real-time push
+   */
+  async notifyReviewModerated(
+    userId: ObjectId,
+    reviewId: ObjectId,
+    productName: string,
+    newStatus: 'approved' | 'rejected',
+    wasAutoApproved: boolean,
+    moderationNotes?: string,
+    io?: SocketIOServer
+  ): Promise<void> {
+    // Auto-approved reviews: user already got a success toast on submit → skip
+    if (newStatus === 'approved' && wasAutoApproved) return
+
+    const isApproved = newStatus === 'approved'
+
+    await this.createAndPush(
+      {
+        userId,
+        type: 'review',
+        title: isApproved ? 'Đánh giá đã được duyệt' : 'Đánh giá bị từ chối',
+        message: isApproved
+          ? `Đánh giá của bạn về "${productName}" đã được duyệt và hiển thị công khai.`
+          : moderationNotes
+            ? `Đánh giá của bạn về "${productName}" bị từ chối. Lý do: ${moderationNotes}`
+            : `Đánh giá của bạn về "${productName}" không đáp ứng tiêu chuẩn và bị từ chối.`,
+        actionUrl: `/account/reviews`,
+        metadata: {
+          reviewId: reviewId.toString(),
+          productName,
+          moderationStatus: newStatus,
+          moderationNotes: moderationNotes || null,
+        },
+        targetRole: 'customer',
       },
       io
     )
