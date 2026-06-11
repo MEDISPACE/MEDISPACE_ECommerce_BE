@@ -589,7 +589,7 @@ class ReviewService {
       })
     }
 
-    // Update review
+    // Update review — admin decision clears aiFlag (human overrides AI)
     const result = await databaseService.reviews.findOneAndUpdate(
       { _id: reviewId },
       {
@@ -598,6 +598,7 @@ class ReviewService {
           moderatedBy: moderatorId,
           moderatedAt: new Date(),
           moderationNotes: notes,
+          aiFlag: false,           // Admin reviewed → clear AI flag
           updatedAt: new Date()
         }
       },
@@ -900,8 +901,11 @@ class ReviewService {
       updateData.moderationNotes = bulkRejectionReason
     }
 
-    // Update all reviews
-    const result = await databaseService.reviews.updateMany({ _id: { $in: reviewIds } }, { $set: updateData })
+    // Update all reviews — admin decision clears aiFlag (human overrides AI)
+    const result = await databaseService.reviews.updateMany(
+      { _id: { $in: reviewIds } },
+      { $set: { ...updateData, aiFlag: false, updatedAt: new Date() } }
+    )
 
     // Update product ratings for affected products
     const productIds = [...new Set(reviews.map((r) => r.productId))]
