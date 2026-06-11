@@ -5,6 +5,7 @@ import cartService from '~/services/carts.services'
 import { AddToCartReqBody, UpdateCartItemReqBody } from '~/models/requests/Cart.request'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { CARTS_MESSAGES } from '~/constants/message'
+import recommendationsService from '~/services/recommendations.services'
 
 // Helper function to get userId and sessionId from request
 const getUserAndSession = (req: Request) => {
@@ -48,6 +49,7 @@ export const addToCartController = async (req: Request<ParamsDictionary, unknown
   const { productId, quantity, unit, price } = req.body
 
   const result = await cartService.addItemToCart(new ObjectId(productId), quantity, userId, sessionId, unit, price)
+  void recommendationsService.recordRealtimeEvent(userId?.toString())
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.ADD_TO_CART_SUCCESS,
