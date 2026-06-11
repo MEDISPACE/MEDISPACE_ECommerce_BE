@@ -45,6 +45,21 @@ export interface ReviewType {
   moderatedAt?: Date
   moderationNotes?: string // Internal notes for rejection reason
 
+  // AI Moderation (async, runs after save)
+  aiModeration?: {
+    severity: string
+    categories: string[]
+    confidence: number
+    shouldHide: boolean
+    requiresHumanReview: boolean
+    reason: string
+    suggestedAction: 'none' | 'review' | 'hide'
+    model: string
+    reviewedAt: Date
+    latencyMs: number
+  }
+  aiFlag?: boolean // true nếu AI đánh dấu cần admin xem xét
+
   // Timestamps
   createdAt?: Date
   updatedAt?: Date
@@ -77,6 +92,21 @@ export default class Review {
   moderatedBy?: ObjectId
   moderatedAt?: Date
   moderationNotes?: string
+
+  // AI Moderation
+  aiModeration?: {
+    severity: string
+    categories: string[]
+    confidence: number
+    shouldHide: boolean
+    requiresHumanReview: boolean
+    reason: string
+    suggestedAction: 'none' | 'review' | 'hide'
+    model: string
+    reviewedAt: Date
+    latencyMs: number
+  }
+  aiFlag?: boolean
 
   createdAt?: Date
   updatedAt?: Date
@@ -130,9 +160,10 @@ export default class Review {
       return 'Rating must be between 1 and 5 stars'
     }
 
-    // Comment validation (minimum length for meaningful feedback)
-    if (!this.comment || this.comment.trim().length < 10) {
-      return 'Review comment must be at least 10 characters'
+    // Comment validation — ngưỡng 5 ký tự để không phạt nhầm review ngắn chân thực
+    // ("Tốt!" 4 ký tự → reject, "Tốt lắm" 7 ký tự → accept)
+    if (!this.comment || this.comment.trim().length < 5) {
+      return 'Nội dung đánh giá phải có ít nhất 5 ký tự'
     }
 
     // Comment max length (prevent spam)
