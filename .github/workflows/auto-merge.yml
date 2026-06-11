@@ -1,14 +1,21 @@
 name: Auto Merge develop → main
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Backend Pipeline"]
     branches: [develop]
+    types: [completed]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: auto-merge-develop-to-main
+  cancel-in-progress: false
+
 jobs:
   auto-merge:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     permissions:
@@ -21,15 +28,17 @@ jobs:
           token: ${{ secrets.DEPLOY_PAT }}
 
       - name: Merge develop → main
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git checkout main
-          git pull origin main
+          git fetch origin main develop
+          git checkout -B main origin/main
 
-          echo "🔀 Merging develop into main..."
-          git merge origin/develop --no-ff -m "chore: auto-merge develop → main"
+          echo "Merging tested develop commit ${TESTED_SHA} into main..."
+          git merge "${TESTED_SHA}" --no-ff -m "chore: auto-merge tested develop → main"
 
           git push origin main
-          echo "✅ Merged successfully"
+          echo "Merged successfully"
