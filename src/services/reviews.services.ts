@@ -8,6 +8,8 @@ import { REVIEWS_MESSAGES } from '~/constants/message'
 import productsService from './products.services'
 import typesenseService from './typesense.services'
 import notificationService from './notifications.services'
+import reviewAiModerationService from './reviewAiModeration.services'
+import { moderateTextRuleBased } from '~/utils/moderation/moderationEngine'
 import { getIO } from '~/sockets/chat.socket'
 import type { Server as SocketIOServer } from 'socket.io'
 
@@ -44,81 +46,42 @@ class ReviewService {
     isVerifiedPurchase: boolean
   ): Promise<boolean> {
     // Rule 1: Verified Purchase (HIGHEST PRIORITY)
-    // If user has verified purchase, proceed to other checks
-    if (!isVerifiedPurchase) {
-      return false
-    }
+    if (!isVerifiedPurchase) return false
 
-    // Rule 3: Spam Detection
-    const spamPatterns = [
-      /https?:\/\//i, // URLs
-      /www\./i, // www links
-      /\.(com|net|org|vn)/i, // domains
-      /mua.*tại/i, // "mua tại..."
-      /liên hệ/i, // contact info
-      /\d{10,}/, // phone numbers (10+ digits)
-      /zalo|telegram|facebook/i // social media
-    ]
+    // Rule 2: Cực ngắn — block ngay (<5 ký tự như "ok", "a")
+    // Ngưỡng 5 (thay vì 10) để không phạt nhầm review ngắn chân thực
+    // VD: "Tốt!" (4 ký tự) → pending, "Tốt lắm" (7 ký tự) → tiếp tục check
+    if (reviewData.comment.trim().length < 5) return false
 
-    const textToCheck = `${reviewData.comment} ${reviewData.title || ''}`
-    const hasSpam = spamPatterns.some((pattern) => pattern.test(textToCheck))
+    // Rule 3: Quá dài bất thường
+    if (reviewData.comment.length > 2000) return false
 
-    if (hasSpam) {
-      return false
-    }
+    // Rule 4: Rule-based moderation engine (PII, spam URL, toxic, medical_harm)
+    // Thay thế các inline regex/keyword checks — dùng chung với community moderation
+    const textToCheck = `${reviewData.title || ''} ${reviewData.comment}`.trim()
+    const ruleResult = moderateTextRuleBased(textToCheck)
 
-    // Rule 4: Sensitive Keywords (Medical Safety)
-    const sensitiveKeywords = [
-      'tác dụng phụ',
-      'nguy hiểm',
-      'chết',
-      'tử vong',
-      'bệnh nặng',
-      'dị ứng',
-      'phản ứng',
-      'độc hại',
-      'cấm',
-      'không nên dùng',
-      'ngộ độc',
-      'biến chứng'
-    ]
+    // Severity high/critical → Force pending (PII, dangerous medical advice, critical toxic)
+    if (ruleResult.severity === 'high' || ruleResult.severity === 'critical') return false
 
-    const lowerText = textToCheck.toLowerCase()
-    const hasSensitive = sensitiveKeywords.some((keyword) => lowerText.includes(keyword))
+    // Severity medium → Force pending (spam URLs, toxic language)
+    // AI layer sẽ xử lý các trường hợp tinh vi hơn không bị rule bắt
+    if (ruleResult.severity === 'medium') return false
 
-    if (hasSensitive) {
-      return false
-    }
-
-    // Rule 2: User Trust Score
-    // Trusted users bypass length/rating checks, but NOT spam/sensitive keyword checks
+    // Rule 5: User Trust Score
+    // Trusted users (≥3 approved, 0 rejected) → auto-approve bất kể độ dài
+    // Lý do: khách hàng trung thành có thể viết ngắn vẫn là review thật
     const userReviews = await databaseService.reviews.find({ userId }).toArray()
     const approvedCount = userReviews.filter((r) => r.status === ReviewStatus.Approved).length
     const rejectedCount = userReviews.filter((r) => r.status === ReviewStatus.Rejected).length
 
-    if (approvedCount >= 3 && rejectedCount === 0) {
-      return true
-    }
+    if (approvedCount >= 3 && rejectedCount === 0) return true
 
-    if (reviewData.comment.length < 10) {
-      return false
-    }
+    // Rule 6: Too Many Images (potential spam)
+    if (reviewData.images && reviewData.images.length > 3) return false
 
-    if (reviewData.comment.length > 2000) {
-      return false
-    }
-
-    // Rule 6: Extreme Ratings with Short Comments (potential fake)
-    if ((reviewData.rating === 1 || reviewData.rating === 5) && reviewData.comment.length < 50) {
-      return false
-    }
-
-    // Rule 7: Too Many Images (potential spam)
-    if (reviewData.images && reviewData.images.length > 3) {
-      return false
-    }
-
-    // Default: Auto-approve if passed all checks
+    // Default: Auto-approve nếu qua hết rule-based checks
+    // AI layer sẽ chạy nền sau để phát hiện các vấn đề tinh vi hơn
     return true
   }
 
@@ -231,6 +194,11 @@ class ReviewService {
     if (shouldApprove) {
       await this.updateProductRating(productId)
     }
+
+    // 10. AI Moderation — fire-and-forget (KHÔNG block response về customer)
+    // Chạy nền sau khi save, nếu AI phát hiện vấn đề sẽ tự downgrade status
+    const aiContent = `${data.title || ''} ${data.comment}`.trim()
+    reviewAiModerationService.analyzeAsync(result.insertedId, userId, aiContent).catch(() => {})
 
     return { ...review, _id: result.insertedId }
   }
@@ -439,7 +407,7 @@ class ReviewService {
     }
 
     if (data.comment !== undefined) {
-      if (data.comment.trim().length < 10) {
+      if (data.comment.trim().length < 5) {
         throw new ErrorWithStatus({
           message: REVIEWS_MESSAGES.COMMENT_TOO_SHORT,
           status: HTTP_STATUS.BAD_REQUEST
@@ -480,6 +448,9 @@ class ReviewService {
 
       updateData.autoApproved = shouldApprove
       updateData.status = shouldApprove ? ReviewStatus.Approved : ReviewStatus.Pending
+      // Reset AI moderation fields — nội dung đã thay đổi, AI sẽ re-score sau
+      updateData.aiModeration = null
+      updateData.aiFlag = false
       shouldUpdateStatus = true
     }
 
@@ -493,6 +464,14 @@ class ReviewService {
     // 6. Update product rating
     if (review.status === ReviewStatus.Approved || shouldUpdateStatus) {
       await this.updateProductRating(review.productId)
+    }
+
+    // 7. AI Moderation re-score nếu nội dung đã thay đổi — fire-and-forget
+    const contentChanged = data.comment !== undefined || data.title !== undefined
+    if (contentChanged) {
+      const newComment = data.comment ?? review.comment
+      const newTitle = data.title ?? review.title ?? ''
+      reviewAiModerationService.analyzeAsync(reviewId, userId, `${newTitle} ${newComment}`.trim()).catch(() => {})
     }
 
     return result
