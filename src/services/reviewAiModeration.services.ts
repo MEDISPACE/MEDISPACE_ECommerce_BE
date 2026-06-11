@@ -47,12 +47,23 @@ function asNumber(val: string | undefined, fallback: number): number {
 }
 
 function pickJson(raw: string): string {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = fenced?.[1] || raw
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  if (start >= 0 && end > start) return candidate.slice(start, end + 1)
-  return candidate
+  // Strip markdown code fences (Gemma often wraps JSON in ```json ... ```)
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/im, '')
+    .replace(/```\s*$/im, '')
+    .trim()
+
+  // Extract first complete JSON object
+  const start = stripped.indexOf('{')
+  const end = stripped.lastIndexOf('}')
+  if (start >= 0 && end > start) return stripped.slice(start, end + 1)
+
+  // Fallback: try original raw string
+  const startRaw = raw.indexOf('{')
+  const endRaw = raw.lastIndexOf('}')
+  if (startRaw >= 0 && endRaw > startRaw) return raw.slice(startRaw, endRaw + 1)
+
+  return stripped
 }
 
 function normalizeResult(raw: any, model: string, latencyMs: number): ReviewAiResult {
@@ -154,7 +165,7 @@ class ReviewAiModerationService {
       baseUrl,
       model,
       apiKey,
-      timeoutMs: asNumber(process.env.AI_MODERATION_TIMEOUT_MS, 12000),
+      timeoutMs: asNumber(process.env.AI_MODERATION_TIMEOUT_MS, 20000),  // 20s for real LLM
       hideConfidence: asNumber(process.env.REVIEW_AI_HIDE_CONFIDENCE, 0.78),
       reviewConfidence: asNumber(process.env.REVIEW_AI_REVIEW_CONFIDENCE, 0.55)
     }
@@ -178,26 +189,33 @@ class ReviewAiModerationService {
     }
 
     // Gọi LLM thật qua OpenAI-compatible API
+    // Endpoint: baseUrl + /v1/chat/completions (OpenAI-compatible)
     const response = await axios.post(
-      `${config.baseUrl}/chat/completions`,
+      `${config.baseUrl}/v1/chat/completions`,
       {
         model: config.model,
         temperature: 0,
+        max_tokens: 300,
         messages: [
           {
             role: 'system',
             content:
-              'Bạn là người kiểm duyệt đánh giá sản phẩm y tế tại Việt Nam. Hãy trả về JSON hợp lệ, không có markdown.'
+              'You are a product review content moderator for a Vietnamese medical e-commerce platform. ' +
+              'Always respond with valid JSON only. No markdown, no explanation outside JSON.'
           },
           {
             role: 'user',
             content: [
-              'Kiểm duyệt đánh giá sản phẩm sau.',
-              'Categories: pii, spam, toxic, medical_harm, harassment, unsafe_advice, self_harm, other.',
-              'Severity: low, medium, high, critical.',
-              'Chỉ đặt shouldHide=true khi nội dung nguy hiểm cao, có PII, self-harm, hoặc tư vấn y tế sai.',
-              'Trả về JSON với: severity, categories, confidence, shouldHide, requiresHumanReview, reason, suggestedAction.',
-              `Nội dung đánh giá: ${content}`
+              'Moderate the following product review. Return ONLY valid JSON with these exact fields:',
+              '- severity: one of ["low", "medium", "high", "critical"]',
+              '- categories: array, each item one of ["pii", "spam", "toxic", "medical_harm", "harassment", "unsafe_advice", "self_harm", "other"] — empty array if safe',
+              '- confidence: float 0.0-1.0',
+              '- shouldHide: boolean — true ONLY for dangerous medical advice, PII, self_harm, or critical toxic content',
+              '- requiresHumanReview: boolean — true for medium/high/critical severity',
+              '- reason: string, one sentence in English',
+              '- suggestedAction: one of ["none", "review", "hide"]',
+              '',
+              `Review text: "${content}"`
             ].join('\n')
           }
         ]
@@ -215,7 +233,23 @@ class ReviewAiModerationService {
     if (!rawContent) throw new Error('[ReviewAI] LLM returned empty response')
 
     const latencyMs = Date.now() - startedAt
-    return normalizeResult(JSON.parse(pickJson(rawContent)), config.model, latencyMs)
+    const jsonStr = pickJson(rawContent)
+
+    let parsed: any
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch (parseErr) {
+      // LLM returned non-JSON despite instructions — log and return safe fallback
+      console.warn('[ReviewAI] JSON parse failed, raw:', rawContent.slice(0, 200))
+      // Fallback: treat as low severity safe review (do not block customer)
+      parsed = {
+        severity: 'low', categories: [], confidence: 0.1,
+        shouldHide: false, requiresHumanReview: false,
+        reason: 'AI response could not be parsed', suggestedAction: 'none'
+      }
+    }
+
+    return normalizeResult(parsed, config.model, latencyMs)
   }
 
   /**

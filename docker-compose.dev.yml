@@ -33,9 +33,12 @@ services:
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:-medispace-dev-ml-token}
       CHAT_AI_URL: http://chat-ai-service:8003
       REDIS_URL: redis://redis:6379
-      # Review AI Moderation — dùng chung LLM với Chat AI service
+      # Review AI Moderation
+      # REVIEW_AI_MOCK=true  → mock mode: dùng magic keywords (dùng cho E2E / Docker dev)
+      # REVIEW_AI_MOCK=false → real LLM: gọi https://llm.datateam.space (dùng khi test thật)
+      # Đổi thành "false" khi muốn test real LLM trong Docker
       REVIEW_AI_ENABLED: "true"
-      REVIEW_AI_MOCK: "false"
+      REVIEW_AI_MOCK: "true"
       REVIEW_AI_HIDE_CONFIDENCE: "0.78"
       REVIEW_AI_REVIEW_CONFIDENCE: "0.55"
       # Kế thừa CUSTOM_LLM_BASE_URL và CUSTOM_LLM_MODEL từ .env (env_file)
