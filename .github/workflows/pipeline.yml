@@ -2,9 +2,9 @@ name: Backend Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 concurrency:
   group: backend-${{ github.ref }}
@@ -28,9 +28,10 @@ jobs:
         with:
           node-version: 20.x
           cache: npm
-      - run: npm install
+      - run: npm ci
       - run: npm run lint || true   # warn only — pre-existing issues
-      - run: npx tsc --noEmit || true   # warn only
+      - run: npm run build
+      - run: npm test
 
   # ── Build & Push Docker Image ─────────────────────────────────────────────
   build-push:

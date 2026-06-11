@@ -1,81 +1,81 @@
-# 🧠 Spec: Hệ Thống Gợi Ý Sản Phẩm (ML Recommendation Engine)
+# Spec: Hệ Thống Gợi Ý Sản Phẩm
 
-> **Phiên bản:** 1.0  
-> **Cập nhật:** 2026-05-17  
-> **Trạng thái:** Production-ready (Sprint 1–4 hoàn tất)
+> **Phiên bản:** 2.0
+> **Cập nhật:** 2026-06-11
+> **Trạng thái:** Hoàn thiện cho phạm vi dự án học thuật; cần staging verification trước production
 
----
+## 1. Phạm vi nghiệp vụ
 
-## 1. Tổng quan kiến trúc
+Hệ thống recommendation phục vụ hai nhóm use case:
 
+- **Recommendation thương mại OTC:** sản phẩm nổi bật, dành cho bạn, liên quan, thường mua kèm, sau mua và mua lại.
+- **Hỗ trợ dược sĩ:** chỉ gợi ý sản phẩm OTC để tham khảo, không tự động gợi ý thuốc kê đơn và không kết luận tổ hợp thuốc an toàn.
+
+Mọi recommendation tự động phải thỏa policy:
+
+- Sản phẩm đang hoạt động, còn hàng và thuộc category/brand đang hoạt động.
+- Không tự động trả thuốc kê đơn, kể cả ở pharmacist workflow.
+- Loại sản phẩm đã có trong ngữ cảnh hiện tại.
+- Loại sản phẩm khớp dị ứng hoặc thuốc đang dùng.
+- Có thể áp dụng rule chống chỉ định/tương tác đã được xác thực nếu collection `drugSafetyRules` có dữ liệu.
+
+Nếu chưa có dữ liệu safety đã được xác thực, hệ thống phải trả trạng thái **chưa được đánh giá**, tuyệt đối không kết luận **an toàn**.
+
+## 2. Kiến trúc và luồng dữ liệu
+
+```text
+Frontend React
+  -> Node/Express BE
+     -> Python/FastAPI ML Service
+        -> MongoDB training/runtime data + recommendation cache
+     -> BE policy filter/rerank/backfill
+  -> FE render + attribution events
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    MEDISPACE Platform                   │
-├─────────────────┬───────────────────┬───────────────────┤
-│   Frontend (FE) │   Backend (BE)    │  ML Service (Py)  │
-│   React + Vite  │   Node/Express    │   FastAPI + SKL   │
-│   Port: 3000    │   Port: 8000      │   Port: 8002      │
-└─────────────────┴───────────────────┴───────────────────┘
-```
 
-### Flow dữ liệu
+Luồng serving:
 
-```
-User Action (FE)
-    │
-    ▼ GET/POST /api/recommendations/...
-Node BE (proxy)
-    │
-    ▼ GET/POST /recommend/...
-Python ML Service
-    │
-    ▼ Query MongoDB + run algorithm
-Return products[]
-```
+1. ML lấy candidate pool lớn hơn số lượng FE yêu cầu.
+2. ML trả candidate kèm `score`, `reason`, `evidence`, `model_version`.
+3. BE áp dụng policy, enrich product, backfill và A/B rerank.
+4. BE trả attribution metadata.
+5. FE ghi nhận impression, click, add-to-cart, purchase và feedback.
+6. Event mới invalidates cache cá nhân hóa của user.
 
----
+## 3. Các loại recommendation
 
-## 2. Danh sách Endpoints
+| Loại | Endpoint BE | Mục tiêu | Algorithm chính |
+|------|-------------|----------|-----------------|
+| Popular | `GET /api/recommendations/popular` | Sản phẩm phổ biến dùng rating/review | Rating/review fallback |
+| Featured/Trending | `GET /api/recommendations/trending` | Sản phẩm nổi bật toàn hệ thống/danh mục | NMF + rating |
+| Related | `GET /api/recommendations/related/:productId` | Sản phẩm tương đồng nhưng đa dạng | TF-IDF + MMR |
+| Bought together | `GET /api/recommendations/bought-together/:productId` | Sản phẩm thường xuất hiện cùng đơn | FP-Growth |
+| For you | `GET /api/recommendations/for-you` | Cá nhân hóa theo user | SVD/NMF fallback |
+| Post purchase | `POST /api/recommendations/post-purchase` | Cross-sell theo danh sách sản phẩm | Hybrid FP-Growth + TF-IDF |
+| Replenishment | `GET /api/recommendations/replenishment` | Dự đoán chu kỳ mua lại | Purchase interval heuristic |
+| Pharmacist support | `POST /api/recommendations/pharmacist` | Gợi ý OTC tham khảo theo ngữ cảnh | TF-IDF medical + BE policy |
 
-### 2.1 Python ML Service (port 8002)
+Endpoint vận hành:
 
-| Method | Endpoint | Algorithm | Mô tả |
-|--------|----------|-----------|-------|
-| `GET` | `/recommend/trending` | NMF | Sản phẩm trending toàn hệ thống |
-| `GET` | `/recommend/trending?category_id={id}` | NMF + filter | Trending trong danh mục |
-| `GET` | `/recommend/related/{productId}` | TF-IDF + MMR | Sản phẩm liên quan |
-| `GET` | `/recommend/bought-together/{productId}` | FP-Growth | Thường mua kèm |
-| `GET` | `/recommend/for-you` | SVD / NMF fallback | Cá nhân hoá (auth required) |
-| `GET` | `/recommend/replenishment` | Lịch sử mua | Nhắc mua lại (auth required) |
-| `POST` | `/recommend/post-purchase` | TF-IDF cross-sell | Sau khi đặt hàng |
-| `POST` | `/recommend/pharmacist` | TF-IDF medical | Gợi ý cho dược sĩ |
+| Method | Endpoint BE | Auth | Mô tả |
+|--------|-------------|------|-------|
+| `POST` | `/api/recommendations/track` | Optional | Ghi nhận attribution/feedback event |
+| `GET` | `/api/recommendations/metrics` | Admin | CTR, CVR, revenue, quality và safety metrics |
+| `GET` | `/api/recommendations/ml-status` | Admin | Trạng thái ML service |
 
-### 2.2 Node BE Proxy (port 8000)
+ML internal endpoints sử dụng `x-service-token`. Personalized endpoints của ML chứa `user_id` trong path, ví dụ `/recommend/for-you/{user_id}`.
 
-| Method | Endpoint | Proxy đến |
-|--------|----------|-----------|
-| `GET` | `/api/recommendations/trending` | ML `/recommend/trending` |
-| `GET` | `/api/recommendations/related/:id` | ML `/recommend/related/{id}` |
-| `GET` | `/api/recommendations/bought-together/:id` | ML `/recommend/bought-together/{id}` |
-| `GET` | `/api/recommendations/for-you` | ML `/recommend/for-you` |
-| `GET` | `/api/recommendations/replenishment` | ML `/recommend/replenishment` |
-| `POST` | `/api/recommendations/post-purchase` | ML `/recommend/post-purchase` |
-| `POST` | `/api/recommendations/pharmacist` | ML `/recommend/pharmacist` |
-
-### 2.3 Query Parameters chung
-
-| Param | Type | Default | Mô tả |
-|-------|------|---------|-------|
-| `limit` | number | 5–12 | Số sản phẩm trả về |
-| `category_id` | string | — | Lọc theo danh mục (chỉ trending) |
-
----
-
-## 3. Response Schema
+## 4. Response contract
 
 ```typescript
 interface RecommendationResult {
-  algorithm: string          // Tên thuật toán đã dùng
+  requestId: string
+  attributionToken: string
+  algorithm: string
+  modelVersion: string
+  experiment: {
+    id: string
+    variant: 'control' | 'diversified'
+  }
   products: RecommendedProduct[]
 }
 
@@ -84,262 +84,176 @@ interface RecommendedProduct {
   name: string
   slug: string
   featuredImage?: string
-  priceVariants: Array<{
-    unit: string
-    price: number
-    originalPrice?: number
-    salePrice?: number       // Giá sau giảm
-    isDefault: boolean
-    quantityPerUnit: number
-  }>
+  priceVariants: PriceVariant[]
   rating: number
   reviewCount: number
   stockQuantity: number
   requiresPrescription: boolean
   category?: Array<{ name: string }>
   brand?: Array<{ name: string }>
+  recommendation: {
+    score: number | null
+    reason: string
+    evidence: string[]
+    requiresIndependentReview: boolean
+  }
 }
 ```
 
----
-
-## 4. Tích hợp Frontend
-
-### 4.1 Hooks (`src/hooks/product/useRecommendations.ts`)
+Candidate từ ML:
 
 ```typescript
-// Trending (tất cả hoặc theo danh mục)
-useTrending(limit?: number, categoryId?: string)
-
-// Sản phẩm liên quan với 1 sản phẩm cụ thể
-useRelated(productId: string, limit?: number)
-
-// Thường mua kèm (FP-Growth)
-useBoughtTogether(productId: string, limit?: number)
-
-// Cá nhân hoá — fallback trending nếu guest
-useForYou(limit?: number, isAuthenticated?: boolean)
-
-// Nhắc mua lại — chỉ khi đã đăng nhập
-useReplenishment(limit?: number, isAuthenticated?: boolean)
-
-// Cross-sell sau mua hàng
-usePostPurchase(productIds: string[], limit?: number)
+interface RecommendationCandidate {
+  productId: string
+  score: number
+  reason: string
+  evidence: string[]
+}
 ```
 
-Tất cả hooks trả về:
-```typescript
-{ products: RecommendedProduct[], loading: boolean, algorithm: string }
-```
+## 5. Event attribution và feedback
 
-### 4.2 Service (`src/services/recommendationService.ts`)
+`POST /api/recommendations/track`
 
 ```typescript
-recommendationService.getTrending(limit, categoryId?)
-recommendationService.getRelated(productId, limit)
-recommendationService.getBoughtTogether(productId, limit)
-recommendationService.getForYou(limit)
-recommendationService.getReplenishment(limit)
-recommendationService.getPostPurchase(productIds[], limit)
-recommendationService.getPharmacistSuggestions({ chronicDiseases, allergies, ... }, limit)
+interface RecommendationEvent {
+  productId: string
+  algorithm: string
+  section: string
+  position: number
+  eventType:
+    | 'impression'
+    | 'click'
+    | 'add_to_cart'
+    | 'purchase'
+    | 'dismiss'
+    | 'snooze'
+  requestId?: string
+  attributionToken?: string
+  modelVersion?: string
+  experimentId?: string
+  experimentVariant?: string
+  value?: number
+}
 ```
 
-### 4.3 UI Component
+Quy tắc:
 
-**`RecommendationCarousel`** (`src/components/products/RecommendationCarousel.tsx`)
+- Impression được ghi khi recommendation page/card thực sự hiển thị.
+- Click chỉ ghi khi user mở sản phẩm; click nút add-to-cart/wishlist không bị tính thành product click.
+- Add-to-cart được lưu tạm attribution trên FE.
+- Purchase được nối lại với add-to-cart attribution sau khi đặt hàng thành công.
+- `dismiss` và `snooze` được lọc khỏi personalized/replenishment serving.
 
-```tsx
-<RecommendationCarousel
-  title="Tiêu đề hiển thị"
-  subtitle="Mô tả phụ"           // optional
-  badge="trending"                // 'trending' | 'for-you' | 'bundle' | 'post-purchase' | 'related'
-  products={products}
-  loading={loading}
-  viewAllLink="/products"         // optional
-  itemsPerPage={5}                // optional, default 5
-  layout="compact"                // optional: 'compact' | 'centered'
-/>
-```
+## 6. Safety và policy engine
 
----
+Policy engine nằm tại `src/services/recommendation-policy.services.ts`.
 
-## 5. Vị trí tích hợp theo trang
+Các rule bắt buộc:
 
-| Trang | URL | Tính năng | Hook | Điều kiện hiển thị |
-|-------|-----|-----------|------|-------------------|
-| **HomePage** | `/` | "Gợi Ý Hôm Nay" / "Dành Cho Bạn" | `useForYou` | Luôn hiện |
-| **HomePage** | `/` | "Xu Hướng Hôm Nay" | `useTrending` | Luôn hiện |
-| **ProductDetailPage** | `/products/:slug` | "Thường Mua Kèm" | `useBoughtTogether` | Luôn hiện |
-| **ProductDetailPage** | `/products/:slug` | "Sản Phẩm Liên Quan" | `useRelated` | Luôn hiện |
-| **ShoppingCartPage** | `/cart` | "Thêm vào đơn hàng?" | `usePostPurchase(cartItemIds)` | Khi giỏ có sản phẩm |
-| **OrderSuccessPage** | `/order/success` | "Bạn Có Thể Cũng Thích" | `usePostPurchase(orderItemIds)` | Sau đặt hàng thành công |
-| **SearchResultsPage** | `/search?q=...` | "Có thể bạn cũng thích" (related) | `useRelated(firstResultId)` | Khi tìm thấy 1–5 kết quả |
-| **SearchResultsPage** | `/search?q=...` | "Có thể bạn đang tìm..." (trending) | `useTrending` | Khi 0 kết quả |
-| **CategoryPage** | `/categories/:slug` | "Đang Được Mua Nhiều Trong..." | `useTrending(8, categoryId)` | Trên product grid |
-| **AccountDashboard** | `/account` | "Có thể bạn cần mua lại" | `useReplenishment` | Đã đăng nhập + có lịch sử |
-| **AccountDashboard** | `/account` | "Dành Riêng Cho Bạn" | `useForYou` | Đã đăng nhập |
-| **OrderDetailPage** | `/account/orders/:id` | "Mua Kèm Được Nhiều Người Chọn" | `usePostPurchase(orderItemIds)` | Luôn hiện |
-| **WishlistPage** | `/account/wishlist` | "Bạn Có Thể Cũng Thích" | `useRelated(firstWishlistItemId)` | Khi wishlist có sản phẩm |
-| **WishlistPage** | `/account/wishlist` | "Sản Phẩm Nổi Bật" | `useTrending` | Khi wishlist rỗng |
-| **PharmacistCreateOrder** | `/pharmacist/orders/create` | "Gợi Ý Cho Bệnh Nhân" | `getPharmacistSuggestions` | Khi nhập thông tin bệnh nhân |
+1. Active, in-stock, active category và active brand.
+2. Chặn toàn bộ automatic prescription recommendation.
+3. Loại excluded products.
+4. Keyword guardrail cho allergy/current medication.
+5. Nếu có rule `status: validated` trong `drugSafetyRules`, áp dụng chống chỉ định và tương tác.
+6. Pharmacist recommendation luôn có `requiresIndependentReview: true`.
 
----
+`drugSafetyRules` là optional trong phạm vi học thuật. Nếu sử dụng dữ liệu demo, phải ghi rõ `academic_demo`; không được mô tả là cơ sở dữ liệu y khoa hoàn chỉnh.
 
-## 6. Thuật toán ML
+Các safety block được ghi vào `recommendationSafetyEvents`.
 
-### 6.1 NMF — Trending
-- **Input:** Ma trận user-item (lượt xem, thêm giỏ, đặt hàng)
-- **Output:** Top N sản phẩm có score cao nhất
-- **Dùng cho:** Trang chủ, Category page
-- **Cập nhật:** Hàng ngày (batch job)
+## 7. Model lifecycle và realtime update
 
-### 6.2 TF-IDF + MMR — Related Products
-- **Input:** Vector mô tả sản phẩm (tên, thành phần, chỉ định)
-- **Output:** K sản phẩm gần nhất (MMR đảm bảo đa dạng)
-- **Dùng cho:** ProductDetail, SearchResults, WishlistPage
-- **Cập nhật:** Khi catalog thay đổi
+- Retrain định kỳ mặc định mỗi 6 giờ.
+- Catalog thay đổi sẽ trigger retrain nền.
+- Model mới được train trong shadow bundle.
+- Chỉ swap toàn bộ bundle khi TF-IDF và NMF vượt readiness gate.
+- Request đang phục vụ không nhìn thấy trạng thái model train dở.
+- Mỗi bundle có `model_version` và evaluation snapshot.
+- `/health` trả `503` khi model chưa sẵn sàng.
+- Click/cart/wishlist/order/feedback invalidates personalized và replenishment cache của user.
 
-### 6.3 FP-Growth — Bought Together
-- **Input:** Lịch sử đơn hàng → tập itemset
-- **Output:** Frequent itemsets → sản phẩm hay mua kèm nhất
-- **Dùng cho:** ProductDetail, CartPage
-- **Cập nhật:** Hàng tuần
+Training signals:
 
-### 6.4 SVD — For You (Personalized)
-- **Input:** Lịch sử tương tác của user cụ thể
-- **Output:** Sản phẩm dự đoán phù hợp với profile user
-- **Fallback:** Trending (NMF) nếu user mới / guest
-- **Dùng cho:** AccountDashboard, HomePage (đã đăng nhập)
+| Signal | Trọng số tương đối |
+|--------|-------------------|
+| Purchase | Cao nhất |
+| Add to cart | Cao |
+| Wishlist/review | Trung bình |
+| Click | Thấp |
+| Dismiss/snooze | Serving-time exclusion |
 
-### 6.5 Replenishment
-- **Input:** Lịch sử mua hàng + chu kỳ mua trung bình
-- **Output:** Sản phẩm dự đoán sắp hết / cần mua lại
-- **Dùng cho:** AccountDashboard
-- **Điều kiện:** Requires authentication + có ≥ 1 đơn hàng
+## 8. A/B testing và metrics
 
-### 6.6 TF-IDF Medical — Pharmacist
-- **Input:** `chronicDiseases[]`, `allergies[]`, `currentMedications[]`, `prescriptionProductIds[]`
-- **Output:** Sản phẩm phù hợp với profile sức khoẻ bệnh nhân
-- **Dùng cho:** Pharmacist CreateOrder workflow
-- **Lưu ý:** Không lọc sản phẩm Rx — dược sĩ tự quyết định
+Mỗi response được gán ổn định trong request vào một variant:
 
----
+- `control`: giữ nguyên ranking.
+- `diversified`: xen kẽ sản phẩm theo category.
 
-## 7. Cấu hình giới hạn số lượng
+Admin metrics 30 ngày gồm:
 
-| Endpoint | Limit mặc định | Giới hạn tối đa | Ghi chú |
-|----------|---------------|-----------------|---------|
-| Trending | 12 | 20 | Home page dùng 8 |
-| Related | 8 | 12 | ProductDetail dùng 8 |
-| Bought Together | 6 | 10 | Cart dùng 6 |
-| For You | 12 | 20 | Dashboard dùng 8 |
-| Replenishment | 5 | 8 | Dashboard dùng 4 |
-| Post Purchase | 8 | 12 | OrderSuccess/Cart dùng 6–8 |
-| Pharmacist | 10 | 15 | — |
+- Impression, click, add-to-cart, purchase.
+- CTR, add-to-cart rate, conversion rate.
+- Recommendation-attributed revenue.
+- Average result count, diversity và novelty.
+- Safety block incidents.
 
----
+Quality events được lưu trong `recommendationQualityEvents`.
 
-## 8. Error Handling & Fallback
+## 9. Frontend UX
 
-```typescript
-// Mọi endpoint đều có fallback:
-return data ?? { algorithm: 'unavailable', products: [] }
+`RecommendationCarousel`:
 
-// Nếu products.length === 0:
-// → Carousel tự ẩn (không render ra DOM)
-// → Không hiện skeleton vô tận
+- Hiển thị lý do gợi ý.
+- Ghi nhận impression riêng với click.
+- Ghi nhận add-to-cart attribution.
+- Cho phép “Không quan tâm”.
+- Với replenishment, cho phép “Nhắc lại sau”.
+- Tự ẩn khi không có sản phẩm.
 
-// Nếu ML service down:
-// → BE trả 503, FE ẩn carousel silently
-// → Không ảnh hưởng UX core
-```
+Pharmacist workflow:
 
----
+- Medical info response sử dụng camelCase thống nhất với FE.
+- Kết hợp thuốc đang dùng từ đơn thuốc đã xác nhận gần đây.
+- Không có nút xác nhận tương tác thuốc “an toàn”.
+- Không cho thêm Rx trực tiếp từ recommendation.
+- UI luôn nhắc dược sĩ kiểm tra độc lập.
 
-## 9. Môi trường & Cấu hình
+## 10. Fallback và cache
 
-### Development
-```yaml
-# docker-compose.dev.yml
-ml-service:
-  build: ./MEDISPACE_Python_Services
-  ports:
-    - "8002:8002"
-  environment:
-    - MONGO_URI=${MONGO_URI}
-    - MODEL_PATH=/app/models
-```
+- BE có circuit breaker cho ML service.
+- Khi ML unavailable, các luồng phù hợp fallback sang rating/review hoặc trả rỗng.
+- FE ẩn section khi response rỗng.
+- BE Redis cache cho trending/featured.
+- ML Mongo cache cho related, bought-together, trending, for-you và replenishment.
+- Retrain invalidates ML cache và thông báo BE flush recommendation cache.
+- Candidate retrieval lấy tối đa khoảng 3 lần limit để policy filter vẫn có thể backfill.
 
-### Environment Variables
-```env
-# Backend .env
-ML_SERVICE_URL=http://localhost:8002   # dev
-ML_SERVICE_URL=http://ml-service:8002  # docker
-```
+## 11. Testing và CI
 
----
+Các pipeline hiện bắt buộc:
 
-## 10. Testing
+- **BE:** build và toàn bộ Vitest suite.
+- **FE:** typecheck, Vitest và production build.
+- **Python ML:** pytest suite.
 
-### Manual test từng tính năng
+Kết quả verification tại thời điểm cập nhật spec:
 
-```bash
-# 1. Trending toàn hệ thống
-curl "http://localhost:8002/recommend/trending?limit=5"
+- BE: `422/422` tests passed.
+- FE: `25/25` tests passed, typecheck và production build passed.
+- Python ML: `53/53` tests passed.
 
-# 2. Trending theo danh mục
-curl "http://localhost:8002/recommend/trending?category_id=<id>&limit=5"
+## 12. Giới hạn phạm vi học thuật
 
-# 3. Related products
-curl "http://localhost:8002/recommend/related/<productId>?limit=5"
+- “Trending” hiện phản ánh sản phẩm nổi bật dựa trên tương tác và rating, không phải short-term sales velocity thực sự.
+- Replenishment là heuristic theo khoảng cách giữa các lần mua, không dự đoán liều dùng.
+- Pharmacist support không thay thế clinical decision support.
+- Không có cơ sở dữ liệu tương tác thuốc chuyên nghiệp; hệ thống không được kết luận thuốc an toàn.
+- Cần staging verification, load test và dữ liệu traffic thực trước khi tuyên bố production-ready.
 
-# 4. Bought together
-curl "http://localhost:8002/recommend/bought-together/<productId>?limit=5"
+## 13. Việc còn lại ngoài phạm vi đồ án
 
-# 5. Post purchase (cross-sell)
-curl -X POST "http://localhost:8002/recommend/post-purchase" \
-  -H "Content-Type: application/json" \
-  -d '{"productIds": ["id1","id2"], "limit": 5}'
-
-# 6. For You (cần auth token)
-curl "http://localhost:8002/recommend/for-you?limit=5" \
-  -H "Authorization: Bearer <token>"
-
-# 7. Replenishment (cần auth token)
-curl "http://localhost:8002/recommend/replenishment?limit=5" \
-  -H "Authorization: Bearer <token>"
-
-# 8. Pharmacist
-curl -X POST "http://localhost:8002/recommend/pharmacist" \
-  -H "Content-Type: application/json" \
-  -d '{"chronicDiseases":["tiểu đường"],"allergies":[],"currentMedications":[],"prescriptionProductIds":[],"limit":5}'
-```
-
-### Frontend E2E
-
-| Trang | Action | Expected |
-|-------|--------|----------|
-| `/categories/thuoc` | Load page | Carousel trending xuất hiện trên product grid |
-| `/search?q=máy đo huyết áp ua-6` | Search | Carousel "Có thể bạn cũng thích" (related) |
-| `/search?q=xyzabc123` | Search không có kết quả | Carousel "Có thể bạn đang tìm..." (trending) |
-| `/cart` | Có sản phẩm trong giỏ | Carousel "Thêm vào đơn hàng?" |
-| `/order/success` | Sau đặt hàng COD | Carousel post-purchase |
-| `/account` | Đã đăng nhập | Grid replenishment + carousel for-you |
-| `/account/wishlist` | Có sản phẩm | Carousel related |
-| `/account/orders/:id` | Xem chi tiết đơn | Carousel post-purchase |
-
----
-
-## 11. Roadmap tương lai
-
-| Tính năng | Ưu tiên | Mô tả |
-|-----------|---------|-------|
-| A/B Testing | HIGH | So sánh CTR giữa các thuật toán |
-| Real-time update | MEDIUM | Cập nhật recommendations khi user browse |
-| Caching layer | MEDIUM | Redis cache cho trending (TTL 1h) |
-| Feedback loop | LOW | User explicit rating để retrain model |
-| Email replenishment | LOW | Gửi email nhắc mua lại định kỳ |
-
----
-
-*Tài liệu này được tạo dựa trên codebase tại commit Sprint 4 hoàn thành (2026-05-17)*
+- Tích hợp nguồn safety data có license và quy trình chuyên gia phê duyệt.
+- Dashboard/alert vận hành thực tế.
+- Đánh giá A/B có ý nghĩa thống kê bằng traffic production.
+- Drift monitoring và rollback tự động nâng cao.
