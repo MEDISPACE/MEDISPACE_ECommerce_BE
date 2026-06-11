@@ -17,7 +17,13 @@ vi.mock('axios', () => ({
 
 vi.mock('~/services/database.services', () => ({
   default: {
-    products: mockProducts
+    products: mockProducts,
+    db: {
+      collection: vi.fn(() => ({
+        find: vi.fn(() => ({ toArray: vi.fn().mockResolvedValue([]) })),
+        insertOne: vi.fn().mockResolvedValue({})
+      }))
+    }
   }
 }))
 
@@ -48,10 +54,12 @@ describe('RecommendationsService prescription policy', () => {
 
     const pipeline = mockProducts.aggregate.mock.calls[0][0]
     expect(pipeline[0].$match.requiresPrescription).toEqual({ $ne: true })
-    expect(result.products).toEqual([{ _id: otcId, requiresPrescription: false }])
+    expect(result.products[0]).toMatchObject({ _id: otcId, requiresPrescription: false })
+    expect(result.products[0].recommendation).toMatchObject({ requiresIndependentReview: false })
+    expect(result.attributionToken).toBeTruthy()
   })
 
-  it('allows prescription products in pharmacist recommendations', async () => {
+  it('blocks automatically suggested prescription products for pharmacists', async () => {
     const rxId = new ObjectId()
     vi.mocked(axios.post).mockResolvedValueOnce({
       data: { algorithm: 'tfidf_medical', products: [rxId.toString()] }
@@ -65,7 +73,7 @@ describe('RecommendationsService prescription policy', () => {
     })
 
     const pipeline = mockProducts.aggregate.mock.calls[0][0]
-    expect(pipeline[0].$match.requiresPrescription).toBeUndefined()
-    expect(result.products).toEqual([{ _id: rxId, requiresPrescription: true }])
+    expect(pipeline[0].$match.requiresPrescription).toEqual({ $ne: true })
+    expect(result.products).toEqual([])
   })
 })
