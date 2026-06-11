@@ -7,6 +7,7 @@ import {
   deleteNotificationController,
 } from '~/controllers/notifications.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
+import { notificationIdValidator, getNotificationsValidator } from '~/middlewares/notifications.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const notificationsRouter = Router()
@@ -18,7 +19,7 @@ const auth = [accessTokenValidator, verifiedUserValidator]
  * GET /notifications?page=1&limit=20&filter=all|unread|order|prescription|promotion|system|reminder
  * Get paginated notifications for the authenticated user
  */
-notificationsRouter.get('/', ...auth, wrapRequestHandler(getNotificationsController))
+notificationsRouter.get('/', ...auth, getNotificationsValidator, wrapRequestHandler(getNotificationsController))
 
 /**
  * GET /notifications/unread-count
@@ -36,12 +37,12 @@ notificationsRouter.patch('/read-all', ...auth, wrapRequestHandler(markAllAsRead
  * PATCH /notifications/:id/read
  * Mark a single notification as read
  */
-notificationsRouter.patch('/:id/read', ...auth, wrapRequestHandler(markAsReadController))
+notificationsRouter.patch('/:id/read', ...auth, notificationIdValidator, wrapRequestHandler(markAsReadController))
 
 /**
  * DELETE /notifications/:id
  * Delete a single notification permanently
  */
-notificationsRouter.delete('/:id', ...auth, wrapRequestHandler(deleteNotificationController))
+notificationsRouter.delete('/:id', ...auth, notificationIdValidator, wrapRequestHandler(deleteNotificationController))
 
 export default notificationsRouter

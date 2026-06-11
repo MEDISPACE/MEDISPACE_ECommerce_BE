@@ -531,6 +531,7 @@ export const REVIEWS_MESSAGES = {
   COMMENT_TOO_LONG: 'Comment must not exceed 2000 characters',
   TOO_MANY_IMAGES: 'Maximum 5 images allowed',
   ALREADY_VOTED_HELPFUL: 'You have already marked this review as helpful',
+  CANNOT_VOTE_OWN_REVIEW: 'You cannot vote for your own review',
   REJECTION_REASON_REQUIRED: 'Rejection reason is required',
   RATING_REQUIRED: 'Rating is required',
   TITLE_MUST_BE_STRING: 'Title must be a string',
