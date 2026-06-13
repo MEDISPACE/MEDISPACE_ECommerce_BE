@@ -117,6 +117,12 @@ class DatabaseService {
       // Orders collection indexes used by recommendation training and replenishment.
       await safeCreateIndex(this.orders, { orderStatus: 1, createdAt: -1 })
       await safeCreateIndex(this.orders, { userId: 1, orderStatus: 1, deliveredAt: -1 })
+      await safeCreateIndex(this.orders, { orderNumber: 1 }, { unique: true })
+      await safeCreateIndex(
+        this.orders,
+        { userId: 1, idempotencyKey: 1 },
+        { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
+      )
 
       // Return Requests collection indexes
       await safeCreateIndex(this.returnRequests, { userId: 1, createdAt: -1 })

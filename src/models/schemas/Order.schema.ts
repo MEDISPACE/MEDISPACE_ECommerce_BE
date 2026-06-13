@@ -72,6 +72,11 @@ export interface OrderType {
   // Loyalty points
   pointsRedeemed?: number      // Số điểm đã đổi
   pointsRedeemAmount?: number  // Số tiền giảm từ điểm
+  stockRestored?: boolean
+  idempotencyKey?: string
+  cartClearedAt?: Date
+  confirmationEmailSentAt?: Date
+  prescriptionId?: ObjectId
 
   createdAt?: Date
   updatedAt?: Date
@@ -108,6 +113,11 @@ export default class Order {
   // Loyalty points
   pointsRedeemed?: number
   pointsRedeemAmount?: number
+  stockRestored: boolean
+  idempotencyKey?: string
+  cartClearedAt?: Date
+  confirmationEmailSentAt?: Date
+  prescriptionId?: ObjectId
 
   createdAt?: Date
   updatedAt?: Date
@@ -143,6 +153,11 @@ export default class Order {
     this.estimatedDeliveryDate = order.estimatedDeliveryDate
     this.pointsRedeemed = order.pointsRedeemed || 0
     this.pointsRedeemAmount = order.pointsRedeemAmount || 0
+    this.stockRestored = order.stockRestored || false
+    this.idempotencyKey = order.idempotencyKey
+    this.cartClearedAt = order.cartClearedAt
+    this.confirmationEmailSentAt = order.confirmationEmailSentAt
+    this.prescriptionId = order.prescriptionId
 
     this.createdAt = order.createdAt || date
     this.updatedAt = order.updatedAt || date

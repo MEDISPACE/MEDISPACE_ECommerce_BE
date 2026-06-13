@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb'
 
 const mockOrdersFindOne = vi.fn()
 const mockOrdersUpdateOne = vi.fn()
+const mockOrdersFindOneAndUpdate = vi.fn()
 const mockProductsFindOne = vi.fn()
 const mockProductsUpdateOne = vi.fn()
 const mockReleaseCouponRedemptionsForOrder = vi.fn()
@@ -13,6 +14,7 @@ vi.mock('~/services/database.services', () => ({
   default: {
     orders: {
       findOne: mockOrdersFindOne,
+      findOneAndUpdate: mockOrdersFindOneAndUpdate,
       updateOne: mockOrdersUpdateOne
     },
     products: {
@@ -72,6 +74,7 @@ const makeOrder = (overrides = {}) => {
 describe('OrderService benefit settlement', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mockOrdersFindOneAndUpdate.mockImplementation(async () => ({}))
   })
 
   it('payment failed: hủy order, restore stock, release coupon usage và hoàn điểm', async () => {
@@ -187,5 +190,18 @@ describe('OrderService benefit settlement', () => {
     expect(mockProductsUpdateOne).not.toHaveBeenCalled()
     expect(mockReleaseCouponRedemptionsForOrder).not.toHaveBeenCalled()
     expect(mockRefundRedeemedPointsForOrder).not.toHaveBeenCalled()
+  })
+
+  it('không restore stock lần nữa khi order đã được claim trước đó', async () => {
+    const order = makeOrder()
+    mockOrdersFindOne
+      .mockResolvedValueOnce(order)
+      .mockResolvedValueOnce({ ...order, paymentStatus: 'failed', orderStatus: 'cancelled', stockRestored: true })
+    mockOrdersFindOneAndUpdate.mockResolvedValueOnce(null)
+
+    await orderService.updatePaymentStatus(order._id, 'failed')
+
+    expect(mockProductsFindOne).not.toHaveBeenCalled()
+    expect(mockProductsUpdateOne).not.toHaveBeenCalled()
   })
 })
