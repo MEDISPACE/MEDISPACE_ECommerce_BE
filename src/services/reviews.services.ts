@@ -381,6 +381,14 @@ class ReviewService {
       })
     }
 
+    // 2b. Rejected reviews cannot be edited — customer must contact admin
+    if (review.status === ReviewStatus.Rejected) {
+      throw new ErrorWithStatus({
+        message: REVIEWS_MESSAGES.REJECTED_REVIEW_CANNOT_BE_EDITED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
     // 3. Prepare update data
     const updateData: any = {
       updatedAt: new Date()
@@ -527,6 +535,14 @@ class ReviewService {
       throw new ErrorWithStatus({
         message: REVIEWS_MESSAGES.REVIEW_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    // Only approved reviews can receive helpful votes (pending/rejected are not public)
+    if (review.status !== ReviewStatus.Approved) {
+      throw new ErrorWithStatus({
+        message: REVIEWS_MESSAGES.REVIEW_NOT_APPROVED,
+        status: HTTP_STATUS.BAD_REQUEST
       })
     }
 

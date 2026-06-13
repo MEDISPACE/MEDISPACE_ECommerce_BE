@@ -286,6 +286,18 @@ class ReviewAiModerationService {
     const review = await databaseService.reviews.findOne({ _id: reviewId })
     if (!review) return
 
+    // BUG-7 fix: Nếu admin đã moderate (approve/reject), KHÔNG override bằng AI
+    // Admin decision luôn có quyền cao nhất — tránh race condition
+    if (review.moderatedBy) {
+      // Vẫn lưu AI score để audit, nhưng không thay đổi status/flag
+      await databaseService.reviews.updateOne(
+        { _id: reviewId },
+        { $set: { aiModeration: aiResult, updatedAt: now } }
+      )
+      console.log(`[ReviewAI] Skipped action for review ${reviewId} — already moderated by admin`)
+      return
+    }
+
     const shouldAutoDowngrade =
       aiResult.shouldHide &&
       (aiResult.severity === 'high' || aiResult.severity === 'critical') &&
@@ -316,6 +328,18 @@ class ReviewAiModerationService {
     }
 
     await databaseService.reviews.updateOne({ _id: reviewId }, { $set: updateFields })
+
+    // BUG-5 fix: Recalculate product rating when AI downgrades approved → pending
+    if (shouldAutoDowngrade && review.status === ReviewStatus.Approved) {
+      try {
+        const { default: reviewService } = await import('~/services/reviews.services')
+        await reviewService.updateProductRating(review.productId)
+      } catch (ratingErr) {
+        console.error('[ReviewAI] Failed to recalculate product rating after downgrade:', ratingErr)
+      }
+    }
+
+    // (DB update moved above — before product rating recalculation)
 
     // Notify admin nếu cần
     if (shouldAutoDowngrade || shouldFlag) {
