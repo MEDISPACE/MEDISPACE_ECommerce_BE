@@ -20,7 +20,7 @@ export class PayOSProvider implements PaymentProvider {
   async createPaymentUrl(order: Order, req?: any): Promise<string> {
     // Generate a unique numeric orderCode
     // Using timestamp + random part to ensure uniqueness and fit in integer limits
-    const orderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000))
+    const orderCode = parseInt((order._id as any).toString().slice(-12), 16)
 
     const apiUrl = process.env.API_URL || 'http://localhost:8000'
 
@@ -63,19 +63,11 @@ export class PayOSProvider implements PaymentProvider {
   }
 
   async verifyReturn(params: any): Promise<PaymentResult> {
-    // Since we append orderId and paymentStatus to the return URL ourselves,
-    // we can just parse them from the query params in the controller.
-    // However, the provider interface expects verification logic.
-    // For PayOS, the return is a direct redirect, so we trust the params we set ourselves?
-    // Actually, PayOS appends its own params too (code, id, cancel, status, orderCode).
-
-    const isSuccess = params.status === 'PAID' || params.code === '00'
-
     return {
-      isSuccess,
-      orderId: params.orderId, // Retrieved from our custom query param
+      isSuccess: false,
+      orderId: params.orderId,
       amount: 0,
-      message: isSuccess ? 'Success' : 'Failed'
+      message: 'Payment status is confirmed by the signed webhook only'
     }
   }
 

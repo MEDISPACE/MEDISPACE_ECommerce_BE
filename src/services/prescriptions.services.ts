@@ -33,7 +33,13 @@ class PrescriptionsService {
       hospitalName: body.hospitalName,
       prescriptionDate: new Date(body.prescriptionDate),
       images: body.images || [],
-      medications: body.medications,
+      medications: body.medications.map((medication) => ({
+        ...medication,
+        productId:
+          medication.productId && ObjectId.isValid(medication.productId)
+            ? new ObjectId(medication.productId)
+            : undefined
+      })),
       status: 'pending', // lowercase for consistency
       verifiedBy: undefined,
       verifiedAt: undefined,
