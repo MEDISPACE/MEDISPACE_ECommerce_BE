@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express'
 import HTTP_STATUS from '~/constants/httpStatus'
 
 const WINDOW_MS = 60_000
-const MAX_REQUESTS = 10
+const MAX_REQUESTS = Number(process.env.COUPON_RATE_LIMIT_MAX || 10)
 const attempts = new Map<string, { count: number; resetAt: number }>()
 
 export const couponRateLimit = (req: Request, res: Response, next: NextFunction) => {
