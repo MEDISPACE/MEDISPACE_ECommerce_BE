@@ -19,6 +19,8 @@ coverage/
 !src/tests/orders.controllers.test.ts
 !src/tests/payment.controllers.test.ts
 !src/tests/carts.services.test.ts
+!src/tests/coupons.middlewares.test.ts
+!src/tests/vnpay.provider.test.ts
 !src/tests/returnRequests.allocations.test.ts
 !src/tests/loyaltyCoupon.integration.test.ts
 !src/tests/recommendations.services.spec.ts
