@@ -1,4 +1,5 @@
 export interface Medication {
+  productId?: string
   productName: string
   dosage: string
   quantity: number
