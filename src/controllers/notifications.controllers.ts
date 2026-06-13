@@ -16,7 +16,7 @@ export const getNotificationsController = async (req: Request<ParamsDictionary, 
     new ObjectId(userId),
     page,
     limit,
-    filter as 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder'
+    filter as 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder' | 'review'
   )
 
   return res.status(HTTP_STATUS.OK).json({

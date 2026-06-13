@@ -29,7 +29,7 @@ export const suggestController = async (req: Request, res: Response) => {
   const q = (req.query.q as string) || ''
 
   if (!q || q.trim().length < 2) {
-    return res.json({ products: [], brands: [], categories: [], articles: [], querySuggestions: [] })
+    return res.json({ products: [], brands: [], categories: [], articles: [] })
   }
 
   // Chạy song song: product/brand/category results + query text completions
@@ -43,6 +43,7 @@ export const suggestController = async (req: Request, res: Response) => {
 
 // ─── GET /search/products?q=&page=&limit=&... ─────────────────────────────────
 export const searchProductsController = async (req: Request, res: Response) => {
+  console.log('[SearchController] searchProductsController called with query:', req.query)
   const { q, page, limit, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, minPrice, maxPrice, ratingMin, sortBy } =
     req.query as Record<string, string>
   const effectivePriceMin = priceMin ?? minPrice
@@ -52,7 +53,15 @@ export const searchProductsController = async (req: Request, res: Response) => {
   if (categoryId && ObjectId.isValid(categoryId)) {
     const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryId) })
     if (category) {
-      const fullPath = category.path === '/' ? `/${category.slug}` : `${category.path}/${category.slug}`
+      let fullPath = category.path
+      if (!fullPath.startsWith('/')) {
+        fullPath = '/' + fullPath
+      }
+      if (fullPath === '/') {
+        fullPath = `/${category.slug}`
+      } else if (!fullPath.endsWith(`/${category.slug}`)) {
+        fullPath = `${fullPath}/${category.slug}`
+      }
       const escapedPath = escapeRegex(fullPath)
       categoryIds = (
         await databaseService.categories
@@ -118,6 +127,8 @@ export const searchProductsController = async (req: Request, res: Response) => {
     }
     if (params.requiresPrescription !== undefined) {
       mongoFilter.requiresPrescription = params.requiresPrescription
+    } else if (params.priceMin !== undefined || params.priceMax !== undefined || sortBy === 'price_asc' || sortBy === 'price_desc') {
+      mongoFilter.requiresPrescription = false
     }
     if (inStock === 'true') {
       mongoFilter.stockQuantity = { $gt: 0 }

@@ -7,7 +7,8 @@ import {
   updateReviewValidator,
   reviewIdValidator,
   productIdValidator,
-  moderateReviewValidator
+  moderateReviewValidator,
+  bulkModerateValidator
 } from '~/middlewares/reviews.middlewares'
 import {
   createReviewController,
@@ -87,6 +88,7 @@ reviewsRouter.post(
   '/admin/bulk-moderate',
   accessTokenValidator,
   isAdminOrPharmacist,
+  bulkModerateValidator,
   wrapRequestHandler(bulkModerateController)
 )
 

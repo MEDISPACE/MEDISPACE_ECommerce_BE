@@ -301,6 +301,24 @@ async function main() {
 
     // ── 2. Upsert products ─────────────────────────────────────────────────
     console.log('[seed] Upserting products...')
+    const categories = db.collection('categories')
+    let defaultCategory = await categories.findOne({})
+    if (!defaultCategory) {
+      const categoryId = new ObjectId()
+      await categories.insertOne({
+        _id: categoryId,
+        name: 'Thực phẩm chức năng',
+        slug: 'thuc-pham-chuc-nang',
+        description: 'Các loại thực phẩm bổ sung, vitamin...',
+        path: '/thuc-pham-chuc-nang',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+      defaultCategory = await categories.findOne({ _id: categoryId })
+    }
+    const defaultCategoryId = defaultCategory!._id
+
     const productIds: Record<string, ObjectId> = {}
     for (const product of E2E_PRODUCTS) {
       const result = await products.findOneAndUpdate(
@@ -308,6 +326,7 @@ async function main() {
         {
           $set: {
             ...product,
+            categoryId: defaultCategoryId,
             updatedAt: new Date(),
           },
           $setOnInsert: {

@@ -180,6 +180,160 @@ class ProductsService {
 
     const startTime = Date.now()
 
+    // ─── TYPESENSE SEARCH DELEGATION ──────────────────────────────────────────
+    if (query.search && query.bypassTypesense !== 'true' && typesenseService.getAvailability()) {
+      try {
+        let categoryIds: string[] | undefined
+        if (query.categoryId) {
+          try {
+            let targetCategory
+            if (ObjectId.isValid(query.categoryId)) {
+              targetCategory = await categoriesService.getCategoryById(query.categoryId)
+            } else {
+              targetCategory = await categoriesService.getCategoryBySlug(query.categoryId)
+            }
+            if (targetCategory) {
+              let categoryPath = targetCategory.path
+              if (!categoryPath.startsWith('/')) {
+                categoryPath = '/' + categoryPath
+              }
+              if (categoryPath === '/') {
+                categoryPath = `/${targetCategory.slug}`
+              } else if (!categoryPath.endsWith(`/${targetCategory.slug}`)) {
+                categoryPath = `${categoryPath}/${targetCategory.slug}`
+              }
+              const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              const descendantCategories = await databaseService.categories
+                .find({
+                  $or: [
+                    { _id: targetCategory._id },
+                    { path: { $regex: `^${escapedPath}(?:/|$)` } }
+                  ]
+                })
+                .toArray()
+              categoryIds = descendantCategories.map((cat) => cat._id.toString())
+            }
+          } catch (error) {
+            console.error('[Typesense Delegation] Error mapping category:', error)
+          }
+        }
+
+        let tsSortBy: string | undefined
+        if (query.sortBy === 'price') {
+          tsSortBy = query.sortOrder === 'desc' ? 'price_desc' : 'price_asc'
+        } else if (query.sortBy === 'createdAt') {
+          tsSortBy = 'newest'
+        } else if (query.sortBy === 'rating') {
+          tsSortBy = 'rating'
+        }
+
+        const tsResult = await typesenseService.searchProducts({
+          q: query.search,
+          page,
+          limit,
+          categoryId: query.categoryId,
+          categoryIds,
+          brandId: query.brandId,
+          requiresPrescription: query.requiresPrescription === 'true' ? true : query.requiresPrescription === 'false' ? false : undefined,
+          inStock: query.inStock === 'true',
+          priceMin: query.minPrice ? parseFloat(query.minPrice) : undefined,
+          priceMax: query.maxPrice ? parseFloat(query.maxPrice) : undefined,
+          ratingMin: query.ratingMin ? parseFloat(query.ratingMin) : undefined,
+          sortBy: tsSortBy
+        })
+
+        if (tsResult && tsResult.hits && tsResult.hits.length > 0) {
+          const mongoIds = tsResult.hits.map((hit: any) => new ObjectId(hit.document.mongoId))
+          const products = await databaseService.products
+            .aggregate([
+              { $match: { _id: { $in: mongoIds } } },
+              {
+                $lookup: {
+                  from: 'categories',
+                  localField: 'categoryId',
+                  foreignField: '_id',
+                  as: 'category',
+                  pipeline: [{ $project: { _id: 1, name: 1, slug: 1 } }]
+                }
+              },
+              {
+                $lookup: {
+                  from: 'brands',
+                  localField: 'brandId',
+                  foreignField: '_id',
+                  as: 'brand',
+                  pipeline: [{ $project: { _id: 1, name: 1, slug: 1, logo: 1 } }]
+                }
+              },
+              {
+                $addFields: {
+                  category: { $arrayElemAt: ['$category', 0] },
+                  brand: { $arrayElemAt: ['$brand', 0] }
+                }
+              },
+              {
+                $project: {
+                  _id: 1,
+                  name: 1,
+                  slug: 1,
+                  sku: 1,
+                  shortDescription: 1,
+                  categoryId: 1,
+                  brandId: 1,
+                  priceVariants: 1,
+                  stockQuantity: 1,
+                  status: 1,
+                  isActive: 1,
+                  requiresPrescription: 1,
+                  featuredImage: 1,
+                  images: 1,
+                  rating: 1,
+                  reviewCount: 1,
+                  createdAt: 1,
+                  category: 1,
+                  brand: 1,
+                  packaging: 1
+                }
+              }
+            ])
+            .toArray()
+
+          // Maintain Typesense ordering
+          const productsMap = new Map(products.map((p) => [p._id.toString(), p]))
+          const sortedProducts = tsResult.hits
+            .map((hit: any) => productsMap.get(hit.document.mongoId))
+            .filter(Boolean)
+
+          console.log(`[Typesense Delegation] Search for "${query.search}" returned ${tsResult.found} documents (Page ${page}).`)
+
+          return {
+            products: sortedProducts,
+            pagination: {
+              page,
+              limit,
+              totalPages: Math.ceil(tsResult.found / limit),
+              totalCount: tsResult.found
+            }
+          }
+        } else if (tsResult && tsResult.hits && tsResult.hits.length === 0) {
+          // If Typesense explicitly returned 0 results, return empty product list
+          console.log(`[Typesense Delegation] Search for "${query.search}" returned 0 documents.`)
+          return {
+            products: [],
+            pagination: {
+              page,
+              limit,
+              totalPages: 0,
+              totalCount: 0
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Typesense Delegation] Failed, falling back to MongoDB search:', error)
+      }
+    }
+    // ─── END TYPESENSE SEARCH DELEGATION ──────────────────────────────────────
+
     // Build filter
     const filter: Record<string, unknown> = {}
 
@@ -197,8 +351,15 @@ class ProductsService {
         // For parent category with path '/thuc-pham-chuc-nang', we want to find:
         // - Categories with path STARTING with '/thuc-pham-chuc-nang' (subcategories)
         // - Or the parent category itself (by _id)
-        const categoryPath =
-          targetCategory.path === '/' ? `/${targetCategory.slug}` : `${targetCategory.path}/${targetCategory.slug}`
+        let categoryPath = targetCategory.path
+        if (!categoryPath.startsWith('/')) {
+          categoryPath = '/' + categoryPath
+        }
+        if (categoryPath === '/') {
+          categoryPath = `/${targetCategory.slug}`
+        } else if (!categoryPath.endsWith(`/${targetCategory.slug}`)) {
+          categoryPath = `${categoryPath}/${targetCategory.slug}`
+        }
 
         // Escape special regex characters in the path
         const escapedPath = categoryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -238,6 +399,12 @@ class ProductsService {
 
     if (query.requiresPrescription !== undefined) {
       filter.requiresPrescription = query.requiresPrescription === 'true'
+    } else if (query.minPrice || query.maxPrice || query.sortBy === 'price') {
+      filter.requiresPrescription = false
+    }
+
+    if (query.ratingMin) {
+      filter.rating = { $gte: parseFloat(query.ratingMin) }
     }
 
     if (query.inStock === 'true') {
@@ -256,23 +423,32 @@ class ProductsService {
     }
 
     // Enhanced search - will be applied in aggregation pipeline for category/brand
+    // Sanitize search query to prevent regex injection (ReDoS)
     const searchQuery = query.search
+      ? query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      : undefined
 
-    if (query.minStock || query.maxStock) {
-      const existing = (filter.stockQuantity as Record<string, number>) || {}
-      if (query.minStock) {
-        existing.$gte = parseInt(query.minStock)
-      }
-      if (query.maxStock) {
-        existing.$lte = parseInt(query.maxStock)
-      }
-      filter.stockQuantity = existing
+    // Handle inStock filter: map to stockQuantity > 0
+    if (query.inStock === 'true') {
+      filter.stockQuantity = { ...(filter.stockQuantity as Record<string, number> || {}), $gt: 0 }
     }
 
-    // Build sort
-    const sortBy = query.sortBy || 'createdAt'
+    if (query.minStock || query.maxStock) {
+      const stockFilter: Record<string, number> = { ...(filter.stockQuantity as Record<string, number> || {}) }
+      if (query.minStock) {
+        stockFilter.$gte = parseInt(query.minStock)
+      }
+      if (query.maxStock) {
+        stockFilter.$lte = parseInt(query.maxStock)
+      }
+      filter.stockQuantity = stockFilter
+    }
+
+    // Build sort — handle 'price' specially since Product uses priceVariants[] not a flat price field
+    const rawSortBy = query.sortBy || 'createdAt'
     const sortOrder = query.sortOrder === 'desc' ? -1 : 1
-    const sortField = sortBy === 'price' ? 'sortPrice' : sortBy
+    // If sorting by 'price', we sort on computed 'calculatedPrice' field (added via $addFields)
+    const sortField = rawSortBy === 'price' ? 'calculatedPrice' : rawSortBy
     const sort: Record<string, 1 | -1> = { [sortField]: sortOrder }
 
     // Optimize query - always use efficient aggregation with minimal fields
@@ -308,25 +484,35 @@ class ProductsService {
             $addFields: {
               category: { $arrayElemAt: ['$category', 0] },
               brand: { $arrayElemAt: ['$brand', 0] },
-              sortPrice: {
+              // Compute price from default priceVariant (isDefault=true) or first variant for sorting
+              calculatedPrice: {
                 $let: {
                   vars: {
                     defaultVariant: {
-                      $first: {
-                        $filter: {
-                          input: '$priceVariants',
-                          as: 'variant',
-                          cond: { $eq: ['$$variant.isDefault', true] }
-                        }
-                      }
-                    },
-                    firstVariant: { $arrayElemAt: ['$priceVariants', 0] }
+                      $ifNull: [
+                        { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                        { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                      ]
+                    }
                   },
-                  in: { $ifNull: ['$$defaultVariant.price', '$$firstVariant.price'] }
+                  in: { $ifNull: ['$$defaultVariant.price', 0] }
                 }
               }
             }
           },
+          // Price range filter
+          ...(query.minPrice || query.maxPrice
+            ? [
+                {
+                  $match: {
+                    calculatedPrice: {
+                      ...(query.minPrice ? { $gte: parseFloat(query.minPrice) } : {}),
+                      ...(query.maxPrice ? { $lte: parseFloat(query.maxPrice) } : {})
+                    }
+                  }
+                }
+              ]
+            : []),
           // Enhanced search filter after lookup
           ...(searchQuery
             ? [
@@ -375,48 +561,83 @@ class ProductsService {
           { $limit: limit }
         ])
         .toArray(),
-      // Count with search filter
-      searchQuery
+      // Count with search/price filters
+      (searchQuery || query.minPrice || query.maxPrice)
         ? databaseService.products
             .aggregate([
               { $match: filter },
-              {
-                $lookup: {
-                  from: 'categories',
-                  localField: 'categoryId',
-                  foreignField: '_id',
-                  as: 'category',
-                  pipeline: [{ $project: { name: 1 } }]
-                }
-              },
-              {
-                $lookup: {
-                  from: 'brands',
-                  localField: 'brandId',
-                  foreignField: '_id',
-                  as: 'brand',
-                  pipeline: [{ $project: { name: 1 } }]
-                }
-              },
-              {
-                $addFields: {
-                  category: { $arrayElemAt: ['$category', 0] },
-                  brand: { $arrayElemAt: ['$brand', 0] }
-                }
-              },
-              {
-                $match: {
-                  $or: [
-                    { name: { $regex: searchQuery, $options: 'i' } },
-                    { shortDescription: { $regex: searchQuery, $options: 'i' } },
-                    { longDescription: { $regex: searchQuery, $options: 'i' } },
-                    { sku: { $regex: searchQuery, $options: 'i' } },
-                    { ingredients: { $regex: searchQuery, $options: 'i' } },
-                    { 'category.name': { $regex: searchQuery, $options: 'i' } },
-                    { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+              // Compute calculatedPrice if price filters are applied
+              ...(query.minPrice || query.maxPrice
+                ? [
+                    {
+                      $addFields: {
+                        calculatedPrice: {
+                          $let: {
+                            vars: {
+                              defaultVariant: {
+                                $ifNull: [
+                                  { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                                  { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                                ]
+                              }
+                            },
+                            in: { $ifNull: ['$$defaultVariant.price', 0] }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      $match: {
+                        calculatedPrice: {
+                          ...(query.minPrice ? { $gte: parseFloat(query.minPrice) } : {}),
+                          ...(query.maxPrice ? { $lte: parseFloat(query.maxPrice) } : {})
+                        }
+                      }
+                    }
                   ]
-                }
-              },
+                : []),
+              // Perform lookups only if searchQuery is present
+              ...(searchQuery
+                ? [
+                    {
+                      $lookup: {
+                        from: 'categories',
+                        localField: 'categoryId',
+                        foreignField: '_id',
+                        as: 'category',
+                        pipeline: [{ $project: { name: 1 } }]
+                      }
+                    },
+                    {
+                      $lookup: {
+                        from: 'brands',
+                        localField: 'brandId',
+                        foreignField: '_id',
+                        as: 'brand',
+                        pipeline: [{ $project: { name: 1 } }]
+                      }
+                    },
+                    {
+                      $addFields: {
+                        category: { $arrayElemAt: ['$category', 0] },
+                        brand: { $arrayElemAt: ['$brand', 0] }
+                      }
+                    },
+                    {
+                      $match: {
+                        $or: [
+                          { name: { $regex: searchQuery, $options: 'i' } },
+                          { shortDescription: { $regex: searchQuery, $options: 'i' } },
+                          { longDescription: { $regex: searchQuery, $options: 'i' } },
+                          { sku: { $regex: searchQuery, $options: 'i' } },
+                          { ingredients: { $regex: searchQuery, $options: 'i' } },
+                          { 'category.name': { $regex: searchQuery, $options: 'i' } },
+                          { 'brand.name': { $regex: searchQuery, $options: 'i' } }
+                        ]
+                      }
+                    }
+                  ]
+                : []),
               { $count: 'total' }
             ])
             .toArray()

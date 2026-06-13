@@ -531,6 +531,7 @@ export const REVIEWS_MESSAGES = {
   COMMENT_TOO_LONG: 'Comment must not exceed 2000 characters',
   TOO_MANY_IMAGES: 'Maximum 5 images allowed',
   ALREADY_VOTED_HELPFUL: 'You have already marked this review as helpful',
+  CANNOT_VOTE_OWN_REVIEW: 'You cannot vote for your own review',
   REJECTION_REASON_REQUIRED: 'Rejection reason is required',
   RATING_REQUIRED: 'Rating is required',
   TITLE_MUST_BE_STRING: 'Title must be a string',
@@ -544,6 +545,8 @@ export const REVIEWS_MESSAGES = {
   STATUS_INVALID: 'Status must be either approved or rejected',
   NOTES_MUST_BE_STRING: 'Notes must be a string',
   SORT_BY_INVALID: 'Sort by must be one of: newest, oldest, highest, lowest, helpful',
+  REJECTED_REVIEW_CANNOT_BE_EDITED: 'Rejected reviews cannot be edited. Please contact support if you believe this is an error.',
+  REVIEW_NOT_APPROVED: 'Only approved reviews can receive helpful votes',
 
   // Success
   CREATE_REVIEW_SUCCESS: 'Review created successfully. It will be visible after moderation.',
