@@ -11,6 +11,7 @@ import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import axios from 'axios'
 import emailService from './email.services'
+import recommendationsService from './recommendations.services'
 
 class UsersService {
   private getRefreshTokenExpiresAt(expiresIn: '30d' | '90d' = '30d') {
@@ -298,6 +299,7 @@ class UsersService {
         $currentDate: { updated_at: true }
       }
     )
+    void recommendationsService.recordRealtimeEvent(userId)
     return {
       status: UserStatus.Verified
     }
@@ -316,6 +318,7 @@ class UsersService {
       { _id: new ObjectId(userId) },
       { $set: { emailVerifyToken }, $currentDate: { updated_at: true } }
     )
+    void recommendationsService.recordRealtimeEvent(userId)
 
     // Send verify email
     await emailService.sendVerifyRegisterEmail(user.email, emailVerifyToken)

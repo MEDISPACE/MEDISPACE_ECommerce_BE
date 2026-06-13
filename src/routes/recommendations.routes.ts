@@ -3,12 +3,14 @@ import {
   getRelatedController,
   getBoughtTogetherController,
   getTrendingController,
+  getPopularController,
   getForYouController,
   getPostPurchaseController,
   getPharmacistSuggestionsController,
   getMLStatusController,
   getReplenishmentController,
-  trackRecommendationEventController
+  trackRecommendationEventController,
+  getRecommendationMetricsController
 } from '~/controllers/recommendations.controllers'
 import { accessTokenValidator, optionalAccessTokenValidator } from '~/middlewares/users.middlewares'
 import { authenticatePharmacist } from '~/middlewares/pharmacists.middlewares'
@@ -44,6 +46,7 @@ recommendationsRouter.get('/bought-together/:productId', wrapRequestHandler(getB
  * Auth: Public
  */
 recommendationsRouter.get('/trending', wrapRequestHandler(getTrendingController))
+recommendationsRouter.get('/popular', wrapRequestHandler(getPopularController))
 
 /**
  * Description: Gợi ý cá nhân hoá (SVD → NMF fallback)
@@ -107,5 +110,6 @@ recommendationsRouter.post(
  * Auth: Admin
  */
 recommendationsRouter.get('/ml-status', accessTokenValidator, adminRequired, wrapRequestHandler(getMLStatusController))
+recommendationsRouter.get('/metrics', accessTokenValidator, adminRequired, wrapRequestHandler(getRecommendationMetricsController))
 
 export default recommendationsRouter

@@ -175,10 +175,29 @@ class PharmacistService {
         current_medications: []
       })
       const result = await databaseService.patientMedicalInfos.insertOne(newMedicalInfo)
-      return { ...newMedicalInfo, _id: result.insertedId }
+      return this.mapMedicalInfo({ ...newMedicalInfo, _id: result.insertedId })
     }
 
-    return medicalInfo
+    return this.mapMedicalInfo(medicalInfo)
+  }
+
+  private mapMedicalInfo(medicalInfo: any) {
+    return {
+      _id: medicalInfo._id,
+      customerId: medicalInfo.customer_id,
+      bloodType: medicalInfo.blood_type || '',
+      allergies: medicalInfo.allergies || [],
+      chronicDiseases: medicalInfo.chronic_diseases || [],
+      currentMedications: (medicalInfo.current_medications || []).map((medication: any) => ({
+        name: medication.drug_name,
+        dosage: medication.dosage,
+        frequency: medication.frequency,
+        startDate: medication.start_date,
+        endDate: medication.end_date
+      })),
+      createdAt: medicalInfo.created_at,
+      updatedAt: medicalInfo.updated_at
+    }
   }
 
   // Update patient medical information
@@ -199,7 +218,7 @@ class PharmacistService {
       { returnDocument: 'after', upsert: true }
     )
 
-    return result
+    return result ? this.mapMedicalInfo(result) : result
   }
 
   // Add allergy to patient
@@ -215,7 +234,7 @@ class PharmacistService {
       { returnDocument: 'after', upsert: true }
     )
 
-    return result
+    return result ? this.mapMedicalInfo(result) : result
   }
 
   // ========== PATIENT NOTES METHODS ==========
@@ -289,7 +308,7 @@ class PharmacistService {
     return medications
   }
 
-  // Check drug interactions (placeholder - needs drug database)
+  // Safety gate only. This deliberately never declares a combination safe.
   async checkDrugInteractions(customerId: string, newDrugName: string) {
     // Get patient's current medications
     const [medicalInfo, recentMedications] = await Promise.all([
@@ -299,8 +318,8 @@ class PharmacistService {
 
     // Check against allergies
     const allergyWarnings = (medicalInfo?.allergies || [])
-      .filter((allergy) => newDrugName.toLowerCase().includes(allergy.toLowerCase()))
-      .map((allergy) => ({
+      .filter((allergy: string) => newDrugName.toLowerCase().includes(allergy.toLowerCase()))
+      .map((allergy: string) => ({
         type: 'allergy',
         severity: 'high',
         message: `Patient is allergic to ${allergy}`
@@ -315,7 +334,11 @@ class PharmacistService {
       has_interactions: allergyWarnings.length > 0,
       warnings: allergyWarnings,
       current_medications: currentDrugs,
-      recommendation: allergyWarnings.length > 0 ? 'DO NOT DISPENSE - Check with doctor' : 'Safe to dispense'
+      recommendation: allergyWarnings.length > 0
+        ? 'DO NOT DISPENSE - Check with doctor'
+        : 'NOT_EVALUATED - No validated interaction database is configured',
+      evaluation_status: allergyWarnings.length > 0 ? 'blocked' : 'not_evaluated',
+      requires_independent_review: true
     }
   }
 
