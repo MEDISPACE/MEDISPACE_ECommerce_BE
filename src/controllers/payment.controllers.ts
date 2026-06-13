@@ -6,18 +6,18 @@ import databaseService from '~/services/database.services'
 import emailService from '~/services/email.services'
 import { PaymentMethod } from '~/constants/enum'
 import { ObjectId } from 'mongodb'
+import { PaymentResult } from '~/services/payment/payment.interface'
 
 /**
  * Helper: After payment success — clear cart & send order confirmation email.
  * Shared by vnpayReturn, payosReturn, payosIpn.
  */
 async function handlePostPaymentSuccess(orderId: ObjectId) {
-  try {
-    const order = await databaseService.orders.findOne({ _id: orderId })
-    if (!order) return
+  const order = await databaseService.orders.findOne({ _id: orderId })
+  if (!order) return
 
-    // Clear purchased items from cart
-    if (order.items && order.items.length > 0) {
+  if (!order.cartClearedAt && order.items && order.items.length > 0) {
+    try {
       for (const item of order.items) {
         await cartService.removeItemFromCart(
           new ObjectId(item.productId),
@@ -26,15 +26,39 @@ async function handlePostPaymentSuccess(orderId: ObjectId) {
           (item as any).unit
         )
       }
+      await databaseService.orders.updateOne(
+        { _id: orderId, cartClearedAt: { $exists: false } },
+        { $set: { cartClearedAt: new Date(), updatedAt: new Date() } }
+      )
+    } catch (error) {
+      console.error('Failed to clear cart after payment success:', error)
     }
-
-    // Send order confirmation email
-    if (order.shippingAddress?.email) {
-      await emailService.sendOrderConfirmationEmail(order.shippingAddress.email, order)
-    }
-  } catch (error) {
-    console.error('Failed to clear cart or send email after payment success:', error)
   }
+
+  if (!order.confirmationEmailSentAt && order.shippingAddress?.email) {
+    try {
+      await emailService.sendOrderConfirmationEmail(order.shippingAddress.email, order)
+      await databaseService.orders.updateOne(
+        { _id: orderId, confirmationEmailSentAt: { $exists: false } },
+        { $set: { confirmationEmailSentAt: new Date(), updatedAt: new Date() } }
+      )
+    } catch (error) {
+      console.error('Failed to send confirmation email after payment success:', error)
+    }
+  }
+}
+
+async function confirmVerifiedPayment(result: PaymentResult, allowedMethods: string[]) {
+  if (!result.isSuccess || !result.orderId || !ObjectId.isValid(result.orderId)) return null
+
+  const orderId = new ObjectId(result.orderId)
+  const order = await databaseService.orders.findOne({ _id: orderId })
+  if (!order || !allowedMethods.includes(order.paymentMethod)) return null
+  if (!Number.isFinite(result.amount) || Math.round(result.amount) !== Math.round(order.totalAmount)) return null
+
+  if (order.paymentStatus !== 'paid') await orderService.updatePaymentStatus(orderId, 'paid')
+  await handlePostPaymentSuccess(orderId)
+  return order
 }
 
 // VNPay Return
@@ -43,17 +67,8 @@ export const vnpayReturnController = async (req: Request, res: Response) => {
     const result = await paymentService.verifyReturn(PaymentMethod.VNPay, req.query)
 
     if (result.isSuccess && result.orderId) {
-      // Idempotency: check if order is already paid
-      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
-      if (existingOrder && existingOrder.paymentStatus !== 'paid') {
-        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
-        await handlePostPaymentSuccess(new ObjectId(result.orderId))
-      }
-    } else if (!result.isSuccess && result.orderId && ObjectId.isValid(result.orderId)) {
-      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
-      if (existingOrder && existingOrder.paymentStatus === 'pending') {
-        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'failed')
-      }
+      const confirmedOrder = await confirmVerifiedPayment(result, [PaymentMethod.VNPay, PaymentMethod.BankTransfer])
+      if (!confirmedOrder) result.isSuccess = false
     }
 
     const redirectOrderId = result.orderId || ''
@@ -70,12 +85,9 @@ export const vnpayIpnController = async (req: Request, res: Response) => {
     const result = await paymentService.verifyIpn(PaymentMethod.VNPay, req.query)
 
     if (result.isSuccess && result.orderId) {
-      // Idempotency: skip if already paid
-      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
-      if (existingOrder && existingOrder.paymentStatus !== 'paid') {
-        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
-      }
-      return res.status(200).json({ RspCode: '00', Message: 'Confirm Success' })
+      const confirmedOrder = await confirmVerifiedPayment(result, [PaymentMethod.VNPay, PaymentMethod.BankTransfer])
+      if (confirmedOrder) return res.status(200).json({ RspCode: '00', Message: 'Confirm Success' })
+      return res.status(200).json({ RspCode: '04', Message: 'Invalid amount or order' })
     }
     return res.status(200).json({ RspCode: '97', Message: 'Fail checksum' })
   } catch (error) {
@@ -105,40 +117,34 @@ export const payOSIpnController = async (req: Request, res: Response) => {
         }
       }
 
-      if (order && order.paymentStatus !== 'paid') {
-        await orderService.updatePaymentStatus(order._id as ObjectId, 'paid')
+      const paymentMatches =
+        order &&
+        order.paymentMethod === PaymentMethod.PayOS &&
+        Number.isFinite(result.amount) &&
+        Math.round(result.amount) === Math.round(order.totalAmount)
+      if (paymentMatches) {
+        if (order.paymentStatus !== 'paid') await orderService.updatePaymentStatus(order._id as ObjectId, 'paid')
         await handlePostPaymentSuccess(order._id as ObjectId)
       }
 
-      return res.status(200).json({ success: true })
+      return res.status(200).json({ success: Boolean(paymentMatches) })
     }
-    return res.status(400).json({ success: false, message: 'Invalid signature' })
+    return res.status(200).json({ success: false, message: 'Invalid signature' })
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Internal Server Error' })
+    console.error('PayOS webhook processing failed:', error)
+    return res.status(500).json({ success: false, message: 'Temporary processing error' })
   }
 }
 
 // PayOS Return
 export const payOSReturnController = async (req: Request, res: Response) => {
   try {
-    const result = await paymentService.verifyReturn(PaymentMethod.PayOS, req.query)
-
-    if (result.isSuccess && result.orderId) {
-      // Idempotency: check if already paid
-      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
-      if (existingOrder && existingOrder.paymentStatus !== 'paid') {
-        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'paid')
-        await handlePostPaymentSuccess(new ObjectId(result.orderId))
-      }
-    } else if (!result.isSuccess && result.orderId && ObjectId.isValid(result.orderId)) {
-      const existingOrder = await databaseService.orders.findOne({ _id: new ObjectId(result.orderId) })
-      if (existingOrder && existingOrder.paymentStatus === 'pending') {
-        await orderService.updatePaymentStatus(new ObjectId(result.orderId), 'failed')
-      }
-    }
-
-    const redirectOrderId = result.orderId || ''
-    const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${redirectOrderId}&paymentStatus=${result.isSuccess ? 'success' : 'failed'}`
+    const redirectOrderId = typeof req.query.orderId === 'string' && ObjectId.isValid(req.query.orderId) ? req.query.orderId : ''
+    const order = redirectOrderId
+      ? await databaseService.orders.findOne({ _id: new ObjectId(redirectOrderId), paymentMethod: PaymentMethod.PayOS })
+      : null
+    const paymentStatus = order?.paymentStatus === 'paid' ? 'success' : 'pending'
+    const redirectUrl = `${process.env.CLIENT_URL}/order/success?orderId=${redirectOrderId}&paymentStatus=${paymentStatus}`
     return res.redirect(redirectUrl)
   } catch (error) {
     return res.redirect(`${process.env.CLIENT_URL}/order/success?paymentStatus=failed`)
