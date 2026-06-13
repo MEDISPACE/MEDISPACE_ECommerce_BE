@@ -123,17 +123,6 @@ export class VNPayProvider implements PaymentProvider {
   }
 
   private getIpAddress(req: any) {
-    let ipAddr =
-      req.headers['x-forwarded-for'] ||
-      req.connection.remoteAddress ||
-      req.socket.remoteAddress ||
-      req.connection.socket.remoteAddress
-
-    // Handle case where x-forwarded-for contains multiple IPs
-    if (ipAddr && typeof ipAddr === 'string' && ipAddr.includes(',')) {
-      ipAddr = ipAddr.split(',')[0].trim()
-    }
-
-    return ipAddr || '127.0.0.1'
+    return req?.ip || req?.socket?.remoteAddress || '127.0.0.1'
   }
 }
