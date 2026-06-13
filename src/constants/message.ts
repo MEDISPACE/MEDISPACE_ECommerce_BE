@@ -545,6 +545,8 @@ export const REVIEWS_MESSAGES = {
   STATUS_INVALID: 'Status must be either approved or rejected',
   NOTES_MUST_BE_STRING: 'Notes must be a string',
   SORT_BY_INVALID: 'Sort by must be one of: newest, oldest, highest, lowest, helpful',
+  REJECTED_REVIEW_CANNOT_BE_EDITED: 'Rejected reviews cannot be edited. Please contact support if you believe this is an error.',
+  REVIEW_NOT_APPROVED: 'Only approved reviews can receive helpful votes',
 
   // Success
   CREATE_REVIEW_SUCCESS: 'Review created successfully. It will be visible after moderation.',
