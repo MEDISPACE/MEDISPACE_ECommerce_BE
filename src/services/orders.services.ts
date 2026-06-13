@@ -65,6 +65,51 @@ class OrderService {
     return order.orderStatus !== 'cancelled' && order.orderStatus !== 'delivered' && order.orderStatus !== 'returned'
   }
 
+  private normalizeMedicationName(value: string) {
+    return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+
+  private async validatePrescriptionForOrder(userId: ObjectId, orderItems: any[], prescriptionId?: string) {
+    const prescriptionItems = orderItems.filter((item) => item.prescriptionRequired)
+    if (prescriptionItems.length === 0) return undefined
+
+    if (!prescriptionId || !ObjectId.isValid(prescriptionId)) {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng có thuốc kê đơn. Vui lòng chọn đơn thuốc đã được dược sĩ xác nhận.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const prescription = await databaseService.prescriptions.findOne({
+      _id: new ObjectId(prescriptionId),
+      customerId: userId,
+      status: 'verified',
+      $or: [{ validUntil: { $exists: false } }, { validUntil: { $gte: new Date() } }]
+    })
+    if (!prescription) {
+      throw new ErrorWithStatus({
+        message: 'Đơn thuốc không hợp lệ, đã hết hạn hoặc chưa được xác nhận.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    for (const item of prescriptionItems) {
+      const normalizedItemName = this.normalizeMedicationName(item.name)
+      const medication = prescription.medications?.find((entry: any) => {
+        if (entry.productId) return entry.productId.toString() === item.productId.toString()
+        return this.normalizeMedicationName(entry.productName || '') === normalizedItemName
+      })
+      if (!medication || item.quantity > medication.quantity) {
+        throw new ErrorWithStatus({
+          message: `Đơn thuốc không cho phép mua sản phẩm "${item.name}" với số lượng đã chọn.`,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+    }
+
+    return prescription._id
+  }
+
   private allocateAmountAcrossItems(totalAmount: number, items: any[]) {
     const normalizedTotal = Math.max(0, Math.floor(totalAmount || 0))
     if (normalizedTotal <= 0 || items.length === 0) return items.map(() => 0)
@@ -86,6 +131,7 @@ class OrderService {
   }
 
   private getCouponEligibleItems(items: any[], coupon: any) {
+    // applicableCategoryIds is the expanded category snapshot returned by validateCoupon.
     const productIds = new Set((coupon.applicableProductIds || []).map((id: any) => id.toString()))
     const categoryIds = new Set((coupon.applicableCategoryIds || []).map((id: any) => id.toString()))
     const hasProductTarget = productIds.size > 0
@@ -135,6 +181,12 @@ class OrderService {
   }
 
   private async restoreStockForOrder(order: any) {
+    const claimed = await databaseService.orders.findOneAndUpdate(
+      { _id: order._id, stockRestored: { $ne: true } },
+      { $set: { stockRestored: true, updatedAt: new Date() } },
+      { returnDocument: 'before' }
+    )
+    if (!claimed) return
     await this.restoreStockForItems(order.items || [])
   }
 
@@ -173,9 +225,18 @@ class OrderService {
       selectedItems,
       isDirectBuy,
       shippingMethod,
-      shippingFee: providedShippingFee,
       estimatedDeliveryDate
     } = payload
+    if (payload.idempotencyKey) {
+      const existing = await this.getOrderByIdempotencyKey(userId, payload.idempotencyKey)
+      if (existing) {
+        const paymentUrl =
+          existing.paymentMethod !== PaymentMethod.COD && req
+            ? await paymentService.createPaymentUrl(existing as any, req)
+            : undefined
+        return { order: existing, orderId: existing._id, paymentUrl }
+      }
+    }
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -197,6 +258,12 @@ class OrderService {
         if (product.stockQuantity < requiredStock) {
           throw new ErrorWithStatus({
             message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
+        if (item.quantity > (product.maxOrderQuantity || 10)) {
+          throw new ErrorWithStatus({
+            message: `Số lượng đặt mua vượt quá giới hạn cho sản phẩm "${product.name}".`,
             status: HTTP_STATUS.BAD_REQUEST
           })
         }
@@ -290,6 +357,12 @@ class OrderService {
         )
 
         const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        if (cartItem.quantity > (product.maxOrderQuantity || 10)) {
+          throw new ErrorWithStatus({
+            message: `Số lượng đặt mua vượt quá giới hạn cho sản phẩm "${product.name}".`,
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
 
         orderItems.push({
           ...cartItem,
@@ -297,7 +370,8 @@ class OrderService {
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * cartItem.quantity,
-          campaignId: campaign?._id
+          campaignId: campaign?._id,
+          prescriptionRequired: product.requiresPrescription || false
         })
       }
     }
@@ -306,43 +380,32 @@ class OrderService {
     const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0)
 
     // Calculate Shipping Fee
-    // Use frontend-provided shippingFee if available (to ensure consistency with checkout page)
-    let shippingFee: number
+    const method = shippingMethod || ShippingMethod.Standard
+    let baseShippingFee = 30000
 
-    if (typeof providedShippingFee === 'number' && providedShippingFee >= 0) {
-      // Use the shipping fee calculated by frontend
-      shippingFee = providedShippingFee
-    } else {
-      // Fallback: calculate shipping fee on backend
-      const method = shippingMethod || ShippingMethod.Standard
-      let baseShippingFee = 30000
-
-      if (method === ShippingMethod.Fast) {
-        baseShippingFee = 45000
-      } else if (method === ShippingMethod.Express) {
-        baseShippingFee = 60000
-      } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
-        try {
-          const feeData = await ghnService.calculateFee({
-            to_district_id: shippingAddress.districtId,
-            to_ward_code: shippingAddress.wardCode,
-            weight: 2000, // Estimated 2kg
-            service_type_id: 2 // Standard
-          })
-          if (feeData && feeData.total) {
-            baseShippingFee = feeData.total
-          }
-        } catch (error) {
-          console.error('GHN Fee Calculation Failed:', error)
-          // Fallback to default 30000 is already set
+    if (method === ShippingMethod.Fast) {
+      baseShippingFee = 45000
+    } else if (method === ShippingMethod.Express) {
+      baseShippingFee = 60000
+    } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
+      try {
+        const feeData = await ghnService.calculateFee({
+          to_district_id: shippingAddress.districtId,
+          to_ward_code: shippingAddress.wardCode,
+          weight: 2000,
+          service_type_id: 2
+        })
+        if (feeData && feeData.total) {
+          baseShippingFee = feeData.total
         }
+      } catch (error) {
+        console.error('GHN Fee Calculation Failed:', error)
       }
+    }
 
-      // Apply Freeship logic: >= 300k -> Free shipping (100% off)
-      shippingFee = Math.max(0, baseShippingFee)
-      if (subtotal >= 300000) {
-        shippingFee = 0
-      }
+    let shippingFee = Math.max(0, baseShippingFee)
+    if (subtotal >= 300000) {
+      shippingFee = 0
     }
 
     // Tax logic: Prices already include VAT, so no extra tax added
@@ -380,8 +443,10 @@ class OrderService {
             applicableCategoryIds: validation.applicableCategoryIds || validation.coupon?.applicableCategoryIds || []
           })
         } else {
-          console.log(`[Order] Coupon ${cartCoupon.code} no longer valid at checkout: ${validation.message}`)
-          // Không throw — chỉ bỏ qua coupon hết hạn, order vẫn được tạo
+          throw new ErrorWithStatus({
+            message: `Mã giảm giá ${cartCoupon.code} không còn hợp lệ: ${validation.message}`,
+            status: HTTP_STATUS.CONFLICT
+          })
         }
       }
     } else if (payload.couponCodes && payload.couponCodes.length > 0) {
@@ -425,7 +490,7 @@ class OrderService {
     const discountAmount = couponDiscountAmount
 
     const orderId = new ObjectId()
-    const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    const orderNumber = `ORD-${orderId.toHexString().slice(-18)}`
 
     // Loyalty points redemption
     let pointsRedeemed = 0
@@ -440,7 +505,7 @@ class OrderService {
           userId,
           orderId,
           maxPointsVnd, // điểm = VNĐ (1:1)
-          subtotal,
+          remainingAfterCoupon,
           orderNumber
         )
         pointsRedeemed = maxPointsVnd
@@ -451,7 +516,7 @@ class OrderService {
 
     const totalAmount = Math.max(0, subtotal + taxAmount + shippingFee - discountAmount - pointsRedeemAmount)
 
-    // Check prescription requirement logic if needed
+    const prescriptionId = await this.validatePrescriptionForOrder(userId, orderItems, payload.prescriptionId)
 
     const order = new Order({
       _id: orderId,
@@ -473,7 +538,10 @@ class OrderService {
       notes,
       estimatedDeliveryDate,
       pointsRedeemed,
-      pointsRedeemAmount
+      pointsRedeemAmount,
+      stockRestored: false,
+      idempotencyKey: payload.idempotencyKey,
+      prescriptionId
     })
 
     const result = await databaseService.orders.insertOne(order)
@@ -575,11 +643,12 @@ class OrderService {
 
     // Generate Payment URL if applicable
     let paymentUrl = undefined
+    let paymentUrlError = false
     if (paymentMethod !== PaymentMethod.COD && req) {
       try {
         paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
       } catch (error) {
-        // error suppressed
+        paymentUrlError = true
       }
     }
 
@@ -627,7 +696,8 @@ class OrderService {
     return {
       order: { ...order, _id: result.insertedId },
       orderId: result.insertedId,
-      paymentUrl
+      paymentUrl,
+      paymentUrlError
     }
   }
 
@@ -642,6 +712,13 @@ class OrderService {
     }
 
     if (order.paymentStatus === 'paid') {
+      throw new ErrorWithStatus({
+        message: ORDERS_MESSAGES.INVALID_PAYMENT_STATUS,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (this.terminalOrderStatuses.has(order.orderStatus)) {
       throw new ErrorWithStatus({
         message: ORDERS_MESSAGES.INVALID_PAYMENT_STATUS,
         status: HTTP_STATUS.BAD_REQUEST
@@ -699,6 +776,10 @@ class OrderService {
   // Get order by Order Number
   async getOrderByOrderNumber(orderNumber: string) {
     return await databaseService.orders.findOne({ orderNumber })
+  }
+
+  async getOrderByIdempotencyKey(userId: ObjectId, idempotencyKey: string) {
+    return databaseService.orders.findOne({ userId, idempotencyKey })
   }
 
   // Update order status (admin only)
@@ -783,6 +864,20 @@ class OrderService {
     }
 
     return updatedOrder
+  }
+
+  async cancelOwnOrder(orderId: ObjectId, userId: ObjectId) {
+    const order = await databaseService.orders.findOne({ _id: orderId, userId })
+    if (!order) {
+      throw new ErrorWithStatus({ message: ORDERS_MESSAGES.ORDER_NOT_FOUND, status: HTTP_STATUS.NOT_FOUND })
+    }
+    if (order.orderStatus !== 'pending') {
+      throw new ErrorWithStatus({
+        message: 'Chỉ có thể hủy đơn hàng đang chờ xử lý.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+    return this.updateOrderStatus(orderId, 'cancelled')
   }
 
   // Update payment status

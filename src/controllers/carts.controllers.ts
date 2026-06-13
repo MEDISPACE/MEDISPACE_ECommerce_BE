@@ -19,7 +19,7 @@ const getUserAndSession = (req: Request) => {
     }
   }
 
-  const sessionId = req.cookies?.sessionId || (req.headers['x-session-id'] as string)
+  const sessionId = req.cookies?.sessionId
   return { userId, sessionId }
 }
 
@@ -33,6 +33,7 @@ export const getCartController = async (req: Request, res: Response) => {
     res.cookie('sessionId', result.sessionId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     })
   }

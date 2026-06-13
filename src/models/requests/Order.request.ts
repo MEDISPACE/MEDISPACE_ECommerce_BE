@@ -25,6 +25,7 @@ export interface CreateOrderReqBody {
   notes?: string
   couponCodes?: string[] // For applying coupons to direct buy orders
   pointsToRedeem?: number // Số điểm loyalty muốn đổi
+  prescriptionId?: string
 }
 
 export interface UpdateOrderStatusReqBody {

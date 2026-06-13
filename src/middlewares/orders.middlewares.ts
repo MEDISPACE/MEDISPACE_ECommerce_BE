@@ -115,9 +115,7 @@ export const createOrderValidator = validate(
       },
       shippingMethod: {
         optional: true,
-        isString: {
-          errorMessage: 'Invalid shipping method format' // Relaxed validation
-        }
+        ...shippingMethodSchema
       },
       notes: {
         optional: true,
@@ -127,6 +125,13 @@ export const createOrderValidator = validate(
         isLength: {
           options: { max: 500 },
           errorMessage: ORDERS_MESSAGES.NOTES_TOO_LONG
+        }
+      },
+      prescriptionId: {
+        optional: true,
+        custom: {
+          options: (value: string) => ObjectId.isValid(value),
+          errorMessage: 'Mã đơn thuốc không hợp lệ.'
         }
       }
     },
