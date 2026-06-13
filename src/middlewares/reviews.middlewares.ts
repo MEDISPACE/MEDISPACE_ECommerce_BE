@@ -81,7 +81,7 @@ export const createReviewValidator = validate(
           errorMessage: REVIEWS_MESSAGES.COMMENT_MUST_BE_STRING
         },
         isLength: {
-          options: { min: 10, max: 2000 },
+          options: { min: 5, max: 2000 },
           errorMessage: REVIEWS_MESSAGES.COMMENT_LENGTH_INVALID
         },
         trim: true
@@ -321,5 +321,45 @@ export const moderateReviewValidator = validate(
       }
     },
     ['params', 'body']
+  )
+)
+
+// Validate bulk moderation
+export const bulkModerateValidator = validate(
+  checkSchema(
+    {
+      reviewIds: {
+        in: ['body'],
+        notEmpty: {
+          errorMessage: 'Review IDs are required'
+        },
+        isArray: {
+          options: { min: 1 },
+          errorMessage: 'Review IDs must be a non-empty array'
+        },
+        custom: {
+          options: (value) => {
+            if (!Array.isArray(value)) return true // isArray handles this
+            for (const id of value) {
+              if (!ObjectId.isValid(id)) {
+                throw new Error(`Invalid review ID: ${id}`)
+              }
+            }
+            return true
+          }
+        }
+      },
+      action: {
+        in: ['body'],
+        notEmpty: {
+          errorMessage: 'Action is required'
+        },
+        isIn: {
+          options: [['approve', 'reject']],
+          errorMessage: 'Action must be "approve" or "reject"'
+        }
+      }
+    },
+    ['body']
   )
 )

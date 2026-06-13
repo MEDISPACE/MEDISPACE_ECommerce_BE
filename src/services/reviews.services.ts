@@ -7,6 +7,11 @@ import { ReviewStatus } from '~/constants/enum'
 import { REVIEWS_MESSAGES } from '~/constants/message'
 import productsService from './products.services'
 import typesenseService from './typesense.services'
+import notificationService from './notifications.services'
+import reviewAiModerationService from './reviewAiModeration.services'
+import { moderateTextRuleBased } from '~/utils/moderation/moderationEngine'
+import { getIO } from '~/sockets/chat.socket'
+import type { Server as SocketIOServer } from 'socket.io'
 
 /**
  * Review Service for Medical E-commerce
@@ -41,80 +46,42 @@ class ReviewService {
     isVerifiedPurchase: boolean
   ): Promise<boolean> {
     // Rule 1: Verified Purchase (HIGHEST PRIORITY)
-    // If user has verified purchase, proceed to other checks
-    if (!isVerifiedPurchase) {
-      return false
-    }
+    if (!isVerifiedPurchase) return false
 
-    // Rule 2: User Trust Score
+    // Rule 2: Cực ngắn — block ngay (<5 ký tự như "ok", "a")
+    // Ngưỡng 5 (thay vì 10) để không phạt nhầm review ngắn chân thực
+    // VD: "Tốt!" (4 ký tự) → pending, "Tốt lắm" (7 ký tự) → tiếp tục check
+    if (reviewData.comment.trim().length < 5) return false
+
+    // Rule 3: Quá dài bất thường
+    if (reviewData.comment.length > 2000) return false
+
+    // Rule 4: Rule-based moderation engine (PII, spam URL, toxic, medical_harm)
+    // Thay thế các inline regex/keyword checks — dùng chung với community moderation
+    const textToCheck = `${reviewData.title || ''} ${reviewData.comment}`.trim()
+    const ruleResult = moderateTextRuleBased(textToCheck)
+
+    // Severity high/critical → Force pending (PII, dangerous medical advice, critical toxic)
+    if (ruleResult.severity === 'high' || ruleResult.severity === 'critical') return false
+
+    // Severity medium → Force pending (spam URLs, toxic language)
+    // AI layer sẽ xử lý các trường hợp tinh vi hơn không bị rule bắt
+    if (ruleResult.severity === 'medium') return false
+
+    // Rule 5: User Trust Score
+    // Trusted users (≥3 approved, 0 rejected) → auto-approve bất kể độ dài
+    // Lý do: khách hàng trung thành có thể viết ngắn vẫn là review thật
     const userReviews = await databaseService.reviews.find({ userId }).toArray()
     const approvedCount = userReviews.filter((r) => r.status === ReviewStatus.Approved).length
     const rejectedCount = userReviews.filter((r) => r.status === ReviewStatus.Rejected).length
 
-    if (approvedCount >= 3 && rejectedCount === 0) {
-      return true
-    }
+    if (approvedCount >= 3 && rejectedCount === 0) return true
 
-    // Rule 3: Spam Detection
-    const spamPatterns = [
-      /https?:\/\//i, // URLs
-      /www\./i, // www links
-      /\.(com|net|org|vn)/i, // domains
-      /mua.*tại/i, // "mua tại..."
-      /liên hệ/i, // contact info
-      /\d{10,}/, // phone numbers (10+ digits)
-      /zalo|telegram|facebook/i // social media
-    ]
+    // Rule 6: Too Many Images (potential spam)
+    if (reviewData.images && reviewData.images.length > 3) return false
 
-    const textToCheck = `${reviewData.comment} ${reviewData.title || ''}`
-    const hasSpam = spamPatterns.some((pattern) => pattern.test(textToCheck))
-
-    if (hasSpam) {
-      return false
-    }
-
-    // Rule 4: Sensitive Keywords (Medical Safety)
-    const sensitiveKeywords = [
-      'tác dụng phụ',
-      'nguy hiểm',
-      'chết',
-      'tử vong',
-      'bệnh nặng',
-      'dị ứng',
-      'phản ứng',
-      'độc hại',
-      'cấm',
-      'không nên dùng',
-      'ngộ độc',
-      'biến chứng'
-    ]
-
-    const lowerText = textToCheck.toLowerCase()
-    const hasSensitive = sensitiveKeywords.some((keyword) => lowerText.includes(keyword))
-
-    if (hasSensitive) {
-      return false
-    }
-
-    if (reviewData.comment.length < 10) {
-      return false
-    }
-
-    if (reviewData.comment.length > 2000) {
-      return false
-    }
-
-    // Rule 6: Extreme Ratings with Short Comments (potential fake)
-    if ((reviewData.rating === 1 || reviewData.rating === 5) && reviewData.comment.length < 50) {
-      return false
-    }
-
-    // Rule 7: Too Many Images (potential spam)
-    if (reviewData.images && reviewData.images.length > 3) {
-      return false
-    }
-
-    // Default: Auto-approve if passed all checks
+    // Default: Auto-approve nếu qua hết rule-based checks
+    // AI layer sẽ chạy nền sau để phát hiện các vấn đề tinh vi hơn
     return true
   }
 
@@ -227,6 +194,11 @@ class ReviewService {
     if (shouldApprove) {
       await this.updateProductRating(productId)
     }
+
+    // 10. AI Moderation — fire-and-forget (KHÔNG block response về customer)
+    // Chạy nền sau khi save, nếu AI phát hiện vấn đề sẽ tự downgrade status
+    const aiContent = `${data.title || ''} ${data.comment}`.trim()
+    reviewAiModerationService.analyzeAsync(result.insertedId, userId, aiContent).catch(() => {})
 
     return { ...review, _id: result.insertedId }
   }
@@ -359,6 +331,7 @@ class ReviewService {
             isVerifiedPurchase: 1,
             helpfulCount: 1,
             status: 1,
+            moderationNotes: 1,
             createdAt: 1,
             updatedAt: 1,
             productName: '$product.name',
@@ -408,6 +381,14 @@ class ReviewService {
       })
     }
 
+    // 2b. Rejected reviews cannot be edited — customer must contact admin
+    if (review.status === ReviewStatus.Rejected) {
+      throw new ErrorWithStatus({
+        message: REVIEWS_MESSAGES.REJECTED_REVIEW_CANNOT_BE_EDITED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
     // 3. Prepare update data
     const updateData: any = {
       updatedAt: new Date()
@@ -434,7 +415,7 @@ class ReviewService {
     }
 
     if (data.comment !== undefined) {
-      if (data.comment.trim().length < 10) {
+      if (data.comment.trim().length < 5) {
         throw new ErrorWithStatus({
           message: REVIEWS_MESSAGES.COMMENT_TOO_SHORT,
           status: HTTP_STATUS.BAD_REQUEST
@@ -459,9 +440,27 @@ class ReviewService {
       updateData.images = data.images
     }
 
-    // Note: We preserve the review's current status (approved/pending/rejected)
-    // This implements "Skip Re-moderation" for better UX
-    // Admin can still use post-moderation to unpublish if needed
+    // Re-evaluate moderation if content changed
+    let shouldUpdateStatus = false
+    if (data.comment !== undefined || data.title !== undefined || data.rating !== undefined) {
+      const shouldApprove = await this.shouldAutoApprove(
+        userId,
+        {
+          comment: data.comment ?? review.comment,
+          title: data.title ?? review.title,
+          rating: data.rating ?? review.rating,
+          images: data.images ?? review.images
+        },
+        review.isVerifiedPurchase
+      )
+
+      updateData.autoApproved = shouldApprove
+      updateData.status = shouldApprove ? ReviewStatus.Approved : ReviewStatus.Pending
+      // Reset AI moderation fields — nội dung đã thay đổi, AI sẽ re-score sau
+      updateData.aiModeration = null
+      updateData.aiFlag = false
+      shouldUpdateStatus = true
+    }
 
     // 5. Update review
     const result = await databaseService.reviews.findOneAndUpdate(
@@ -471,7 +470,17 @@ class ReviewService {
     )
 
     // 6. Update product rating
-    await this.updateProductRating(review.productId)
+    if (review.status === ReviewStatus.Approved || shouldUpdateStatus) {
+      await this.updateProductRating(review.productId)
+    }
+
+    // 7. AI Moderation re-score nếu nội dung đã thay đổi — fire-and-forget
+    const contentChanged = data.comment !== undefined || data.title !== undefined
+    if (contentChanged) {
+      const newComment = data.comment ?? review.comment
+      const newTitle = data.title ?? review.title ?? ''
+      reviewAiModerationService.analyzeAsync(reviewId, userId, `${newTitle} ${newComment}`.trim()).catch(() => {})
+    }
 
     return result
   }
@@ -504,8 +513,10 @@ class ReviewService {
     // 3. Delete review
     await databaseService.reviews.deleteOne({ _id: reviewId })
 
-    // 4. Update product rating
-    await this.updateProductRating(review.productId)
+    // 4. Update product rating only if the deleted review was approved
+    if (review.status === ReviewStatus.Approved) {
+      await this.updateProductRating(review.productId)
+    }
 
     return { message: REVIEWS_MESSAGES.DELETE_REVIEW_SUCCESS }
   }
@@ -524,6 +535,22 @@ class ReviewService {
       throw new ErrorWithStatus({
         message: REVIEWS_MESSAGES.REVIEW_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    // Only approved reviews can receive helpful votes (pending/rejected are not public)
+    if (review.status !== ReviewStatus.Approved) {
+      throw new ErrorWithStatus({
+        message: REVIEWS_MESSAGES.REVIEW_NOT_APPROVED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    // Check if user is voting their own review
+    if (review.userId.equals(userId)) {
+      throw new ErrorWithStatus({
+        message: REVIEWS_MESSAGES.CANNOT_VOTE_OWN_REVIEW,
+        status: HTTP_STATUS.BAD_REQUEST
       })
     }
 
@@ -578,7 +605,7 @@ class ReviewService {
       })
     }
 
-    // Update review
+    // Update review — admin decision clears aiFlag (human overrides AI)
     const result = await databaseService.reviews.findOneAndUpdate(
       { _id: reviewId },
       {
@@ -587,6 +614,7 @@ class ReviewService {
           moderatedBy: moderatorId,
           moderatedAt: new Date(),
           moderationNotes: notes,
+          aiFlag: false,           // Admin reviewed → clear AI flag
           updatedAt: new Date()
         }
       },
@@ -595,6 +623,38 @@ class ReviewService {
 
     // Update product rating (approved/rejected affects visible rating)
     await this.updateProductRating(review.productId)
+
+    // Notify customer:
+    // - ALWAYS notify when rejected (customer needs to know why)
+    // - Notify when manually approved (review was pending, customer was waiting)
+    // - SKIP when auto-approved (customer already got success toast on submit)
+    if (status === ReviewStatus.Rejected || status === ReviewStatus.Approved) {
+      try {
+        const product = await databaseService.products.findOne(
+          { _id: review.productId },
+          { projection: { name: 1 } }
+        )
+        const productName = product?.name ?? 'sản phẩm'
+
+        // Graceful degradation: getIO() throws if socket not initialized (e.g. during tests)
+        // In that case, notification is still persisted in DB — real-time push is skipped
+        let io: SocketIOServer | undefined
+        try { io = getIO() } catch { io = undefined }
+
+        await notificationService.notifyReviewModerated(
+          review.userId,
+          reviewId,
+          productName,
+          status === ReviewStatus.Approved ? 'approved' : 'rejected',
+          Boolean(review.autoApproved),
+          notes,
+          io
+        )
+      } catch (notifyErr) {
+        // Notification failure must NOT block moderation result
+        console.error('[ReviewService] notifyReviewModerated failed:', notifyErr)
+      }
+    }
 
     return result
   }
@@ -840,26 +900,64 @@ class ReviewService {
    * @returns Result of bulk operation
    */
   async bulkModerate(reviewIds: ObjectId[], action: 'approve' | 'reject', moderatorId: ObjectId) {
+    // Fetch reviews BEFORE updating so we have userId, productId, autoApproved
+    const reviews = await databaseService.reviews.find({ _id: { $in: reviewIds } }).toArray()
+
     const updateData: any = {
       moderatedBy: moderatorId,
       moderatedAt: new Date()
     }
 
+    const bulkRejectionReason = 'Nội dung không đáp ứng tiêu chuẩn cộng đồng của MEDISPACE.'
+
     if (action === 'approve') {
       updateData.status = ReviewStatus.Approved
     } else {
       updateData.status = ReviewStatus.Rejected
-      updateData.moderationNotes = 'Bulk rejected by admin'
+      updateData.moderationNotes = bulkRejectionReason
     }
 
-    // Update all reviews
-    const result = await databaseService.reviews.updateMany({ _id: { $in: reviewIds } }, { $set: updateData })
+    // Update all reviews — admin decision clears aiFlag (human overrides AI)
+    const result = await databaseService.reviews.updateMany(
+      { _id: { $in: reviewIds } },
+      { $set: { ...updateData, aiFlag: false, updatedAt: new Date() } }
+    )
 
     // Update product ratings for affected products
-    const reviews = await databaseService.reviews.find({ _id: { $in: reviewIds } }).toArray()
-
     const productIds = [...new Set(reviews.map((r) => r.productId))]
     await Promise.all(productIds.map((id) => this.updateProductRating(id)))
+
+    // Notify each affected customer (fire-and-forget — don't block bulk result)
+    try {
+      // Graceful degradation: getIO() throws if socket not initialized
+      let io: SocketIOServer | undefined
+      try { io = getIO() } catch { io = undefined }
+
+      // Fetch product names once (deduplicated by productId)
+      const productDocs = await databaseService.products
+        .find({ _id: { $in: productIds } }, { projection: { _id: 1, name: 1 } })
+        .toArray()
+      const productNameMap = new Map(productDocs.map((p) => [p._id.toString(), p.name as string]))
+
+      await Promise.all(
+        reviews.map((review) =>
+          notificationService
+            .notifyReviewModerated(
+              review.userId,
+              review._id!,
+              productNameMap.get(review.productId.toString()) ?? 'sản phẩm',
+              action === 'approve' ? 'approved' : 'rejected',
+              Boolean(review.autoApproved),
+              action === 'reject' ? bulkRejectionReason : undefined,
+              io
+            )
+            .catch((e) => console.error('[ReviewService] bulkModerate notify failed:', e))
+        )
+      )
+    } catch (bulkNotifyErr) {
+      // Notification failure must NOT block bulk moderation result
+      console.error('[ReviewService] bulkModerate notification block failed:', bulkNotifyErr)
+    }
 
     return {
       modifiedCount: result.modifiedCount,

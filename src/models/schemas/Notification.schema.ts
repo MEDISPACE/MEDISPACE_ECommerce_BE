@@ -1,6 +1,6 @@
 import { ObjectId } from 'mongodb'
 
-export type NotificationTypeEnum = 'order' | 'prescription' | 'promotion' | 'reminder' | 'system'
+export type NotificationTypeEnum = 'order' | 'prescription' | 'promotion' | 'reminder' | 'system' | 'review'
 export type NotificationTargetRole = 'customer' | 'admin' | 'pharmacist'
 
 interface NotificationConstructor {

@@ -208,7 +208,7 @@ const searchSchema = {
 const sortBySchema = {
   optional: true,
   isIn: {
-    options: [['name', 'createdAt', 'stockQuantity', 'sku', 'price']],
+    options: [['name', 'createdAt', 'stockQuantity', 'sku', 'price', 'rating', 'reviewCount']],
     errorMessage: PRODUCTS_MESSAGES.SORT_BY_INVALID
   }
 }
@@ -226,6 +226,14 @@ const stockFilterSchema = {
   isInt: {
     options: { min: 0 },
     errorMessage: PRODUCTS_MESSAGES.STOCK_QUANTITY_INVALID
+  }
+}
+
+const priceFilterSchema = {
+  optional: true,
+  isFloat: {
+    options: { min: 0 },
+    errorMessage: 'Price must be a positive number'
   }
 }
 
@@ -431,8 +439,25 @@ export const getProductsValidator = validate(
       search: searchSchema,
       sortBy: sortBySchema,
       sortOrder: sortOrderSchema,
+      inStock: {
+        optional: true,
+        isIn: {
+          options: [['true', 'false']],
+          errorMessage: 'inStock must be "true" or "false"'
+        }
+      },
       minStock: stockFilterSchema,
-      maxStock: stockFilterSchema
+      maxStock: stockFilterSchema,
+      minPrice: priceFilterSchema,
+      maxPrice: priceFilterSchema,
+      ratingMin: priceFilterSchema,
+      bypassTypesense: {
+        optional: true,
+        isIn: {
+          options: [['true', 'false']],
+          errorMessage: 'bypassTypesense must be "true" or "false"'
+        }
+      }
     },
     ['query']
   )

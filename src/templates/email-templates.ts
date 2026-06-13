@@ -71,6 +71,15 @@ export const getOrderConfirmationContent = (order: any) => {
   const pointsRedeemed = order.pointsRedeemed || 0
   const pointsRedeemAmount = order.pointsRedeemAmount || 0
 
+  const shippingAddress = order.shippingAddress || {}
+  const lastName = shippingAddress.lastName || ''
+  const firstName = shippingAddress.firstName || 'Khách hàng'
+  const phone = shippingAddress.phone || ''
+  const address = shippingAddress.address || 'Không có địa chỉ'
+  const ward = shippingAddress.ward || ''
+  const district = shippingAddress.district || ''
+  const province = shippingAddress.province || ''
+
   const itemsHtml = order.items
     .map(
       (item: any) => `
@@ -89,7 +98,7 @@ export const getOrderConfirmationContent = (order: any) => {
 
   return `
     <h2>Xác nhận đơn hàng #${order.orderNumber}</h2>
-    <p>Xin chào <strong>${order.shippingAddress.lastName} ${order.shippingAddress.firstName}</strong>,</p>
+    <p>Xin chào <strong>${lastName} ${firstName}</strong>,</p>
     <p>Cảm ơn bạn đã đặt hàng tại <strong>MediSpace</strong>. Đơn hàng của bạn đã được tiếp nhận và đang được xử lý.</p>
     
     <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
@@ -200,10 +209,10 @@ export const getOrderConfirmationContent = (order: any) => {
     <div style="margin-top: 30px;">
       <h3 style="border-bottom: 1px solid #ddd; padding-bottom: 10px;">Địa chỉ giao hàng</h3>
       <p>
-        <strong>${order.shippingAddress.lastName} ${order.shippingAddress.firstName}</strong><br>
-        ${order.shippingAddress.phone}<br>
-        ${order.shippingAddress.address}<br>
-        ${order.shippingAddress.ward}, ${order.shippingAddress.district}, ${order.shippingAddress.province}
+        <strong>${lastName} ${firstName}</strong><br>
+        ${phone}<br>
+        ${address}<br>
+        ${ward ? ward + ', ' : ''}${district ? district + ', ' : ''}${province}
       </p>
     </div>
 

@@ -15,7 +15,7 @@ const client = new Typesense.Client({
     }
   ],
   apiKey: process.env.TYPESENSE_API_KEY || 'medispace-ts-secret',
-  connectionTimeoutSeconds: 5
+  connectionTimeoutSeconds: 60
 })
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
@@ -792,15 +792,21 @@ class TypesenseService {
     ratingMin?: number
     sortBy?: string
   }): Promise<any> {
+    console.log('[Typesense] searchProducts called, isAvailable =', this.isAvailable)
     if (!this.isAvailable) return null
 
     const { q, page = 1, limit = 20, categoryId, categoryIds, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
+
+    let reqPrescription = requiresPrescription
+    if (reqPrescription === undefined && (priceMin !== undefined || priceMax !== undefined || sortBy === 'price_asc' || sortBy === 'price_desc')) {
+      reqPrescription = false
+    }
 
     const filters: string[] = ['isActive:=true']
     if (categoryIds?.length) filters.push(`categoryId:=[${categoryIds.join(',')}]`)
     else if (categoryId) filters.push(`categoryId:=${categoryId}`)
     if (brandId) filters.push(`brandId:=${brandId}`)
-    if (requiresPrescription !== undefined) filters.push(`requiresPrescription:=${requiresPrescription}`)
+    if (reqPrescription !== undefined) filters.push(`requiresPrescription:=${reqPrescription}`)
     if (inStock) filters.push('inStock:=true')
     if (priceMin !== undefined && priceMax !== undefined) filters.push(`price:[${priceMin}..${priceMax}]`)
     else if (priceMin !== undefined) filters.push(`price:>=${priceMin}`)
@@ -809,7 +815,7 @@ class TypesenseService {
 
     // Mặc định: ưu tiên OTC trước kê đơn (requiresPrescription:asc → false=0 trước true=1)
     // Trừ khi user đã filter requiresPrescription cụ thể thì bỏ qua ưu tiên này
-    const rxSort = requiresPrescription !== undefined ? '' : 'requiresPrescription:asc,'
+    const rxSort = reqPrescription !== undefined ? '' : 'requiresPrescription:asc,'
     // Khi q='*' (browse mode), _text_match không có ý nghĩa → bỏ qua
     // Typesense giới hạn tối đa 3 sort fields
     const isTextSearch = q && q !== '*'
@@ -832,7 +838,8 @@ class TypesenseService {
         per_page: limit,
         num_typos: 2
       })
-    } catch {
+    } catch (err) {
+      console.error('[Typesense] searchProducts error:', err)
       return null
     }
   }
