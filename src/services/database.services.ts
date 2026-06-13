@@ -38,7 +38,7 @@ const uri =
 
 class DatabaseService {
   private client: MongoClient
-  private db: Db
+  public db: Db
   constructor() {
     this.client = new MongoClient(uri)
     this.db = this.client.db(process.env.DB_NAME)
@@ -96,6 +96,11 @@ class DatabaseService {
       const recommendationEvents = this.db.collection('recommendationEvents')
       await safeCreateIndex(recommendationEvents, { userId: 1, timestamp: -1 })
       await safeCreateIndex(recommendationEvents, { productId: 1, timestamp: -1 })
+      await safeCreateIndex(recommendationEvents, { attributionToken: 1, eventType: 1 })
+      await safeCreateIndex(recommendationEvents, { experimentId: 1, experimentVariant: 1, eventType: 1, timestamp: -1 })
+      await safeCreateIndex(this.db.collection('drugSafetyRules'), { productId: 1, status: 1 })
+      await safeCreateIndex(this.db.collection('recommendationSafetyEvents'), { timestamp: -1, reason: 1 })
+      await safeCreateIndex(this.db.collection('recommendationQualityEvents'), { timestamp: -1, algorithm: 1, variant: 1 })
       await safeCreateIndex(recommendationEvents, { timestamp: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 })
 
       // Categories collection indexes
