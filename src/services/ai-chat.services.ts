@@ -29,8 +29,9 @@ const RATE_LIMIT_WINDOW = 3600 // 1 giờ (seconds)
 // Response dedup cache: 3 phút
 const RESPONSE_CACHE_TTL = 180
 
-// History: lấy tối đa 20 messages gần nhất (~10 lượt)
-const HISTORY_LIMIT = 20
+// History: lấy tối đa 12 messages gần nhất (~6 lượt)
+// [FIX-11] Đồng bộ với AI Service MAX_HISTORY_TURNS=6 (mỗi turn = 2 msg)
+const HISTORY_LIMIT = 12
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface AIContextProduct {
@@ -162,6 +163,7 @@ export async function sendToAI(payload: {
   user_id: string
   history: AIHistoryMessage[]
   context_products?: AIContextProduct[]
+  context_data?: Record<string, any> | null   // [FIX-10] Phase 3: orders, loyalty
 }): Promise<AIChatResponse> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
@@ -175,7 +177,8 @@ export async function sendToAI(payload: {
         conversation_id: payload.conversation_id,
         user_id: payload.user_id,
         history: payload.history,
-        context_products: payload.context_products || []
+        context_products: payload.context_products || [],
+        context_data: payload.context_data ?? undefined   // [FIX-10]
       }),
       signal: controller.signal
     })
@@ -256,6 +259,7 @@ export async function streamFromAI(
     user_id: string
     history: AIHistoryMessage[]
     context_products?: AIContextProduct[]
+    context_data?: Record<string, any> | null   // [FIX-10] Phase 3: orders, loyalty
   },
   onChunk: (chunk: string) => void,
   onDone: (response: AIChatResponse) => void,
@@ -273,7 +277,8 @@ export async function streamFromAI(
         conversation_id: payload.conversation_id,
         user_id: payload.user_id,
         history: payload.history,
-        context_products: payload.context_products || []
+        context_products: payload.context_products || [],
+        context_data: payload.context_data ?? undefined   // [FIX-10]
       }),
       signal: controller.signal
     })

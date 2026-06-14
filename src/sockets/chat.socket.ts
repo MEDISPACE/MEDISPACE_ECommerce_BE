@@ -381,14 +381,15 @@ export const initChatSocket = (httpServer: HTTPServer) => {
               if (conversation.type === 'ai') {
                 // Khách hàng đang ở AI Mode
                 try {
-                  // 1. Lấy lịch sử hội thoại (Conversation Memory) - tối đa 6 tin nhắn trước tin nhắn hiện tại
+                  // 1. Lấy lịch sử hội thoại (Conversation Memory)
+                  // [FIX-11] limit(12) = 6 turns × 2 msg/turn, đồng bộ với HISTORY_LIMIT=12
                   const dbMessages = await databaseService.messages
                     .find({
                       conversationId: new ObjectId(convIdStr),
                       _id: { $ne: message._id }
                     })
                     .sort({ createdAt: -1 })
-                    .limit(6)
+                    .limit(12)
                     .toArray()
 
                   // FIX: Include ALL message types (customer + AI + pharmacist)
