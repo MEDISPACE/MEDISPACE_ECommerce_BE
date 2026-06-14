@@ -9,7 +9,7 @@ const getUserAndSession = (req: Request) => {
   if (req.decoded_authorization?.userId) {
     userId = new ObjectId(req.decoded_authorization.userId)
   }
-  const sessionId = req.cookies?.sessionId || (req.headers['x-session-id'] as string)
+  const sessionId = req.cookies?.sessionId
   return { userId, sessionId }
 }
 

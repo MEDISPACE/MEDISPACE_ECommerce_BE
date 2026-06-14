@@ -6,6 +6,7 @@ import emailService from './email.services'
 import paymentService from './payment.services'
 import productsService from './products.services'
 import { ghnService } from './ghn.services'
+import shippingService from './shipping.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
@@ -19,6 +20,42 @@ import recommendationsService from './recommendations.services'
 
 class OrderService {
   private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
+
+  private estimatePackageWeight(items: any[]) {
+    return Math.max(
+      500,
+      items.reduce((sum, item) => sum + (item.quantity || 1) * 250, 0)
+    )
+  }
+
+  private async quoteSelectedShippingMethod(
+    shippingMethod: string | undefined,
+    shippingAddress: any,
+    orderItems: any[],
+    subtotal: number
+  ) {
+    const method = shippingMethod || ShippingMethod.Standard
+
+    if (/^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(method)) {
+      const rate = await shippingService.calculateRate(
+        {
+          toAddress: shippingAddress.address,
+          toWard: shippingAddress.ward,
+          toDistrict: shippingAddress.district,
+          toProvince: shippingAddress.province,
+          toDistrictId: shippingAddress.districtId,
+          toWardCode: shippingAddress.wardCode,
+          weight: this.estimatePackageWeight(orderItems),
+          orderValue: subtotal
+        },
+        method
+      )
+
+      if (rate) return rate.price
+    }
+
+    return null
+  }
 
   private assertOrderStatusTransition(order: any, newStatus: string) {
     const currentStatus = order.orderStatus
@@ -65,6 +102,56 @@ class OrderService {
     return order.orderStatus !== 'cancelled' && order.orderStatus !== 'delivered' && order.orderStatus !== 'returned'
   }
 
+  private normalizeMedicationName(value: string) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  private async validatePrescriptionForOrder(userId: ObjectId, orderItems: any[], prescriptionId?: string) {
+    const prescriptionItems = orderItems.filter((item) => item.prescriptionRequired)
+    if (prescriptionItems.length === 0) return undefined
+
+    if (!prescriptionId || !ObjectId.isValid(prescriptionId)) {
+      throw new ErrorWithStatus({
+        message: 'Đơn hàng có thuốc kê đơn. Vui lòng chọn đơn thuốc đã được dược sĩ xác nhận.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const prescription = await databaseService.prescriptions.findOne({
+      _id: new ObjectId(prescriptionId),
+      customerId: userId,
+      status: 'verified',
+      $or: [{ validUntil: { $exists: false } }, { validUntil: { $gte: new Date() } }]
+    })
+    if (!prescription) {
+      throw new ErrorWithStatus({
+        message: 'Đơn thuốc không hợp lệ, đã hết hạn hoặc chưa được xác nhận.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    for (const item of prescriptionItems) {
+      const normalizedItemName = this.normalizeMedicationName(item.name)
+      const medication = prescription.medications?.find((entry: any) => {
+        if (entry.productId) return entry.productId.toString() === item.productId.toString()
+        return this.normalizeMedicationName(entry.productName || '') === normalizedItemName
+      })
+      if (!medication || item.quantity > medication.quantity) {
+        throw new ErrorWithStatus({
+          message: `Đơn thuốc không cho phép mua sản phẩm "${item.name}" với số lượng đã chọn.`,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+    }
+
+    return prescription._id
+  }
+
   private allocateAmountAcrossItems(totalAmount: number, items: any[]) {
     const normalizedTotal = Math.max(0, Math.floor(totalAmount || 0))
     if (normalizedTotal <= 0 || items.length === 0) return items.map(() => 0)
@@ -72,7 +159,9 @@ class OrderService {
     const subtotal = items.reduce((sum, item) => sum + Math.max(0, item.totalPrice || 0), 0)
     if (subtotal <= 0) return items.map(() => 0)
 
-    const allocations = items.map((item) => Math.floor((normalizedTotal * Math.max(0, item.totalPrice || 0)) / subtotal))
+    const allocations = items.map((item) =>
+      Math.floor((normalizedTotal * Math.max(0, item.totalPrice || 0)) / subtotal)
+    )
     let remainder = normalizedTotal - allocations.reduce((sum, amount) => sum + amount, 0)
 
     for (let i = 0; i < allocations.length && remainder > 0; i += 1) {
@@ -86,6 +175,7 @@ class OrderService {
   }
 
   private getCouponEligibleItems(items: any[], coupon: any) {
+    // applicableCategoryIds is the expanded category snapshot returned by validateCoupon.
     const productIds = new Set((coupon.applicableProductIds || []).map((id: any) => id.toString()))
     const categoryIds = new Set((coupon.applicableCategoryIds || []).map((id: any) => id.toString()))
     const hasProductTarget = productIds.size > 0
@@ -110,9 +200,8 @@ class OrderService {
       eligibleItems.forEach((eligibleItem, eligibleIndex) => {
         const amount = allocations[eligibleIndex]
         if (amount <= 0) return
-        const index = items.findIndex((item) =>
-          item.productId?.toString() === eligibleItem.productId?.toString() &&
-          item.unit === eligibleItem.unit
+        const index = items.findIndex(
+          (item) => item.productId?.toString() === eligibleItem.productId?.toString() && item.unit === eligibleItem.unit
         )
         if (index < 0) return
         couponAllocationsByItem[index].push({
@@ -135,6 +224,12 @@ class OrderService {
   }
 
   private async restoreStockForOrder(order: any) {
+    const claimed = await databaseService.orders.findOneAndUpdate(
+      { _id: order._id, stockRestored: { $ne: true } },
+      { $set: { stockRestored: true, updatedAt: new Date() } },
+      { returnDocument: 'before' }
+    )
+    if (!claimed) return
     await this.restoreStockForItems(order.items || [])
   }
 
@@ -173,9 +268,18 @@ class OrderService {
       selectedItems,
       isDirectBuy,
       shippingMethod,
-      shippingFee: providedShippingFee,
       estimatedDeliveryDate
     } = payload
+    if (payload.idempotencyKey) {
+      const existing = await this.getOrderByIdempotencyKey(userId, payload.idempotencyKey)
+      if (existing) {
+        const paymentUrl =
+          existing.paymentMethod !== PaymentMethod.COD && req
+            ? await paymentService.createPaymentUrl(existing as any, req)
+            : undefined
+        return { order: existing, orderId: existing._id, paymentUrl }
+      }
+    }
     let orderItems: any[] = []
 
     if (isDirectBuy && selectedItems && selectedItems.length > 0) {
@@ -197,6 +301,12 @@ class OrderService {
         if (product.stockQuantity < requiredStock) {
           throw new ErrorWithStatus({
             message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
+        if (item.quantity > (product.maxOrderQuantity || 10)) {
+          throw new ErrorWithStatus({
+            message: `Số lượng đặt mua vượt quá giới hạn cho sản phẩm "${product.name}".`,
             status: HTTP_STATUS.BAD_REQUEST
           })
         }
@@ -290,6 +400,12 @@ class OrderService {
         )
 
         const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        if (cartItem.quantity > (product.maxOrderQuantity || 10)) {
+          throw new ErrorWithStatus({
+            message: `Số lượng đặt mua vượt quá giới hạn cho sản phẩm "${product.name}".`,
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
 
         orderItems.push({
           ...cartItem,
@@ -297,7 +413,8 @@ class OrderService {
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * cartItem.quantity,
-          campaignId: campaign?._id
+          campaignId: campaign?._id,
+          prescriptionRequired: product.requiresPrescription || false
         })
       }
     }
@@ -306,43 +423,33 @@ class OrderService {
     const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0)
 
     // Calculate Shipping Fee
-    // Use frontend-provided shippingFee if available (to ensure consistency with checkout page)
-    let shippingFee: number
+    const method = shippingMethod || ShippingMethod.Standard
+    let baseShippingFee = await this.quoteSelectedShippingMethod(method, shippingAddress, orderItems, subtotal)
+    if (baseShippingFee === null) baseShippingFee = 30000
 
-    if (typeof providedShippingFee === 'number' && providedShippingFee >= 0) {
-      // Use the shipping fee calculated by frontend
-      shippingFee = providedShippingFee
-    } else {
-      // Fallback: calculate shipping fee on backend
-      const method = shippingMethod || ShippingMethod.Standard
-      let baseShippingFee = 30000
-
-      if (method === ShippingMethod.Fast) {
-        baseShippingFee = 45000
-      } else if (method === ShippingMethod.Express) {
-        baseShippingFee = 60000
-      } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
-        try {
-          const feeData = await ghnService.calculateFee({
-            to_district_id: shippingAddress.districtId,
-            to_ward_code: shippingAddress.wardCode,
-            weight: 2000, // Estimated 2kg
-            service_type_id: 2 // Standard
-          })
-          if (feeData && feeData.total) {
-            baseShippingFee = feeData.total
-          }
-        } catch (error) {
-          console.error('GHN Fee Calculation Failed:', error)
-          // Fallback to default 30000 is already set
+    if (method === ShippingMethod.Fast) {
+      baseShippingFee = 45000
+    } else if (method === ShippingMethod.Express) {
+      baseShippingFee = 60000
+    } else if (method === ShippingMethod.Standard && shippingAddress.districtId && shippingAddress.wardCode) {
+      try {
+        const feeData = await ghnService.calculateFee({
+          to_district_id: shippingAddress.districtId,
+          to_ward_code: shippingAddress.wardCode,
+          weight: 2000,
+          service_type_id: 2
+        })
+        if (feeData && feeData.total) {
+          baseShippingFee = feeData.total
         }
+      } catch (error) {
+        console.error('GHN Fee Calculation Failed:', error)
       }
+    }
 
-      // Apply Freeship logic: >= 300k -> Free shipping (100% off)
-      shippingFee = Math.max(0, baseShippingFee)
-      if (subtotal >= 300000) {
-        shippingFee = 0
-      }
+    let shippingFee = Math.max(0, baseShippingFee)
+    if (subtotal >= 300000) {
+      shippingFee = 0
     }
 
     // Tax logic: Prices already include VAT, so no extra tax added
@@ -352,7 +459,7 @@ class OrderService {
     let couponDiscountAmount = 0
     let appliedCoupons: any[] = []
     let freeShippingApplied = false
-    const hasPrescriptionItems = !!orderItems.find(i => i.prescriptionRequired)
+    const hasPrescriptionItems = !!orderItems.find((i) => i.prescriptionRequired)
 
     if (!isDirectBuy) {
       // Lấy danh sách coupon từ cart
@@ -380,8 +487,10 @@ class OrderService {
             applicableCategoryIds: validation.applicableCategoryIds || validation.coupon?.applicableCategoryIds || []
           })
         } else {
-          console.log(`[Order] Coupon ${cartCoupon.code} no longer valid at checkout: ${validation.message}`)
-          // Không throw — chỉ bỏ qua coupon hết hạn, order vẫn được tạo
+          throw new ErrorWithStatus({
+            message: `Mã giảm giá ${cartCoupon.code} không còn hợp lệ: ${validation.message}`,
+            status: HTTP_STATUS.CONFLICT
+          })
         }
       }
     } else if (payload.couponCodes && payload.couponCodes.length > 0) {
@@ -415,9 +524,7 @@ class OrderService {
     if (freeShippingApplied) {
       shippingDiscountAmount = shippingFee
       appliedCoupons = appliedCoupons.map((coupon: any) =>
-        coupon.type === 'free_shipping'
-          ? { ...coupon, discountAmount: shippingDiscountAmount }
-          : coupon
+        coupon.type === 'free_shipping' ? { ...coupon, discountAmount: shippingDiscountAmount } : coupon
       )
       shippingFee = 0
     }
@@ -425,7 +532,7 @@ class OrderService {
     const discountAmount = couponDiscountAmount
 
     const orderId = new ObjectId()
-    const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    const orderNumber = `ORD-${orderId.toHexString().slice(-18)}`
 
     // Loyalty points redemption
     let pointsRedeemed = 0
@@ -440,7 +547,7 @@ class OrderService {
           userId,
           orderId,
           maxPointsVnd, // điểm = VNĐ (1:1)
-          subtotal,
+          remainingAfterCoupon,
           orderNumber
         )
         pointsRedeemed = maxPointsVnd
@@ -451,7 +558,7 @@ class OrderService {
 
     const totalAmount = Math.max(0, subtotal + taxAmount + shippingFee - discountAmount - pointsRedeemAmount)
 
-    // Check prescription requirement logic if needed
+    const prescriptionId = await this.validatePrescriptionForOrder(userId, orderItems, payload.prescriptionId)
 
     const order = new Order({
       _id: orderId,
@@ -463,6 +570,7 @@ class OrderService {
       paymentMethod,
       paymentStatus: 'pending',
       orderStatus: 'pending',
+      shippingMethod: method,
       subtotal,
       taxAmount,
       shippingFee,
@@ -473,7 +581,10 @@ class OrderService {
       notes,
       estimatedDeliveryDate,
       pointsRedeemed,
-      pointsRedeemAmount
+      pointsRedeemAmount,
+      stockRestored: false,
+      idempotencyKey: payload.idempotencyKey,
+      prescriptionId
     })
 
     const result = await databaseService.orders.insertOne(order)
@@ -483,12 +594,7 @@ class OrderService {
     try {
       if (appliedCoupons && appliedCoupons.length > 0) {
         for (const coupon of appliedCoupons) {
-          await couponService.recordCouponRedemption(
-            coupon.code,
-            userId,
-            result.insertedId,
-            coupon.discountAmount || 0
-          )
+          await couponService.recordCouponRedemption(coupon.code, userId, result.insertedId, coupon.discountAmount || 0)
         }
       }
     } catch (error) {
@@ -533,13 +639,12 @@ class OrderService {
         if (updatedProduct && updatedProduct.stockQuantity <= LOW_STOCK_THRESHOLD) {
           try {
             const io = getIO()
-            notificationService.notifyLowStock(
-              updatedProduct._id!,
-              updatedProduct.name,
-              updatedProduct.stockQuantity,
-              io
-            ).catch(() => {})
-          } catch { /* socket not ready */ }
+            notificationService
+              .notifyLowStock(updatedProduct._id!, updatedProduct.name, updatedProduct.stockQuantity, io)
+              .catch(() => {})
+          } catch {
+            /* socket not ready */
+          }
         }
       }
     }
@@ -553,10 +658,9 @@ class OrderService {
           await cartService.removeItemFromCart(new ObjectId(item.productId), userId, sessionId, (item as any).unit)
         }
         // Xóa applied coupons sau khi đặt hàng (chỉ coupons đã dùng)
-        await databaseService.carts.updateOne(
-          userId ? { userId } : { sessionId },
-          { $set: { appliedCoupons: [], discountAmount: 0, updatedAt: new Date() } }
-        )
+        await databaseService.carts.updateOne(userId ? { userId } : { sessionId }, {
+          $set: { appliedCoupons: [], discountAmount: 0, updatedAt: new Date() }
+        })
       } else {
         // Clear entire cart
         await cartService.clearCart(userId)
@@ -575,11 +679,12 @@ class OrderService {
 
     // Generate Payment URL if applicable
     let paymentUrl = undefined
+    let paymentUrlError = false
     if (paymentMethod !== PaymentMethod.COD && req) {
       try {
         paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
       } catch (error) {
-        // error suppressed
+        paymentUrlError = true
       }
     }
 
@@ -587,47 +692,58 @@ class OrderService {
     try {
       const io = getIO()
       notificationService.notifyNewOrderToAdmin(orderNumber, totalAmount, io).catch(() => {})
-    } catch { /* socket not ready */ }
+    } catch {
+      /* socket not ready */
+    }
 
     // Notify customer that their order was placed successfully (fire-and-forget)
     try {
       const io = getIO()
       const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
-      notificationService.createAndPush(
-        {
-          userId,
-          type: 'order' as any,
-          title: 'Đặt hàng thành công! 🎉',
-          message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
-          actionUrl: '/account/orders',
-          metadata: { orderNumber, totalAmount },
-          targetRole: 'customer',
-        },
-        io
-      ).catch(() => {})
-    } catch { /* socket not ready */ }
+      notificationService
+        .createAndPush(
+          {
+            userId,
+            type: 'order' as any,
+            title: 'Đặt hàng thành công! 🎉',
+            message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
+            actionUrl: '/account/orders',
+            metadata: { orderNumber, totalAmount },
+            targetRole: 'customer'
+          },
+          io
+        )
+        .catch(() => {})
+    } catch {
+      /* socket not ready */
+    }
 
     // Notify all pharmacists about new order to prepare (fire-and-forget)
     try {
       const io = getIO()
       const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
-      notificationService.broadcastToRole(
-        'pharmacist',
-        {
-          type: 'order' as any,
-          title: 'Đơn hàng mới cần chuẩn bị',
-          message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
-          actionUrl: '/pharmacist/orders',
-          metadata: { orderNumber, totalAmount },
-        },
-        io
-      ).catch(() => {})
-    } catch { /* socket not ready */ }
+      notificationService
+        .broadcastToRole(
+          'pharmacist',
+          {
+            type: 'order' as any,
+            title: 'Đơn hàng mới cần chuẩn bị',
+            message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
+            actionUrl: '/pharmacist/orders',
+            metadata: { orderNumber, totalAmount }
+          },
+          io
+        )
+        .catch(() => {})
+    } catch {
+      /* socket not ready */
+    }
 
     return {
       order: { ...order, _id: result.insertedId },
       orderId: result.insertedId,
-      paymentUrl
+      paymentUrl,
+      paymentUrlError
     }
   }
 
@@ -642,6 +758,13 @@ class OrderService {
     }
 
     if (order.paymentStatus === 'paid') {
+      throw new ErrorWithStatus({
+        message: ORDERS_MESSAGES.INVALID_PAYMENT_STATUS,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (this.terminalOrderStatuses.has(order.orderStatus)) {
       throw new ErrorWithStatus({
         message: ORDERS_MESSAGES.INVALID_PAYMENT_STATUS,
         status: HTTP_STATUS.BAD_REQUEST
@@ -701,6 +824,10 @@ class OrderService {
     return await databaseService.orders.findOne({ orderNumber })
   }
 
+  async getOrderByIdempotencyKey(userId: ObjectId, idempotencyKey: string) {
+    return databaseService.orders.findOne({ userId, idempotencyKey })
+  }
+
   // Update order status (admin only)
   async updateOrderStatus(orderId: ObjectId, newStatus: string, trackingNumber?: string, notes?: string) {
     const order = await databaseService.orders.findOne({ _id: orderId })
@@ -744,12 +871,7 @@ class OrderService {
 
       // Loyalty: tích điểm khi giao thành công
       try {
-        await loyaltyService.earnPointsFromOrder(
-          order.userId,
-          orderId,
-          order.totalAmount,
-          order.orderNumber
-        )
+        await loyaltyService.earnPointsFromOrder(order.userId, orderId, order.totalAmount, order.orderNumber)
       } catch (err) {
         console.error('Loyalty earn points error:', err)
       }
@@ -772,17 +894,29 @@ class OrderService {
     if (updatedOrder && order.userId) {
       try {
         const io = getIO()
-        notificationService.notifyOrderStatusChange(
-          order.userId,
-          orderId,
-          order.orderNumber,
-          newStatus,
-          io
-        ).catch(() => {})
-      } catch { /* socket not ready */ }
+        notificationService
+          .notifyOrderStatusChange(order.userId, orderId, order.orderNumber, newStatus, io)
+          .catch(() => {})
+      } catch {
+        /* socket not ready */
+      }
     }
 
     return updatedOrder
+  }
+
+  async cancelOwnOrder(orderId: ObjectId, userId: ObjectId) {
+    const order = await databaseService.orders.findOne({ _id: orderId, userId })
+    if (!order) {
+      throw new ErrorWithStatus({ message: ORDERS_MESSAGES.ORDER_NOT_FOUND, status: HTTP_STATUS.NOT_FOUND })
+    }
+    if (order.orderStatus !== 'pending') {
+      throw new ErrorWithStatus({
+        message: 'Chỉ có thể hủy đơn hàng đang chờ xử lý.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+    return this.updateOrderStatus(orderId, 'cancelled')
   }
 
   // Update payment status
@@ -807,7 +941,10 @@ class OrderService {
       })
     }
 
-    if (newStatus === 'failed' && (order.paymentStatus === 'paid' || order.orderStatus === 'delivered' || order.orderStatus === 'returned')) {
+    if (
+      newStatus === 'failed' &&
+      (order.paymentStatus === 'paid' || order.orderStatus === 'delivered' || order.orderStatus === 'returned')
+    ) {
       throw new ErrorWithStatus({
         message: 'Không thể đánh dấu thất bại cho đơn hàng đã thanh toán/giao/hoàn tất.',
         status: HTTP_STATUS.BAD_REQUEST

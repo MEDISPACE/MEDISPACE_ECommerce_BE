@@ -24,6 +24,7 @@ import chatsRouter from './routes/chats.routes'
 import articlesRouter from './routes/articles.routes'
 import healthCategoriesRouter from './routes/healthCategories.routes'
 import ghnRouter from './routes/ghn.routes'
+import shippingRouter from './routes/shipping.routes'
 import returnRequestsRouter from './routes/returnRequests.routes'
 import searchRouter from './routes/search.routes'
 import couponsRouter from './routes/coupons.routes'
@@ -41,6 +42,12 @@ import { initFolder } from './utils/file'
 config()
 
 const app = express()
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1)
+app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1)
+
+if (process.env.NODE_ENV === 'production' && !process.env.VNP_RETURN_URL) {
+  console.warn('[Config] VNP_RETURN_URL is not set; VNPay will use API_URL/payment/vnpay-return.')
+}
 
 const bootstrapSearch = async () => {
   await databaseService.connect()
@@ -63,7 +70,7 @@ app.use(
     origin: allowedOrigins.length > 0 ? allowedOrigins : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key']
   })
 )
 
@@ -86,6 +93,7 @@ app.use('/chats', chatsRouter)
 app.use('/articles', articlesRouter)
 app.use('/health-categories', healthCategoriesRouter)
 app.use('/ghn', ghnRouter)
+app.use('/shipping', shippingRouter)
 app.use('/returns', returnRequestsRouter)
 app.use('/search', searchRouter)
 app.use('/coupons', couponsRouter)
