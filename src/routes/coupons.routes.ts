@@ -15,6 +15,7 @@ import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users
 import { adminRequired } from '~/middlewares/admin.middlewares'
 import { optionalAuth } from '~/middlewares/carts.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
+import { couponRateLimit } from '~/middlewares/coupons.middlewares'
 
 const couponsRouter = Router()
 
@@ -35,6 +36,7 @@ couponsRouter.get('/public', wrapRequestHandler(getPublicCouponsController))
 couponsRouter.post(
   '/validate',
   accessTokenValidator,
+  couponRateLimit,
   wrapRequestHandler(validateCouponController)
 )
 
@@ -47,6 +49,7 @@ couponsRouter.post(
 couponsRouter.post(
   '/apply',
   accessTokenValidator,
+  couponRateLimit,
   wrapRequestHandler(applyCouponController)
 )
 

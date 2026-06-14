@@ -24,10 +24,8 @@ export class VNPayProvider implements PaymentProvider {
     const locale = 'vn'
     const currCode = 'VND'
 
-    // Use configured return URL or construct one
-    // Note: If VNP_RETURN_URL is set in env, use it. Otherwise construct from base.
-    // Here we assume VNP_RETURN_URL is the full URL to the controller endpoint
-    const vnp_ReturnUrl = this.returnUrl || 'http://localhost:8000/payment/vnpay/return'
+    const apiUrl = (process.env.API_URL || 'http://localhost:8000').replace(/\/$/, '')
+    const vnp_ReturnUrl = this.returnUrl || `${apiUrl}/payment/vnpay-return`
 
     let vnp_Params: any = {}
     vnp_Params['vnp_Version'] = '2.1.0'
@@ -123,17 +121,6 @@ export class VNPayProvider implements PaymentProvider {
   }
 
   private getIpAddress(req: any) {
-    let ipAddr =
-      req.headers['x-forwarded-for'] ||
-      req.connection.remoteAddress ||
-      req.socket.remoteAddress ||
-      req.connection.socket.remoteAddress
-
-    // Handle case where x-forwarded-for contains multiple IPs
-    if (ipAddr && typeof ipAddr === 'string' && ipAddr.includes(',')) {
-      ipAddr = ipAddr.split(',')[0].trim()
-    }
-
-    return ipAddr || '127.0.0.1'
+    return req?.ip || req?.socket?.remoteAddress || '127.0.0.1'
   }
 }

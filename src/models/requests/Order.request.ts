@@ -21,10 +21,11 @@ export interface CreateOrderReqBody {
     wardCode?: string
   }
   paymentMethod: string // 'cod', 'bank_transfer', 'credit_card', 'e_wallet'
-  shippingMethod?: string // 'standard', 'fast', 'express'
+  shippingMethod?: string // 'standard', 'fast', 'express', 'ghn:<serviceId>', 'ghtk:<transport>', 'ahamove:<serviceId>'
   notes?: string
   couponCodes?: string[] // For applying coupons to direct buy orders
   pointsToRedeem?: number // Số điểm loyalty muốn đổi
+  prescriptionId?: string
 }
 
 export interface UpdateOrderStatusReqBody {

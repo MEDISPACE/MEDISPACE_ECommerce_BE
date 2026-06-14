@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb'
 
 export interface PrescriptionMedication {
+  productId?: ObjectId
   productName: string
   dosage: string
   quantity: number
