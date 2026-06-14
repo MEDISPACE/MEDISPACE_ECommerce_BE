@@ -68,9 +68,12 @@ const paymentMethodSchema = {
 
 // Shipping method validation
 const shippingMethodSchema = {
-  isIn: {
-    options: [[...Object.values(ShippingMethod)]],
-    errorMessage: ORDERS_MESSAGES.SHIPPING_METHOD_INVALID
+  custom: {
+    options: (value: string) => {
+      if (Object.values(ShippingMethod).includes(value as ShippingMethod)) return true
+      if (/^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(value)) return true
+      throw new Error(ORDERS_MESSAGES.SHIPPING_METHOD_INVALID)
+    }
   }
 }
 

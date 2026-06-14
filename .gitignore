@@ -18,6 +18,7 @@ coverage/
 !src/tests/orders.benefits.test.ts
 !src/tests/orders.controllers.test.ts
 !src/tests/payment.controllers.test.ts
+!src/tests/shipping.providers.test.ts
 !src/tests/carts.services.test.ts
 !src/tests/coupons.middlewares.test.ts
 !src/tests/vnpay.provider.test.ts
