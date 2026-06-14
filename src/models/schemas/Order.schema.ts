@@ -7,10 +7,10 @@ export interface OrderItem {
   sku: string
   unit: string // Đơn vị đã chọn: "Viên", "Vỉ", "Hộp"...
   quantity: number
-  unitPrice: number      // Giá sau campaign hoặc giá gốc
+  unitPrice: number // Giá sau campaign hoặc giá gốc
   originalUnitPrice?: number // Giá gốc
-  totalPrice: number     // quantity * unitPrice
-  campaignId?: ObjectId  // Campaign ID
+  totalPrice: number // quantity * unitPrice
+  campaignId?: ObjectId // Campaign ID
   prescriptionRequired: boolean
   image?: string
   discountAllocation?: number
@@ -53,6 +53,7 @@ export interface OrderType {
   itemCount: number
 
   shippingAddress: ShippingAddress
+  shippingMethod?: string
   paymentMethod: string // 'cod', 'bank_transfer', 'credit_card', 'e_wallet'
   paymentStatus: string // 'pending', 'paid', 'failed', 'refunded'
   orderStatus: string // 'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'
@@ -70,8 +71,8 @@ export interface OrderType {
   estimatedDeliveryDate?: string
 
   // Loyalty points
-  pointsRedeemed?: number      // Số điểm đã đổi
-  pointsRedeemAmount?: number  // Số tiền giảm từ điểm
+  pointsRedeemed?: number // Số điểm đã đổi
+  pointsRedeemAmount?: number // Số tiền giảm từ điểm
   stockRestored?: boolean
   idempotencyKey?: string
   cartClearedAt?: Date
@@ -94,6 +95,7 @@ export default class Order {
   itemCount: number
 
   shippingAddress: ShippingAddress
+  shippingMethod?: string
   paymentMethod: string
   paymentStatus: string
   orderStatus: string
@@ -136,6 +138,7 @@ export default class Order {
     this.itemCount = order.itemCount || order.items.reduce((sum, item) => sum + item.quantity, 0)
 
     this.shippingAddress = order.shippingAddress
+    this.shippingMethod = order.shippingMethod
     this.paymentMethod = order.paymentMethod
     this.paymentStatus = order.paymentStatus || 'pending'
     this.orderStatus = order.orderStatus || 'pending'

@@ -24,6 +24,7 @@ import chatsRouter from './routes/chats.routes'
 import articlesRouter from './routes/articles.routes'
 import healthCategoriesRouter from './routes/healthCategories.routes'
 import ghnRouter from './routes/ghn.routes'
+import shippingRouter from './routes/shipping.routes'
 import returnRequestsRouter from './routes/returnRequests.routes'
 import searchRouter from './routes/search.routes'
 import couponsRouter from './routes/coupons.routes'
@@ -92,6 +93,7 @@ app.use('/chats', chatsRouter)
 app.use('/articles', articlesRouter)
 app.use('/health-categories', healthCategoriesRouter)
 app.use('/ghn', ghnRouter)
+app.use('/shipping', shippingRouter)
 app.use('/returns', returnRequestsRouter)
 app.use('/search', searchRouter)
 app.use('/coupons', couponsRouter)
