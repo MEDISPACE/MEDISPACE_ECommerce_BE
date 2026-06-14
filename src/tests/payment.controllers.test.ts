@@ -115,6 +115,22 @@ describe('payment controllers', () => {
     expect(res.json).toHaveBeenCalledWith({ RspCode: '00', Message: 'Confirm Success' })
   })
 
+  it('rejects a VNPay IPN for an order created with a different payment method', async () => {
+    const existing = order({ paymentMethod: 'payos' })
+    mockVerifyIpn.mockResolvedValue({
+      isSuccess: true,
+      orderId: existing._id.toString(),
+      amount: existing.totalAmount
+    })
+    mockOrdersFindOne.mockResolvedValue(existing)
+    const res = response()
+
+    await vnpayIpnController({ query: {} } as any, res)
+
+    expect(mockUpdatePaymentStatus).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith({ RspCode: '04', Message: 'Invalid amount or order' })
+  })
+
   it('does not trust an unauthenticated PayOS return URL to mark an order paid', async () => {
     const existing = order({ paymentMethod: 'payos' })
     mockOrdersFindOne.mockResolvedValue(existing)
@@ -145,5 +161,22 @@ describe('payment controllers', () => {
 
     expect(mockUpdatePaymentStatus).not.toHaveBeenCalled()
     expect(res.json).toHaveBeenCalledWith({ success: false })
+  })
+
+  it('handles a repeated valid PayOS webhook without marking an already-paid order again', async () => {
+    const existing = order({ paymentMethod: 'payos', paymentStatus: 'paid' })
+    mockVerifyIpn.mockResolvedValue({
+      isSuccess: true,
+      transactionId: existing.orderNumber,
+      amount: existing.totalAmount
+    })
+    mockGetOrderByOrderNumber.mockResolvedValue(existing)
+    mockOrdersFindOne.mockResolvedValue(existing)
+    const res = response()
+
+    await payOSIpnController({ body: {} } as any, res)
+
+    expect(mockUpdatePaymentStatus).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith({ success: true })
   })
 })

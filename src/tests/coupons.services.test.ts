@@ -327,9 +327,24 @@ describe('CouponService', () => {
 
       expect(mockInsertOne).toHaveBeenCalledTimes(1)
       expect(mockFindOneAndUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ code: coupon.code }),
         expect.objectContaining({
-          $inc: expect.objectContaining({ currentUsageCount: 1 })
+          code: coupon.code,
+          $and: expect.arrayContaining([
+            expect.objectContaining({
+              $expr: {
+                $lt: [
+                  { $ifNull: [`$userUsageCounts.${USER_ID}`, 0] },
+                  '$perUserLimit'
+                ]
+              }
+            })
+          ])
+        }),
+        expect.objectContaining({
+          $inc: expect.objectContaining({
+            currentUsageCount: 1,
+            [`userUsageCounts.${USER_ID}`]: 1
+          })
         }),
         { returnDocument: 'after' }
       )

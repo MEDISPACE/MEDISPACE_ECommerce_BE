@@ -6,6 +6,7 @@ const mockOrdersUpdateOne = vi.fn()
 const mockOrdersFindOneAndUpdate = vi.fn()
 const mockProductsFindOne = vi.fn()
 const mockProductsUpdateOne = vi.fn()
+const mockPrescriptionsFindOne = vi.fn()
 const mockReleaseCouponRedemptionsForOrder = vi.fn()
 const mockRefundRedeemedPointsForOrder = vi.fn()
 const mockEarnPointsFromOrder = vi.fn()
@@ -20,6 +21,9 @@ vi.mock('~/services/database.services', () => ({
     products: {
       findOne: mockProductsFindOne,
       updateOne: mockProductsUpdateOne
+    },
+    prescriptions: {
+      findOne: mockPrescriptionsFindOne
     }
   }
 }))
@@ -203,5 +207,80 @@ describe('OrderService benefit settlement', () => {
 
     expect(mockProductsFindOne).not.toHaveBeenCalled()
     expect(mockProductsUpdateOne).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['cancelled', 'processing'],
+    ['returned', 'processing'],
+    ['delivered', 'cancelled']
+  ])('rejects terminal order transition %s → %s', (currentStatus, nextStatus) => {
+    expect(() => (orderService as any).assertOrderStatusTransition(
+      makeOrder({ orderStatus: currentStatus }),
+      nextStatus
+    )).toThrow()
+  })
+
+  it('rejects a prescription-required order when no prescription is selected', async () => {
+    await expect((orderService as any).validatePrescriptionForOrder(
+      new ObjectId(),
+      [{ productId: new ObjectId(), name: 'Thuốc A', quantity: 1, prescriptionRequired: true }]
+    )).rejects.toThrow('Vui lòng chọn đơn thuốc')
+  })
+
+  it('rejects an expired, unverified, or foreign prescription', async () => {
+    mockPrescriptionsFindOne.mockResolvedValueOnce(null)
+
+    await expect((orderService as any).validatePrescriptionForOrder(
+      new ObjectId(),
+      [{ productId: new ObjectId(), name: 'Thuốc A', quantity: 1, prescriptionRequired: true }],
+      new ObjectId().toString()
+    )).rejects.toThrow('không hợp lệ')
+  })
+
+  it('rejects medication or quantity not covered by the prescription', async () => {
+    const productId = new ObjectId()
+    mockPrescriptionsFindOne.mockResolvedValueOnce({
+      _id: new ObjectId(),
+      medications: [{ productId, productName: 'Thuốc A', quantity: 1 }]
+    })
+
+    await expect((orderService as any).validatePrescriptionForOrder(
+      new ObjectId(),
+      [{ productId, name: 'Thuốc A', quantity: 2, prescriptionRequired: true }],
+      new ObjectId().toString()
+    )).rejects.toThrow('không cho phép mua')
+  })
+
+  it('accepts a verified prescription matching product and quantity', async () => {
+    const productId = new ObjectId()
+    const prescriptionId = new ObjectId()
+    mockPrescriptionsFindOne.mockResolvedValueOnce({
+      _id: prescriptionId,
+      medications: [{ productId, productName: 'Thuốc A', quantity: 2 }]
+    })
+
+    await expect((orderService as any).validatePrescriptionForOrder(
+      new ObjectId(),
+      [{ productId, name: 'Thuốc A', quantity: 2, prescriptionRequired: true }],
+      prescriptionId.toString()
+    )).resolves.toEqual(prescriptionId)
+  })
+
+  it('allocates a targeted coupon only across eligible category items', () => {
+    const eligibleCategory = new ObjectId()
+    const items = [
+      { productId: new ObjectId(), categoryId: eligibleCategory, unit: 'Hộp', totalPrice: 100_000 },
+      { productId: new ObjectId(), categoryId: new ObjectId(), unit: 'Hộp', totalPrice: 200_000 }
+    ]
+
+    const allocated = (orderService as any).attachBenefitAllocations(items, [{
+      code: 'CATEGORY10',
+      type: 'fixed_amount',
+      discountAmount: 10_000,
+      applicableCategoryIds: [eligibleCategory]
+    }], 0)
+
+    expect(allocated[0].discountAllocation).toBe(10_000)
+    expect(allocated[1].discountAllocation).toBe(0)
   })
 })

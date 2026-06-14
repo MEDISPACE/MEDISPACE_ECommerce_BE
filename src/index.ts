@@ -41,6 +41,12 @@ import { initFolder } from './utils/file'
 config()
 
 const app = express()
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1)
+app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1)
+
+if (process.env.NODE_ENV === 'production' && !process.env.VNP_RETURN_URL) {
+  console.warn('[Config] VNP_RETURN_URL is not set; VNPay will use API_URL/payment/vnpay-return.')
+}
 
 const bootstrapSearch = async () => {
   await databaseService.connect()
