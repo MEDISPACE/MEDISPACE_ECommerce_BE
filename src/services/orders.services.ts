@@ -6,6 +6,7 @@ import emailService from './email.services'
 import paymentService from './payment.services'
 import productsService from './products.services'
 import { ghnService } from './ghn.services'
+import shippingService from './shipping.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/message'
@@ -19,6 +20,42 @@ import recommendationsService from './recommendations.services'
 
 class OrderService {
   private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
+
+  private estimatePackageWeight(items: any[]) {
+    return Math.max(
+      500,
+      items.reduce((sum, item) => sum + (item.quantity || 1) * 250, 0)
+    )
+  }
+
+  private async quoteSelectedShippingMethod(
+    shippingMethod: string | undefined,
+    shippingAddress: any,
+    orderItems: any[],
+    subtotal: number
+  ) {
+    const method = shippingMethod || ShippingMethod.Standard
+
+    if (/^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(method)) {
+      const rate = await shippingService.calculateRate(
+        {
+          toAddress: shippingAddress.address,
+          toWard: shippingAddress.ward,
+          toDistrict: shippingAddress.district,
+          toProvince: shippingAddress.province,
+          toDistrictId: shippingAddress.districtId,
+          toWardCode: shippingAddress.wardCode,
+          weight: this.estimatePackageWeight(orderItems),
+          orderValue: subtotal
+        },
+        method
+      )
+
+      if (rate) return rate.price
+    }
+
+    return null
+  }
 
   private assertOrderStatusTransition(order: any, newStatus: string) {
     const currentStatus = order.orderStatus
@@ -66,7 +103,12 @@ class OrderService {
   }
 
   private normalizeMedicationName(value: string) {
-    return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
   }
 
   private async validatePrescriptionForOrder(userId: ObjectId, orderItems: any[], prescriptionId?: string) {
@@ -117,7 +159,9 @@ class OrderService {
     const subtotal = items.reduce((sum, item) => sum + Math.max(0, item.totalPrice || 0), 0)
     if (subtotal <= 0) return items.map(() => 0)
 
-    const allocations = items.map((item) => Math.floor((normalizedTotal * Math.max(0, item.totalPrice || 0)) / subtotal))
+    const allocations = items.map((item) =>
+      Math.floor((normalizedTotal * Math.max(0, item.totalPrice || 0)) / subtotal)
+    )
     let remainder = normalizedTotal - allocations.reduce((sum, amount) => sum + amount, 0)
 
     for (let i = 0; i < allocations.length && remainder > 0; i += 1) {
@@ -156,9 +200,8 @@ class OrderService {
       eligibleItems.forEach((eligibleItem, eligibleIndex) => {
         const amount = allocations[eligibleIndex]
         if (amount <= 0) return
-        const index = items.findIndex((item) =>
-          item.productId?.toString() === eligibleItem.productId?.toString() &&
-          item.unit === eligibleItem.unit
+        const index = items.findIndex(
+          (item) => item.productId?.toString() === eligibleItem.productId?.toString() && item.unit === eligibleItem.unit
         )
         if (index < 0) return
         couponAllocationsByItem[index].push({
@@ -381,7 +424,8 @@ class OrderService {
 
     // Calculate Shipping Fee
     const method = shippingMethod || ShippingMethod.Standard
-    let baseShippingFee = 30000
+    let baseShippingFee = await this.quoteSelectedShippingMethod(method, shippingAddress, orderItems, subtotal)
+    if (baseShippingFee === null) baseShippingFee = 30000
 
     if (method === ShippingMethod.Fast) {
       baseShippingFee = 45000
@@ -415,7 +459,7 @@ class OrderService {
     let couponDiscountAmount = 0
     let appliedCoupons: any[] = []
     let freeShippingApplied = false
-    const hasPrescriptionItems = !!orderItems.find(i => i.prescriptionRequired)
+    const hasPrescriptionItems = !!orderItems.find((i) => i.prescriptionRequired)
 
     if (!isDirectBuy) {
       // Lấy danh sách coupon từ cart
@@ -480,9 +524,7 @@ class OrderService {
     if (freeShippingApplied) {
       shippingDiscountAmount = shippingFee
       appliedCoupons = appliedCoupons.map((coupon: any) =>
-        coupon.type === 'free_shipping'
-          ? { ...coupon, discountAmount: shippingDiscountAmount }
-          : coupon
+        coupon.type === 'free_shipping' ? { ...coupon, discountAmount: shippingDiscountAmount } : coupon
       )
       shippingFee = 0
     }
@@ -528,6 +570,7 @@ class OrderService {
       paymentMethod,
       paymentStatus: 'pending',
       orderStatus: 'pending',
+      shippingMethod: method,
       subtotal,
       taxAmount,
       shippingFee,
@@ -551,12 +594,7 @@ class OrderService {
     try {
       if (appliedCoupons && appliedCoupons.length > 0) {
         for (const coupon of appliedCoupons) {
-          await couponService.recordCouponRedemption(
-            coupon.code,
-            userId,
-            result.insertedId,
-            coupon.discountAmount || 0
-          )
+          await couponService.recordCouponRedemption(coupon.code, userId, result.insertedId, coupon.discountAmount || 0)
         }
       }
     } catch (error) {
@@ -601,13 +639,12 @@ class OrderService {
         if (updatedProduct && updatedProduct.stockQuantity <= LOW_STOCK_THRESHOLD) {
           try {
             const io = getIO()
-            notificationService.notifyLowStock(
-              updatedProduct._id!,
-              updatedProduct.name,
-              updatedProduct.stockQuantity,
-              io
-            ).catch(() => {})
-          } catch { /* socket not ready */ }
+            notificationService
+              .notifyLowStock(updatedProduct._id!, updatedProduct.name, updatedProduct.stockQuantity, io)
+              .catch(() => {})
+          } catch {
+            /* socket not ready */
+          }
         }
       }
     }
@@ -621,10 +658,9 @@ class OrderService {
           await cartService.removeItemFromCart(new ObjectId(item.productId), userId, sessionId, (item as any).unit)
         }
         // Xóa applied coupons sau khi đặt hàng (chỉ coupons đã dùng)
-        await databaseService.carts.updateOne(
-          userId ? { userId } : { sessionId },
-          { $set: { appliedCoupons: [], discountAmount: 0, updatedAt: new Date() } }
-        )
+        await databaseService.carts.updateOne(userId ? { userId } : { sessionId }, {
+          $set: { appliedCoupons: [], discountAmount: 0, updatedAt: new Date() }
+        })
       } else {
         // Clear entire cart
         await cartService.clearCart(userId)
@@ -656,42 +692,52 @@ class OrderService {
     try {
       const io = getIO()
       notificationService.notifyNewOrderToAdmin(orderNumber, totalAmount, io).catch(() => {})
-    } catch { /* socket not ready */ }
+    } catch {
+      /* socket not ready */
+    }
 
     // Notify customer that their order was placed successfully (fire-and-forget)
     try {
       const io = getIO()
       const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
-      notificationService.createAndPush(
-        {
-          userId,
-          type: 'order' as any,
-          title: 'Đặt hàng thành công! 🎉',
-          message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
-          actionUrl: '/account/orders',
-          metadata: { orderNumber, totalAmount },
-          targetRole: 'customer',
-        },
-        io
-      ).catch(() => {})
-    } catch { /* socket not ready */ }
+      notificationService
+        .createAndPush(
+          {
+            userId,
+            type: 'order' as any,
+            title: 'Đặt hàng thành công! 🎉',
+            message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
+            actionUrl: '/account/orders',
+            metadata: { orderNumber, totalAmount },
+            targetRole: 'customer'
+          },
+          io
+        )
+        .catch(() => {})
+    } catch {
+      /* socket not ready */
+    }
 
     // Notify all pharmacists about new order to prepare (fire-and-forget)
     try {
       const io = getIO()
       const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
-      notificationService.broadcastToRole(
-        'pharmacist',
-        {
-          type: 'order' as any,
-          title: 'Đơn hàng mới cần chuẩn bị',
-          message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
-          actionUrl: '/pharmacist/orders',
-          metadata: { orderNumber, totalAmount },
-        },
-        io
-      ).catch(() => {})
-    } catch { /* socket not ready */ }
+      notificationService
+        .broadcastToRole(
+          'pharmacist',
+          {
+            type: 'order' as any,
+            title: 'Đơn hàng mới cần chuẩn bị',
+            message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
+            actionUrl: '/pharmacist/orders',
+            metadata: { orderNumber, totalAmount }
+          },
+          io
+        )
+        .catch(() => {})
+    } catch {
+      /* socket not ready */
+    }
 
     return {
       order: { ...order, _id: result.insertedId },
@@ -825,12 +871,7 @@ class OrderService {
 
       // Loyalty: tích điểm khi giao thành công
       try {
-        await loyaltyService.earnPointsFromOrder(
-          order.userId,
-          orderId,
-          order.totalAmount,
-          order.orderNumber
-        )
+        await loyaltyService.earnPointsFromOrder(order.userId, orderId, order.totalAmount, order.orderNumber)
       } catch (err) {
         console.error('Loyalty earn points error:', err)
       }
@@ -853,14 +894,12 @@ class OrderService {
     if (updatedOrder && order.userId) {
       try {
         const io = getIO()
-        notificationService.notifyOrderStatusChange(
-          order.userId,
-          orderId,
-          order.orderNumber,
-          newStatus,
-          io
-        ).catch(() => {})
-      } catch { /* socket not ready */ }
+        notificationService
+          .notifyOrderStatusChange(order.userId, orderId, order.orderNumber, newStatus, io)
+          .catch(() => {})
+      } catch {
+        /* socket not ready */
+      }
     }
 
     return updatedOrder
@@ -902,7 +941,10 @@ class OrderService {
       })
     }
 
-    if (newStatus === 'failed' && (order.paymentStatus === 'paid' || order.orderStatus === 'delivered' || order.orderStatus === 'returned')) {
+    if (
+      newStatus === 'failed' &&
+      (order.paymentStatus === 'paid' || order.orderStatus === 'delivered' || order.orderStatus === 'returned')
+    ) {
       throw new ErrorWithStatus({
         message: 'Không thể đánh dấu thất bại cho đơn hàng đã thanh toán/giao/hoàn tất.',
         status: HTTP_STATUS.BAD_REQUEST

@@ -117,15 +117,16 @@ interface CartItem {
   productId: ObjectId
   name: string
   sku: string
-  unit: string              // Viên | Vỉ | Hộp | Tuýp | Chai ...
+  unit: string // Viên | Vỉ | Hộp | Tuýp | Chai ...
   quantity: number
-  unitPrice: number         // Giá SAU campaign (authoritative từ backend)
+  unitPrice: number // Giá SAU campaign (authoritative từ backend)
   originalUnitPrice: number // Giá gốc (trước campaign) — để hiển thị gạch chân
-  totalPrice: number        // quantity * unitPrice
-  campaignId?: ObjectId     // Campaign đã áp dụng
+  totalPrice: number // quantity * unitPrice
+  campaignId?: ObjectId // Campaign đã áp dụng
   prescriptionRequired: boolean
   image?: string
-  priceVariants?: Array<{   // Bản copy của priceVariants từ Product — dùng cho UI dropdown unit
+  priceVariants?: Array<{
+    // Bản copy của priceVariants từ Product — dùng cho UI dropdown unit
     unit: string
     price: number
     originalPrice?: number
@@ -136,43 +137,44 @@ interface CartItem {
 interface AppliedCoupon {
   code: string
   discountAmount: number
-  type: string              // 'percentage' | 'fixed_amount' | 'fixed' | 'free_shipping'
+  type: string // 'percentage' | 'fixed_amount' | 'fixed' | 'free_shipping'
 }
 
 interface Cart {
   _id: ObjectId
-  userId?: ObjectId         // Nếu đã login
-  sessionId?: string        // Nếu Guest
+  userId?: ObjectId // Nếu đã login
+  sessionId?: string // Nếu Guest
 
   items: CartItem[]
-  itemCount: number         // Tổng số lượng (sum of quantities)
+  itemCount: number // Tổng số lượng (sum of quantities)
   uniqueProductCount: number // Số loại sản phẩm (items.length)
 
-  subtotal: number          // Sum of items[].totalPrice
-  discountAmount: number    // Sum of coupon discounts (trừ free_shipping)
-  taxAmount: number         // Luôn = 0 (VAT đã gộp vào giá)
-  shippingFee: number       // Dùng cho preview, không phải finalShipping
-  loyaltyDiscount: number   // Luôn = 0 (loyalty xử lý tại checkout, không lưu trong cart)
-  totalAmount: number       // subtotal - discountAmount - loyaltyDiscount + taxAmount + shippingFee
+  subtotal: number // Sum of items[].totalPrice
+  discountAmount: number // Sum of coupon discounts (trừ free_shipping)
+  taxAmount: number // Luôn = 0 (VAT đã gộp vào giá)
+  shippingFee: number // Dùng cho preview, không phải finalShipping
+  loyaltyDiscount: number // Luôn = 0 (loyalty xử lý tại checkout, không lưu trong cart)
+  totalAmount: number // subtotal - discountAmount - loyaltyDiscount + taxAmount + shippingFee
 
   appliedCoupons?: AppliedCoupon[]
   loyaltyPointsUsed?: number // Luôn = 0 trong cart (chỉ ghi vào order)
 
   requiresPrescription: boolean // any(items.prescriptionRequired)
 
-  status: string            // 'active' (duy nhất 1 trạng thái được dùng)
+  status: string // 'active' (duy nhất 1 trạng thái được dùng)
   abandonmentReason?: string
 
   createdAt: Date
   updatedAt: Date
   lastActivityAt: Date
-  expiresAt: Date           // createdAt + 7 ngày
+  expiresAt: Date // createdAt + 7 ngày
 }
 ```
 
 **Indexes:** Không thấy index explicit trong code. Cần có `userId` index và `sessionId` index để query nhanh.
 
 **Lưu ý quan trọng:**
+
 - 1 user chỉ có 1 Cart document (tìm bằng userId hoặc sessionId).
 - Cart không bị xóa khi checkout — chỉ bị xóa items hoặc xóa coupons.
 - Cart **không bao giờ** có `loyaltyDiscount` thực sự (field tồn tại nhưng = 0). Loyalty áp dụng chỉ tại lúc tạo Order.
@@ -187,55 +189,71 @@ interface Cart {
 interface OrderItem {
   productId: ObjectId
   categoryId?: ObjectId
-  name: string; sku: string; unit: string
+  name: string
+  sku: string
+  unit: string
   quantity: number
-  unitPrice: number         // Snapshot giá tại thời điểm đặt hàng
+  unitPrice: number // Snapshot giá tại thời điểm đặt hàng
   originalUnitPrice?: number
   totalPrice: number
   campaignId?: ObjectId
   prescriptionRequired: boolean
   image?: string
   // Phân bổ chiết khấu (phục vụ báo cáo & refund một phần)
-  discountAllocation?: number    // Tổng tiền giảm coupon phân bổ cho item này
-  pointsAllocation?: number      // Tiền giảm từ điểm phân bổ cho item này
-  couponAllocations?: {          // Chi tiết từng coupon
-    code: string; type: string; amount: number
+  discountAllocation?: number // Tổng tiền giảm coupon phân bổ cho item này
+  pointsAllocation?: number // Tiền giảm từ điểm phân bổ cho item này
+  couponAllocations?: {
+    // Chi tiết từng coupon
+    code: string
+    type: string
+    amount: number
   }[]
 }
 
 interface Order {
   _id: ObjectId
   userId: ObjectId
-  orderNumber: string       // "ORD-{timestamp}-{random3digits}"
+  orderNumber: string // "ORD-{timestamp}-{random3digits}"
 
   items: OrderItem[]
   itemCount: number
 
   shippingAddress: {
-    firstName, lastName, phone, email,
-    address, ward, district, province, postalCode?
+    firstName
+    lastName
+    phone
+    email
+    address
+    ward
+    district
+    province
+    postalCode?
   }
 
-  paymentMethod: string     // 'cod' | 'bank_transfer' | 'vnpay' | 'payos' ...
-  paymentStatus: string     // 'pending' | 'paid' | 'failed' | 'refunded'
-  orderStatus: string       // 'pending' → 'confirmed' → 'processing' → 'shipped' → 'delivered' → 'cancelled' | 'returned'
+  paymentMethod: string // 'cod' | 'bank_transfer' | 'vnpay' | 'payos' ...
+  paymentStatus: string // 'pending' | 'paid' | 'failed' | 'refunded'
+  orderStatus: string // 'pending' → 'confirmed' → 'processing' → 'shipped' → 'delivered' → 'cancelled' | 'returned'
 
   subtotal: number
-  taxAmount: number         // = 0
+  taxAmount: number // = 0
   shippingFee: number
-  discountAmount: number    // Tổng coupon discount (trừ free_shipping)
-  totalAmount: number       // = subtotal + shippingFee - discountAmount - pointsRedeemAmount
+  discountAmount: number // Tổng coupon discount (trừ free_shipping)
+  totalAmount: number // = subtotal + shippingFee - discountAmount - pointsRedeemAmount
   appliedCoupons: OrderAppliedCoupon[]
-  shippingDiscountAmount: number  // Số tiền freeship coupon đã giảm
+  shippingDiscountAmount: number // Số tiền freeship coupon đã giảm
 
   notes?: string
   trackingNumber?: string
   estimatedDeliveryDate?: string
 
-  pointsRedeemed?: number       // Số điểm đã đổi
-  pointsRedeemAmount?: number   // Số tiền giảm từ điểm (= pointsRedeemed * 1VNĐ)
+  pointsRedeemed?: number // Số điểm đã đổi
+  pointsRedeemAmount?: number // Số tiền giảm từ điểm (= pointsRedeemed * 1VNĐ)
 
-  createdAt, updatedAt, paidAt?, shippedAt?, deliveredAt?: Date
+  createdAt
+  updatedAt
+  paidAt?
+  shippedAt?
+  deliveredAt?: Date
 }
 ```
 
@@ -250,6 +268,7 @@ pending ──► confirmed ──► processing ──► shipped ──► del
 ```
 
 **Ràng buộc chuyển trạng thái** (xem `assertOrderStatusTransition`):
+
 - Đơn đã `cancelled` → không chuyển trạng thái nào khác.
 - Đơn đã `returned` → không chuyển trạng thái nào khác.
 - Đơn đã `delivered` → chỉ có thể chuyển sang `returned`.
@@ -265,27 +284,28 @@ pending ──► confirmed ──► processing ──► shipped ──► del
 ```typescript
 interface Coupon {
   _id: ObjectId
-  code: string              // Uppercase, unique. VD: "SAVE10"
+  code: string // Uppercase, unique. VD: "SAVE10"
   name: string
   type: 'percentage' | 'fixed_amount' | 'fixed' | 'free_shipping'
-  value: number             // % (0-100) hoặc số VNĐ
+  value: number // % (0-100) hoặc số VNĐ
 
   maxDiscountAmount?: number // Chỉ dùng khi type=percentage
 
-  minOrderAmount: number    // Giá trị đơn tối thiểu (tính trên eligible items)
-  applicableProductIds?: ObjectId[]  // Nếu có → chỉ áp cho sản phẩm trong list
+  minOrderAmount: number // Giá trị đơn tối thiểu (tính trên eligible items)
+  applicableProductIds?: ObjectId[] // Nếu có → chỉ áp cho sản phẩm trong list
   applicableCategoryIds?: ObjectId[] // Hỗ trợ subcategory (path-based matching)
   excludePrescriptionItems?: boolean // Không áp cho thuốc kê đơn
 
-  totalUsageLimit?: number  // null = không giới hạn
-  perUserLimit: number      // Default = 1
+  totalUsageLimit?: number // null = không giới hạn
+  perUserLimit: number // Default = 1
   currentUsageCount: number // Counter tổng
-  userUsageCounts: Record<string, number>  // Counter per-user (atomically managed)
+  userUsageCounts: Record<string, number> // Counter per-user (atomically managed)
 
   isPublic: boolean
-  targetUserIds?: ObjectId[]  // Coupon riêng cho một số user
+  targetUserIds?: ObjectId[] // Coupon riêng cho một số user
 
-  startDate, endDate: Date
+  startDate
+  endDate: Date
   isActive: boolean
   createdBy: ObjectId
 }
@@ -320,12 +340,12 @@ interface CouponRedemption {
 ```typescript
 interface LoyaltyAccount {
   userId: ObjectId
-  pointsBalance: number       // Số điểm hiện có
+  pointsBalance: number // Số điểm hiện có
   totalPointsEarned: number
   totalPointsRedeemed: number
   totalPointsExpired: number
   tier: 'member' | 'silver' | 'gold' | 'platinum'
-  totalSpent: number          // Tổng tiền đã chi (VNĐ) — xét hạng
+  totalSpent: number // Tổng tiền đã chi (VNĐ) — xét hạng
 }
 
 // Tier thresholds (totalSpent):
@@ -341,16 +361,17 @@ interface LoyaltyAccount {
 interface LoyaltyTransaction {
   userId: ObjectId
   type: 'earn' | 'redeem' | 'expire' | 'revoke' | 'adjust'
-  points: number          // Dương = cộng, âm = trừ
-  balanceAfter: number    // Balance sau transaction
+  points: number // Dương = cộng, âm = trừ
+  balanceAfter: number // Balance sau transaction
   orderId?: ObjectId
   description: string
-  expiresAt?: Date        // Chỉ cho type='earn'
+  expiresAt?: Date // Chỉ cho type='earn'
   isExpired: boolean
 }
 ```
 
 **Quy tắc tích điểm:**
+
 - Công thức: `earnedPoints = floor(orderTotal / POINTS_PER_VND) * tierMultiplier`
 - `POINTS_PER_VND` mặc định = 1000 (cấu hình ENV)
 - Ví dụ: Order 500,000đ, tier Gold (1.5x) → `floor(500000/1000) * 1.5 = 750 điểm`
@@ -358,6 +379,7 @@ interface LoyaltyTransaction {
 - Điểm hết hạn sau 365 ngày (cấu hình ENV)
 
 **Quy đổi điểm:**
+
 - 1 điểm = 1 VNĐ (khi đổi)
 - Tối đa được đổi: `min(pointsBalance, floor(subtotal * maxRedeemRatio))` (default ratio = 0.3 = 30%)
 - Tối thiểu để đổi: `POINTS_MIN_REDEEM` = 10,000 điểm
@@ -404,6 +426,7 @@ Campaign (campaigns)
 ### 3.1. CartService (`src/services/carts.services.ts`)
 
 #### `buildCartQuery(userId?, sessionId?)`
+
 - **Input:** userId hoặc sessionId
 - **Output:** MongoDB query object `{userId}` hoặc `{sessionId}`
 - **Logic:** Helper nội bộ, ưu tiên userId.
@@ -411,6 +434,7 @@ Campaign (campaigns)
 ---
 
 #### `getCart(userId?, sessionId?)`
+
 - **Input:** userId (optional), sessionId (optional)
 - **Output:** `{ cart: CartDocument, sessionId: string }`
 - **Business Rules:**
@@ -427,6 +451,7 @@ Campaign (campaigns)
 ---
 
 #### `refreshCampaignPrices(cart)` — **Private**
+
 - **Input:** Cart document
 - **Output:** Cart document với giá đã refresh
 - **Logic:**
@@ -443,6 +468,7 @@ Campaign (campaigns)
 ---
 
 #### `addItemToCart(productId, quantity, userId?, sessionId?, requestedUnit?, requestedPrice?)`
+
 - **Input:** productId, quantity, userId (opt), sessionId (opt), requestedUnit (opt), requestedPrice (bị ignore)
 - **Output:** Updated `Cart` instance
 - **Business Rules:**
@@ -462,6 +488,7 @@ Campaign (campaigns)
 ---
 
 #### `updateItemQuantity(productId, quantity, userId?, sessionId?, unit?)`
+
 - **Input:** productId, quantity (1-10), userId/sessionId, unit (optional để xác định đúng item)
 - **Output:** Updated `Cart` instance
 - **Validation:**
@@ -473,6 +500,7 @@ Campaign (campaigns)
 ---
 
 #### `updateItemUnit(productId, unit, userId?, sessionId?, currentUnit?)`
+
 - **Input:** productId, unit mới, userId/sessionId, currentUnit (đơn vị hiện tại để xác định item)
 - **Business Rules:**
   1. Kiểm tra `unit` có trong `product.priceVariants` không → throw `400` nếu không hợp lệ.
@@ -483,6 +511,7 @@ Campaign (campaigns)
 ---
 
 #### `removeItemFromCart(productId, userId?, sessionId?, unit?)`
+
 - **Logic:**
   - Nếu `unit` được truyền → xóa item có `(productId, unit)`.
   - Nếu không có `unit` → xóa tất cả items có `productId` đó.
@@ -491,16 +520,19 @@ Campaign (campaigns)
 ---
 
 #### `clearCart(userId?, sessionId?)`
+
 - **Logic:** Reset `items = []`, `itemCount = 0`, `subtotal = 0`, `totalAmount = 0`, xóa `appliedCoupons`, reset `discountAmount = 0`, `loyaltyDiscount = 0`.
 
 ---
 
 #### `verifyStockAvailability(cartItems)`
+
 - **Logic:** Duyệt từng item, kiểm tra `product.stockQuantity >= item.quantity * quantityPerUnit`. Throw `400` nếu không đủ.
 
 ---
 
 #### `getCheckoutData(userId?, sessionId?)`
+
 - **Output:** Cart với `items` được populate thêm thông tin product (`name`, `sku`, `featuredImage`, `requiresPrescription`).
 
 ---
@@ -510,6 +542,7 @@ Campaign (campaigns)
 #### `createOrder(userId, payload)` — Hàm Quan Trọng Nhất
 
 **Input:**
+
 ```typescript
 {
   shippingAddress,           // Địa chỉ giao hàng đầy đủ
@@ -519,8 +552,8 @@ Campaign (campaigns)
   req,                       // Express request object (cần cho VNPay IP)
   selectedItems?,            // Chỉ checkout các item được tick
   isDirectBuy?,              // true = Mua ngay, false = từ cart
-  shippingMethod?,           // 'standard' | 'fast' | 'express'
-  shippingFee?,              // FE truyền lên — backend ưu tiên nếu hợp lệ
+  shippingMethod?,           // 'standard' | 'fast' | 'express' | 'ghn:<serviceId>' | 'ghtk:<transport>'
+  shippingFee?,              // FE có thể preview, backend luôn tự quote lại và không trust field này
   estimatedDeliveryDate?,
   couponCodes?,              // Cho direct buy
   pointsToRedeem?            // Số điểm muốn đổi
@@ -605,6 +638,7 @@ await db.products.updateOne(
 - Notify Pharmacists: Chuẩn bị thuốc.
 
 **Output:**
+
 ```typescript
 { order: Order, orderId: ObjectId, paymentUrl?: string }
 ```
@@ -614,6 +648,7 @@ await db.products.updateOne(
 #### `updateOrderStatus(orderId, newStatus, trackingNumber?, notes?)`
 
 **Business Rules:**
+
 1. Validate transition (xem `assertOrderStatusTransition`).
 2. `newStatus === 'shipped'` → ghi `trackingNumber`, `shippedAt`.
 3. `newStatus === 'delivered'`:
@@ -631,6 +666,7 @@ await db.products.updateOne(
 #### `updatePaymentStatus(orderId, newStatus)`
 
 **Business Rules:**
+
 1. Không update nếu status không thay đổi (idempotency).
 2. Không `paid` nếu order đã terminal.
 3. Không `failed` nếu đã paid/delivered/returned.
@@ -647,7 +683,9 @@ await db.products.updateOne(
 ### 3.3. CouponService (`src/services/coupons.services.ts`)
 
 #### `validateCoupon(code, userId, cartSubtotal, hasPrescriptionItems, items?)`
+
 **Các bước validation theo thứ tự:**
+
 1. Tìm coupon (`isActive: true`).
 2. Kiểm tra thời gian (`startDate <= now <= endDate`).
 3. Tính `eligibleSubtotal` — subtotal chỉ từ items thuộc `applicableProductIds` hoặc `applicableCategoryIds` (bao gồm subcategories theo path). Nếu coupon không có target → áp toàn bộ cart.
@@ -666,7 +704,9 @@ await db.products.updateOne(
 ---
 
 #### `applyCouponToCart(code, userId, sessionId?, selectedSubtotal?, selectedItems?)`
+
 **Stacking Rules:**
+
 - Tối đa **1 discount coupon** (percentage/fixed) + **1 freeship coupon** — không thể stack 2 discount.
 - Nếu đã có freeship + thêm freeship khác → reject.
 - Nếu đã có discount + thêm discount khác → reject.
@@ -674,6 +714,7 @@ await db.products.updateOne(
 ---
 
 #### `recordCouponRedemption(couponCode, userId, orderId, discountAmount)` — **Atomic**
+
 - Kiểm tra idempotency (đã có redemption cho orderId chưa → skip).
 - `findOneAndUpdate` với condition kiểm tra `totalUsageLimit` và `perUserLimit` → increment `currentUsageCount` và `userUsageCounts[userId]`.
 - Nếu condition fail (`null` returned) → throw `409 CONFLICT` (coupon vừa hết trong lúc race).
@@ -683,6 +724,7 @@ await db.products.updateOne(
 ---
 
 #### `releaseCouponRedemptionsForOrder(orderId)` — **Idempotent**
+
 - Tìm tất cả redemptions của orderId → decrement counters (dùng `$max([0, ...])` để không âm) → xóa redemption records.
 
 ---
@@ -690,6 +732,7 @@ await db.products.updateOne(
 ### 3.4. LoyaltyService (`src/services/loyalty.services.ts`)
 
 #### `redeemPoints(userId, orderId, pointsToRedeem, orderSubtotal, orderNumber)` — **Atomic**
+
 - Kiểm tra idempotency theo (userId, orderId, type='redeem').
 - Validate: `pointsToRedeem >= minRedeem` (default 10,000).
 - Validate: `redeemAmount <= floor(orderSubtotal * maxRedeemRatio)` (default 30%).
@@ -698,12 +741,14 @@ await db.products.updateOne(
 - Nếu insert fail → compensate (hoàn lại balance).
 
 #### `earnPointsFromOrder(userId, orderId, orderTotal, orderNumber)`
+
 - Idempotency: check đã có earn transaction cho orderId chưa.
 - Tính điểm: `floor(orderTotal / pointsPerVnd) * tierMultiplier`.
 - Cập nhật `totalSpent`, recalculate tier.
 - Insert `LoyaltyTransaction` (type='earn', expiresAt = +365 ngày).
 
 #### `refundRedeemedPointsForOrder(userId, orderId, orderNumber)` — **Idempotent**
+
 - Tìm transaction redeem cho orderId → hoàn điểm.
 - Kiểm tra không hoàn 2 lần (check type='adjust' với description 'Hoàn điểm đã đổi').
 
@@ -722,6 +767,7 @@ interface PaymentProvider {
 ```
 
 **Registered Providers:**
+
 - `vnpay` → `VNPayProvider`
 - `bank_transfer` → `VNPayProvider` (alias)
 - `payos` → `PayOSProvider`
@@ -731,12 +777,14 @@ interface PaymentProvider {
 #### `VNPayProvider`
 
 **`createPaymentUrl(order, req)`:**
+
 - Params: `vnp_TxnRef = order._id.toString()` (dùng MongoID làm transaction reference).
 - `vnp_Amount = order.totalAmount * 100` (VNPay dùng đơn vị 1/100 VNĐ).
 - Ký HMAC-SHA512 với `VNP_HASH_SECRET`.
 - IP từ `X-Forwarded-For` header hoặc `req.connection.remoteAddress`.
 
 **`verifyReturn(params)` / `verifyIpn(params)`:**
+
 - Xóa `vnp_SecureHash` + `vnp_SecureHashType` → sort params → tính lại HMAC-SHA512 → so sánh.
 - `vnp_ResponseCode === '00'` → success.
 - `orderId` = `vnp_TxnRef` = MongoDB ObjectId.
@@ -746,16 +794,19 @@ interface PaymentProvider {
 #### `PayOSProvider`
 
 **`createPaymentUrl(order, req)`:**
+
 - `orderCode = Number(lastSixDigitsOfTimestamp + random3)` — unique numeric ID (PayOS yêu cầu số).
 - `description = "DH {order.orderNumber}"` (cắt tối đa 25 ký tự).
 - `returnUrl/cancelUrl` trỏ về **backend** trước (`/payment/payos/return?orderId=...`), không trỏ thẳng về FE.
 - Dùng `@payos/node` SDK: `payOS.createPaymentLink(paymentData)`.
 
 **`verifyReturn(params)`:**
+
 - Đọc `status === 'PAID' || code === '00'` từ PayOS redirect params.
 - `orderId` lấy từ custom query param `orderId` mà backend tự append vào returnUrl.
 
 **`verifyIpn(body)`:**
+
 - Dùng `payOS.verifyPaymentWebhookData(body)` của SDK → verify signature.
 - Extract orderNumber từ `description` ("DH {orderNumber}") → trả về qua `transactionId`.
 - `orderId` = '' (rỗng) — controller phải lookup bằng `transactionId` (orderNumber).
@@ -765,12 +816,15 @@ interface PaymentProvider {
 ### 3.6. Payment Controllers (`src/controllers/payment.controllers.ts`)
 
 #### `handlePostPaymentSuccess(orderId)` — **Private Helper**
+
 Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
+
 1. Fetch order.
 2. Remove purchased items từ cart (item by item theo unit).
 3. Send order confirmation email.
 
 #### `vnpayReturnController` / `payOSReturnController` — **Return URL**
+
 - Dùng cho user redirect (browser).
 - **Idempotency check:** `existingOrder.paymentStatus !== 'paid'` trước khi update.
 - Nếu success → `updatePaymentStatus('paid')` + `handlePostPaymentSuccess()`.
@@ -778,11 +832,13 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 - Redirect về `CLIENT_URL/order/success?orderId=...&paymentStatus=success|failed`.
 
 #### `vnpayIpnController` — **Server-to-Server IPN**
+
 - VNPay gọi server-to-server. Trả về JSON `{ RspCode: '00' }` để confirm.
 - Idempotency check.
 - Không gọi `handlePostPaymentSuccess` ở đây (email/cart clear sẽ do Return URL xử lý).
 
 #### `payOSIpnController` — **Webhook**
+
 - PayOS POST webhook.
 - Lookup order bằng `result.transactionId` (= orderNumber) nếu `orderId` rỗng.
 - Gọi `handlePostPaymentSuccess()`.
@@ -793,71 +849,74 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 
 ### 4.1. Cart Endpoints
 
-| Method | Path | Auth | Mô tả |
-|--------|------|------|-------|
-| GET | `/cart` | Optional | Lấy giỏ hàng |
-| POST | `/cart/add` | Optional | Thêm sản phẩm |
-| PUT | `/cart/update/:productId` | Optional | Cập nhật số lượng |
-| PUT | `/cart/update-unit/:productId` | Optional | Đổi đơn vị |
-| DELETE | `/cart/remove/:productId` | Optional | Xóa sản phẩm |
-| DELETE | `/cart/clear` | Optional | Xóa toàn bộ giỏ |
-| GET | `/cart/checkout` | Optional | Lấy checkout data |
+| Method | Path                           | Auth     | Mô tả             |
+| ------ | ------------------------------ | -------- | ----------------- |
+| GET    | `/cart`                        | Optional | Lấy giỏ hàng      |
+| POST   | `/cart/add`                    | Optional | Thêm sản phẩm     |
+| PUT    | `/cart/update/:productId`      | Optional | Cập nhật số lượng |
+| PUT    | `/cart/update-unit/:productId` | Optional | Đổi đơn vị        |
+| DELETE | `/cart/remove/:productId`      | Optional | Xóa sản phẩm      |
+| DELETE | `/cart/clear`                  | Optional | Xóa toàn bộ giỏ   |
+| GET    | `/cart/checkout`               | Optional | Lấy checkout data |
 
 **Auth "Optional":** Nếu có Bearer token hợp lệ → set `req.decoded_authorization`. Token sai/không có → guest mode (dùng `req.cookies.sessionId` hoặc `x-session-id` header).
 
 **Response Pattern:**
+
 ```json
 {
   "message": "...",
-  "result": { /* Cart object */ }
+  "result": {
+    /* Cart object */
+  }
 }
 ```
 
 **Validation Chi tiết:**
 
-| Field | Rule |
-|-------|------|
+| Field                    | Rule                   |
+| ------------------------ | ---------------------- |
 | `productId` (body/param) | Valid MongoDB ObjectId |
-| `quantity` | Integer, min=1, max=10 |
+| `quantity`               | Integer, min=1, max=10 |
 
 ---
 
 ### 4.2. Order Endpoints
 
-| Method | Path | Auth | Mô tả |
-|--------|------|------|-------|
-| POST | `/orders` | **Required + Verified** | Tạo đơn hàng |
-| GET | `/orders` | Required + Verified | Danh sách đơn của user |
-| GET | `/orders/:orderId` | Required + Verified | Chi tiết đơn |
-| PUT | `/orders/:orderId/status` | Required + Verified | Cập nhật trạng thái |
-| PUT | `/orders/:orderId/payment` | Required + Verified | Cập nhật payment status |
-| POST | `/orders/:orderId/payment-url` | Required + Verified | Lấy payment URL (retry) |
-| GET | `/orders/admin/all` | Required + Verified | Tất cả đơn (Admin) |
-| GET | `/orders/admin/stats` | Required + Verified | Thống kê đơn (Admin) |
+| Method | Path                           | Auth                    | Mô tả                   |
+| ------ | ------------------------------ | ----------------------- | ----------------------- |
+| POST   | `/orders`                      | **Required + Verified** | Tạo đơn hàng            |
+| GET    | `/orders`                      | Required + Verified     | Danh sách đơn của user  |
+| GET    | `/orders/:orderId`             | Required + Verified     | Chi tiết đơn            |
+| PUT    | `/orders/:orderId/status`      | Required + Verified     | Cập nhật trạng thái     |
+| PUT    | `/orders/:orderId/payment`     | Required + Verified     | Cập nhật payment status |
+| POST   | `/orders/:orderId/payment-url` | Required + Verified     | Lấy payment URL (retry) |
+| GET    | `/orders/admin/all`            | Required + Verified     | Tất cả đơn (Admin)      |
+| GET    | `/orders/admin/stats`          | Required + Verified     | Thống kê đơn (Admin)    |
 
 > **⚠️ Lưu ý:** Route `/orders/admin/all` và `/orders/admin/stats` không có middleware kiểm tra role Admin thêm — chỉ cần verified user token. Đây là **security risk** (xem mục 8).
 
 **Validation `createOrderValidator`:**
 
-| Field | Rule |
-|-------|------|
-| `items` | Optional array (nếu checkout từ cart) |
-| `isDirectBuy` | Optional boolean |
+| Field             | Rule                                                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `items`           | Optional array (nếu checkout từ cart)                                                                    |
+| `isDirectBuy`     | Optional boolean                                                                                         |
 | `shippingAddress` | Object với: `firstName*`, `lastName*`, `phone*`, `email*`, `address*`, `ward*`, `district*`, `province*` |
-| `paymentMethod` | Bắt buộc, phải thuộc: `cod`, `bank_transfer`, `vnpay`, `payos`, `cash`, `credit_card_pos` |
-| `shippingMethod` | Optional string (validation lỏng — không strict enum check) |
-| `notes` | Optional string, max 500 chars |
+| `paymentMethod`   | Bắt buộc, phải thuộc: `cod`, `bank_transfer`, `vnpay`, `payos`, `cash`, `credit_card_pos`                |
+| `shippingMethod`  | Optional string: enum cũ hoặc carrier method dạng `ghn:<serviceId>`, `ghtk:<transport>`                  |
+| `notes`           | Optional string, max 500 chars                                                                           |
 
 ---
 
 ### 4.3. Payment Endpoints
 
-| Method | Path | Auth | Mô tả |
-|--------|------|------|-------|
-| GET | `/payment/vnpay-return` | None | VNPay Return URL |
-| GET | `/payment/vnpay-ipn` | None | VNPay IPN (Server callback) |
-| GET | `/payment/payos/return` | None | PayOS Return URL |
-| POST | `/payment/payos/ipn` | None | PayOS Webhook |
+| Method | Path                    | Auth | Mô tả                       |
+| ------ | ----------------------- | ---- | --------------------------- |
+| GET    | `/payment/vnpay-return` | None | VNPay Return URL            |
+| GET    | `/payment/vnpay-ipn`    | None | VNPay IPN (Server callback) |
+| GET    | `/payment/payos/return` | None | PayOS Return URL            |
+| POST   | `/payment/payos/ipn`    | None | PayOS Webhook               |
 
 **Không có auth** — các endpoint này cần public để payment gateway gọi vào.
 
@@ -865,12 +924,12 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 
 ### 4.4. Error Codes
 
-| HTTP Status | Tình huống |
-|-------------|------------|
-| 400 | Số lượng ngoài 1-10, stock không đủ, đơn vị không hợp lệ, coupon hết hạn/không đủ điều kiện, điểm không đủ/chưa đến min |
-| 404 | Product/Cart/Order không tồn tại |
-| 409 | Race condition — stock vừa hết hoặc coupon vừa hết lượt |
-| 401/403 | Token thiếu/hết hạn/không verified |
+| HTTP Status | Tình huống                                                                                                              |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 400         | Số lượng ngoài 1-10, stock không đủ, đơn vị không hợp lệ, coupon hết hạn/không đủ điều kiện, điểm không đủ/chưa đến min |
+| 404         | Product/Cart/Order không tồn tại                                                                                        |
+| 409         | Race condition — stock vừa hết hoặc coupon vừa hết lượt                                                                 |
+| 401/403     | Token thiếu/hết hạn/không verified                                                                                      |
 
 ---
 
@@ -881,6 +940,7 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 **Pattern:** React `useReducer` + Context API (không dùng Redux).
 
 **State:**
+
 ```typescript
 {
   cart: Cart | null,
@@ -891,14 +951,17 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 ```
 
 **Selection Key:** `createSelectionKey(productId, unit?) = unit ? "${productId}-${unit}" : productId`
+
 - Cho phép cùng product với unit khác nhau được xử lý độc lập.
 
 **Persistence:**
+
 - `selectedItems` → `sessionStorage.medispace_selected_items` (mảng JSON)
 - `wishlist` → `localStorage.medispace_wishlist` (mảng JSON)
 - `cart` → fetched từ API, không persist local
 
 **Auth-aware Loading:**
+
 - Khi mount: Check `localStorage.medispace_access_token`. Nếu không có → `cart = null`.
 - Lắng nghe `storage` event (cross-tab) và custom `auth-changed` event → reload cart.
 
@@ -920,6 +983,7 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 ### 5.2. ShoppingCartPage (`src/components/cart/ShoppingCartPage.tsx`)
 
 **Features:**
+
 - Checkbox select per item và select-all.
 - Quantity +/- buttons (min=1, max=10 hard-coded UI).
 - Unit dropdown (chỉ hiện nếu product có > 1 priceVariant).
@@ -933,6 +997,7 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 **Guard:** Validate `selectedItems` khi cart thay đổi — loại bỏ selections không còn trong cart.
 
 **Checkout Button:**
+
 - Nếu chưa login → toast + redirect `/login?returnUrl=/cart/checkout`.
 - Nếu đã login → navigate `/cart/checkout`.
 
@@ -941,30 +1006,37 @@ Gọi khi thanh toán thành công (dùng bởi cả VNPay lẫn PayOS):
 ### 5.3. CheckoutPage (`src/components/cart/CheckoutPage.tsx`)
 
 **Modes:**
+
 1. **Normal mode** — checkout từ cart với `selectedItems`.
 2. **Buy Now mode** — `?mode=buy_now&productId=...&quantity=...&unit=...`.
 
 **Data Loading:**
+
 - `authService.getMe()` → thông tin user.
 - `addressService.getAddresses()` → danh sách địa chỉ.
 
 **Shipping:**
-- GHN integration: Nếu địa chỉ có `districtId` + `wardCode` → gọi `ghnService.getShippingOptions()` → hiển thị các option thực từ GHN.
-- Fallback: 3 options mặc định (30k/45k/60k).
-- Auto-select option đầu tiên từ GHN.
+
+- Multi-carrier integration: FE gọi `POST /shipping/rates` để lấy phí thật từ các provider đang bật.
+- Provider hiện hỗ trợ: `ghn:<serviceId>`, `ghtk:road`, `ghtk:fly`.
+- Fallback: 3 options mặc định (30k/45k/60k) nếu carrier API không trả option.
+- Auto-select option rẻ nhất từ danh sách rate đã sort.
 - **Freeship:** `subtotal >= 300,000đ || freeShippingFromCoupon → shippingFee = 0`.
 
 **Pricing:**
+
 ```
 total = max(0, subtotal - couponDiscount - pointsDiscount + shippingFee)
 pointsRedeemBaseAmount = max(0, subtotal - couponDiscount)
 ```
 
 **Guard:**
+
 - `useEffect` redirect về `/cart` nếu không có selectedItems (trong normal mode).
 - Guard bị tắt ngay khi `orderPlaced = true` (sau khi đặt hàng thành công).
 
 **`handlePlaceOrder()`:**
+
 1. Validate user, selectedItems, selectedAddress.
 2. Map payment method: `vnpay → 'vnpay'`, `payos → 'payos'`, `cod → 'cod'`.
 3. Gọi `orderService.createOrder()`.
@@ -977,6 +1049,7 @@ pointsRedeemBaseAmount = max(0, subtotal - couponDiscount)
 ### 5.4. OrderService FE (`src/services/orderService.ts`)
 
 **Key design:** `transformOrderFromBackend(backendOrder)` — map Backend schema → FE type.
+
 - `_id` → `id`
 - `orderStatus` → `status`
 - `discountAmount` → `discount`
@@ -987,18 +1060,61 @@ pointsRedeemBaseAmount = max(0, subtotal - couponDiscount)
 
 ### 5.5. Order Pages (`src/components/order/`)
 
-| Component | Route | Mô tả |
-|-----------|-------|-------|
-| `OrdersPage` | `/account/orders` | Danh sách đơn hàng với tabs |
-| `OrderDetailPage` | `/order/:id` | Chi tiết đơn, timeline status |
-| `OrderSuccessPage` | `/order/success?orderId=...&paymentStatus=...` | Thành công / Thất bại |
-| `OrderFailurePage` | `/order/failure` | Trang thất bại riêng |
+| Component          | Route                                          | Mô tả                         |
+| ------------------ | ---------------------------------------------- | ----------------------------- |
+| `OrdersPage`       | `/account/orders`                              | Danh sách đơn hàng với tabs   |
+| `OrderDetailPage`  | `/order/:id`                                   | Chi tiết đơn, timeline status |
+| `OrderSuccessPage` | `/order/success?orderId=...&paymentStatus=...` | Thành công / Thất bại         |
+| `OrderFailurePage` | `/order/failure`                               | Trang thất bại riêng          |
 
 `OrderSuccessPage` đọc `paymentStatus` từ query params (backend redirect về).
 
 ---
 
 ## 6. Tích hợp Thanh toán
+
+### 6.0. Vận chuyển đa nhà cung cấp
+
+Checkout dùng endpoint tổng hợp `POST /shipping/rates`. Backend gọi song song provider vận chuyển thật và chuẩn hóa kết quả về cùng format. Khi tạo order, backend quote lại phí theo `shippingMethod` đã chọn để không tin giá từ frontend.
+
+**Provider đang hỗ trợ:**
+
+- `ghn:<serviceId>` — GHN real-time rate.
+- `ghtk:road` — Giao Hàng Tiết Kiệm đường bộ.
+- `ghtk:fly` — Giao Hàng Tiết Kiệm tuyến bay.
+- `ahamove:<serviceId>` — Ahamove real-time estimate, ví dụ `ahamove:BIKE` hoặc `ahamove:ECO`.
+
+**Biến môi trường GHTK:**
+
+```env
+GHTK_API_URL=https://services.giaohangtietkiem.vn
+GHTK_TOKEN=your_ghtk_token
+GHTK_CLIENT_SOURCE=MediSpace
+GHTK_PICK_ADDRESS=...
+GHTK_PICK_WARD=...
+GHTK_PICK_DISTRICT=...
+GHTK_PICK_PROVINCE=...
+```
+
+Nếu `GHTK_TOKEN` hoặc địa chỉ lấy hàng chưa cấu hình, provider GHTK tự bỏ qua và không hiển thị option.
+
+**Biến môi trường Ahamove:**
+
+```env
+AHAMOVE_API_URL=https://partner-apistg.ahamove.com
+AHAMOVE_TOKEN=your_ahamove_token
+AHAMOVE_SERVICES=BIKE,ECO
+AHAMOVE_SAME_PROVINCE_ONLY=true
+AHAMOVE_PICK_NAME=MediSpace
+AHAMOVE_PICK_MOBILE=your_pickup_phone
+AHAMOVE_PICK_ADDRESS=...
+AHAMOVE_PICK_WARD=...
+AHAMOVE_PICK_DISTRICT=...
+AHAMOVE_PICK_PROVINCE=...
+```
+
+Nếu `AHAMOVE_TOKEN` hoặc địa chỉ lấy hàng chưa cấu hình, provider Ahamove tự bỏ qua và không hiển thị option.
+Mặc định Ahamove chỉ hiển thị khi địa chỉ giao cùng tỉnh/thành với kho, để tránh hiện các quote liên tỉnh quá cao trong checkout.
 
 ### 6.1. VNPay
 
@@ -1054,6 +1170,7 @@ Browser redirect ─────────────────────
 ```
 
 **Key Difference vs VNPay:**
+
 - PayOS không embed orderId trong webhook — phải lookup bằng orderNumber từ description.
 - Return URL trỏ về **backend** trước (không trỏ thẳng FE) → backend xử lý rồi redirect.
 - `verifyReturn` không verify signature — chỉ trust params (`status === 'PAID'`).
@@ -1063,6 +1180,7 @@ Browser redirect ─────────────────────
 ### 6.3. Idempotency
 
 Cả Return URL và IPN đều check `order.paymentStatus !== 'paid'` trước khi update. Điều này đảm bảo:
+
 - VNPay gọi IPN nhiều lần → chỉ xử lý lần đầu.
 - Return URL và IPN cùng kích hoạt → chỉ một lần update.
 
@@ -1072,27 +1190,27 @@ Cả Return URL và IPN đều check `order.paymentStatus !== 'paid'` trước k
 
 ### 7.1. Pricing Rules
 
-| Rule | Chi tiết |
-|------|----------|
-| **Backend authoritative** | Backend luôn tính giá từ DB + Campaign. Giá từ FE bị bỏ qua. |
-| **Campaign refresh** | Mỗi lần getCart → refresh giá theo campaign đang active. |
-| **Multi-unit pricing** | Mỗi unit (Viên/Vỉ/Hộp) có giá và `quantityPerUnit` riêng. |
-| **VAT** | Đã gộp vào giá bán (`taxAmount = 0` trong order). |
-| **Freeship** | `subtotal >= 300,000đ → shippingFee = 0`. |
-| **Coupon stacking** | Tối đa 1 discount coupon + 1 freeship coupon. |
-| **Coupon precedence** | Coupon discount tính trước Loyalty points. |
-| **Max points** | `pointsToRedeem <= subtotal - couponDiscount` và `<= 30% subtotal`. |
+| Rule                      | Chi tiết                                                            |
+| ------------------------- | ------------------------------------------------------------------- |
+| **Backend authoritative** | Backend luôn tính giá từ DB + Campaign. Giá từ FE bị bỏ qua.        |
+| **Campaign refresh**      | Mỗi lần getCart → refresh giá theo campaign đang active.            |
+| **Multi-unit pricing**    | Mỗi unit (Viên/Vỉ/Hộp) có giá và `quantityPerUnit` riêng.           |
+| **VAT**                   | Đã gộp vào giá bán (`taxAmount = 0` trong order).                   |
+| **Freeship**              | `subtotal >= 300,000đ → shippingFee = 0`.                           |
+| **Coupon stacking**       | Tối đa 1 discount coupon + 1 freeship coupon.                       |
+| **Coupon precedence**     | Coupon discount tính trước Loyalty points.                          |
+| **Max points**            | `pointsToRedeem <= subtotal - couponDiscount` và `<= 30% subtotal`. |
 
 ### 7.2. Inventory/Stock
 
-| Rule | Chi tiết |
-|------|----------|
-| **Unit conversion** | `stockToDeduct = quantity * quantityPerUnit` |
-| **Stock check timing** | Khi thêm vào cart + khi tạo order. |
-| **Atomic deduction** | `$gte` query trong MongoDB để tránh race condition. |
-| **Rollback** | Nếu stock deduction fail → cancel order + restore coupon + restore points. |
-| **Low stock alert** | `stockQuantity <= 30` sau deduction → notify qua Socket.IO. |
-| **Restore on cancel** | Cancel order (admin) hoặc payment fail → restore stock + coupon + points. |
+| Rule                   | Chi tiết                                                                   |
+| ---------------------- | -------------------------------------------------------------------------- |
+| **Unit conversion**    | `stockToDeduct = quantity * quantityPerUnit`                               |
+| **Stock check timing** | Khi thêm vào cart + khi tạo order.                                         |
+| **Atomic deduction**   | `$gte` query trong MongoDB để tránh race condition.                        |
+| **Rollback**           | Nếu stock deduction fail → cancel order + restore coupon + restore points. |
+| **Low stock alert**    | `stockQuantity <= 30` sau deduction → notify qua Socket.IO.                |
+| **Restore on cancel**  | Cancel order (admin) hoặc payment fail → restore stock + coupon + points.  |
 
 ### 7.3. Order Status Lifecycle
 
@@ -1102,24 +1220,24 @@ pending → confirmed → processing → shipped → delivered
 cancelled                                    returned
 ```
 
-| Transition | Điều kiện |
-|-----------|-----------|
-| `* → cancelled` | Không thể từ `delivered` |
-| `* → returned` | Chỉ từ `delivered` |
-| `cancelled → *` | Không thể |
-| `returned → *` | Không thể |
-| `delivered → *` | Chỉ → `returned` |
+| Transition            | Điều kiện                                          |
+| --------------------- | -------------------------------------------------- |
+| `* → cancelled`       | Không thể từ `delivered`                           |
+| `* → returned`        | Chỉ từ `delivered`                                 |
+| `cancelled → *`       | Không thể                                          |
+| `returned → *`        | Không thể                                          |
+| `delivered → *`       | Chỉ → `returned`                                   |
 | `pending → confirmed` | Auto khi `paymentStatus = 'paid'` (online payment) |
-| COD `delivered` | Auto `paymentStatus = 'paid'` |
+| COD `delivered`       | Auto `paymentStatus = 'paid'`                      |
 
 ### 7.4. Đặc thù Domain Dược phẩm
 
-| Rule | Chi tiết |
-|------|----------|
-| **Thuốc kê đơn** | `requiresPrescription = true` → Coupon có `excludePrescriptionItems` sẽ bị từ chối. |
-| **Giỏ hàng ghi nhận** | `cart.requiresPrescription = any(items.prescriptionRequired)`. |
-| **Pharmacist notification** | Mọi đơn hàng mới → notify pharmacists chuẩn bị thuốc qua Socket.IO. |
-| **Max quantity** | Hard-coded 10 trong cả FE lẫn BE middleware. |
+| Rule                        | Chi tiết                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| **Thuốc kê đơn**            | `requiresPrescription = true` → Coupon có `excludePrescriptionItems` sẽ bị từ chối. |
+| **Giỏ hàng ghi nhận**       | `cart.requiresPrescription = any(items.prescriptionRequired)`.                      |
+| **Pharmacist notification** | Mọi đơn hàng mới → notify pharmacists chuẩn bị thuốc qua Socket.IO.                 |
+| **Max quantity**            | Hard-coded 10 trong cả FE lẫn BE middleware.                                        |
 
 ---
 
@@ -1183,7 +1301,7 @@ Các trường tổng hợp (`itemCount`, `uniqueProductCount`, `subtotal`) đư
 ```typescript
 // ShoppingCartPage.tsx
 for (const key of selectedItems) {
-  const [productId, unit] = key.split('-')  // BUG TIỀM ẨN
+  const [productId, unit] = key.split('-') // BUG TIỀM ẨN
   await removeFromCart(productId, unit)
 }
 ```
@@ -1206,6 +1324,7 @@ Có 2 string literals cho cùng 1 khái niệm. Nên chuẩn hóa về 1 giá tr
 ### 8.8. ℹ️ Không Có Index Explicit
 
 Các collection `carts`, `orders`, `coupons` không có MongoDB index được định nghĩa trong code. Các query như `findOne({ userId })`, `find({ orderStatus: 'pending' })` sẽ full-scan nếu không có index. Cần index:
+
 - `carts`: `{ userId: 1 }`, `{ sessionId: 1 }`, `{ expiresAt: 1 }` (TTL index)
 - `orders`: `{ userId: 1 }`, `{ orderStatus: 1 }`, `{ orderNumber: 1 }`, `{ paymentStatus: 1 }`
 - `coupons`: `{ code: 1 }` (unique), `{ isActive: 1 }`, `{ isPublic: 1 }`
@@ -1236,36 +1355,36 @@ Trong `cartService.updateCartItemUnit`, không truyền `currentUnit`. BE sẽ t
 
 ## Phụ lục: File Reference Map
 
-| File | Mô tả |
-|------|-------|
-| `BE/src/models/schemas/Cart.schema.ts` | Cart model + addItem/removeItem/calculateTotals methods |
-| `BE/src/models/schemas/Order.schema.ts` | Order model + generateOrderNumber + updateStatus methods |
-| `BE/src/models/schemas/Coupon.schema.ts` | Coupon model với tất cả rules |
-| `BE/src/models/schemas/CouponRedemption.schema.ts` | Audit trail coupon usage |
-| `BE/src/models/schemas/LoyaltyAccount.schema.ts` | Tier thresholds + multipliers |
-| `BE/src/models/schemas/LoyaltyTransaction.schema.ts` | Điểm event log |
-| `BE/src/models/schemas/Product.schema.ts` | PriceVariant, stock, requiresPrescription |
-| `BE/src/services/carts.services.ts` | CartService: getCart, addItem, refreshCampaignPrices |
-| `BE/src/services/orders.services.ts` | OrderService: createOrder (main business logic) |
-| `BE/src/services/coupons.services.ts` | Validate, apply, record, release coupons |
-| `BE/src/services/loyalty.services.ts` | Earn, redeem, refund, revoke points |
-| `BE/src/services/payment.services.ts` | Provider pattern factory |
-| `BE/src/services/payment/payment.interface.ts` | PaymentProvider interface |
-| `BE/src/services/payment/vnpay.provider.ts` | VNPay HMAC-SHA512 integration |
-| `BE/src/services/payment/payos.provider.ts` | PayOS SDK integration |
-| `BE/src/controllers/carts.controllers.ts` | HTTP handlers cho cart |
-| `BE/src/controllers/orders.controllers.ts` | HTTP handlers cho orders |
-| `BE/src/controllers/payment.controllers.ts` | Return + IPN handlers, handlePostPaymentSuccess |
-| `BE/src/routes/carts.routes.ts` | Cart router |
-| `BE/src/routes/orders.routes.ts` | Orders router |
-| `BE/src/routes/payment.routes.ts` | Payment callback routes |
-| `BE/src/middlewares/carts.middlewares.ts` | optionalAuth, addToCartValidator |
-| `BE/src/middlewares/orders.middlewares.ts` | createOrderValidator, shippingAddress validation |
-| `BE/src/constants/enum.ts` | PaymentMethod, ShippingMethod, OrderStatus enums |
-| `FE/src/contexts/CartContext.tsx` | Cart global state (useReducer + Context) |
-| `FE/src/services/cartService.ts` | Cart API client |
-| `FE/src/services/orderService.ts` | Order API client + transformOrderFromBackend |
-| `FE/src/services/ghnService.ts` | GHN shipping fee/options API client |
-| `FE/src/components/cart/ShoppingCartPage.tsx` | Cart UI |
-| `FE/src/components/cart/CheckoutPage.tsx` | Checkout form + order placement |
-| `FE/src/components/order/OrderSuccessPage.tsx` | Payment result page |
+| File                                                 | Mô tả                                                    |
+| ---------------------------------------------------- | -------------------------------------------------------- |
+| `BE/src/models/schemas/Cart.schema.ts`               | Cart model + addItem/removeItem/calculateTotals methods  |
+| `BE/src/models/schemas/Order.schema.ts`              | Order model + generateOrderNumber + updateStatus methods |
+| `BE/src/models/schemas/Coupon.schema.ts`             | Coupon model với tất cả rules                            |
+| `BE/src/models/schemas/CouponRedemption.schema.ts`   | Audit trail coupon usage                                 |
+| `BE/src/models/schemas/LoyaltyAccount.schema.ts`     | Tier thresholds + multipliers                            |
+| `BE/src/models/schemas/LoyaltyTransaction.schema.ts` | Điểm event log                                           |
+| `BE/src/models/schemas/Product.schema.ts`            | PriceVariant, stock, requiresPrescription                |
+| `BE/src/services/carts.services.ts`                  | CartService: getCart, addItem, refreshCampaignPrices     |
+| `BE/src/services/orders.services.ts`                 | OrderService: createOrder (main business logic)          |
+| `BE/src/services/coupons.services.ts`                | Validate, apply, record, release coupons                 |
+| `BE/src/services/loyalty.services.ts`                | Earn, redeem, refund, revoke points                      |
+| `BE/src/services/payment.services.ts`                | Provider pattern factory                                 |
+| `BE/src/services/payment/payment.interface.ts`       | PaymentProvider interface                                |
+| `BE/src/services/payment/vnpay.provider.ts`          | VNPay HMAC-SHA512 integration                            |
+| `BE/src/services/payment/payos.provider.ts`          | PayOS SDK integration                                    |
+| `BE/src/controllers/carts.controllers.ts`            | HTTP handlers cho cart                                   |
+| `BE/src/controllers/orders.controllers.ts`           | HTTP handlers cho orders                                 |
+| `BE/src/controllers/payment.controllers.ts`          | Return + IPN handlers, handlePostPaymentSuccess          |
+| `BE/src/routes/carts.routes.ts`                      | Cart router                                              |
+| `BE/src/routes/orders.routes.ts`                     | Orders router                                            |
+| `BE/src/routes/payment.routes.ts`                    | Payment callback routes                                  |
+| `BE/src/middlewares/carts.middlewares.ts`            | optionalAuth, addToCartValidator                         |
+| `BE/src/middlewares/orders.middlewares.ts`           | createOrderValidator, shippingAddress validation         |
+| `BE/src/constants/enum.ts`                           | PaymentMethod, ShippingMethod, OrderStatus enums         |
+| `FE/src/contexts/CartContext.tsx`                    | Cart global state (useReducer + Context)                 |
+| `FE/src/services/cartService.ts`                     | Cart API client                                          |
+| `FE/src/services/orderService.ts`                    | Order API client + transformOrderFromBackend             |
+| `FE/src/services/ghnService.ts`                      | GHN shipping fee/options API client                      |
+| `FE/src/components/cart/ShoppingCartPage.tsx`        | Cart UI                                                  |
+| `FE/src/components/cart/CheckoutPage.tsx`            | Checkout form + order placement                          |
+| `FE/src/components/order/OrderSuccessPage.tsx`       | Payment result page                                      |
