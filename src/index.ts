@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser'
 import databaseService from './services/database.services'
 import cleanupService from './services/cleanup.services'
 import aiModerationService from './services/aiModeration.services'
+import schedulerService from './services/scheduler.services'
 import { config } from 'dotenv'
 import usersRouter from './routes/users.routes'
 import categoriesRouter from './routes/categories.routes'
@@ -128,6 +129,9 @@ const httpServer = createServer(app)
 
 // Initialize Socket.IO for chat
 initChatSocket(httpServer)
+schedulerService.start().catch((error) => {
+  console.error('[Scheduler] Failed to start scheduler:', error)
+})
 
 const port = Number(process.env.PORT) || 8000
 httpServer.listen(port, '0.0.0.0', () => {

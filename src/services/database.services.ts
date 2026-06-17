@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection } from 'mongodb'
+import { MongoClient, Db, Collection, ClientSession, TransactionOptions } from 'mongodb'
 import { config } from 'dotenv'
 import User from '~/models/schemas/User.schema'
 import RefreshToken from '~/models/schemas/RefreshToken.schema'
@@ -54,6 +54,22 @@ class DatabaseService {
     } catch (error) {
       console.error('❌ MongoDB connection failed:', error)
       process.exit(1)
+    }
+  }
+
+  async withTransaction<T>(callback: (session?: ClientSession) => Promise<T>, options?: TransactionOptions): Promise<T> {
+    const session = this.client.startSession()
+    try {
+      return await session.withTransaction(() => callback(session), options)
+    } catch (error: any) {
+      const message = String(error?.message || '')
+      if (message.includes('Transaction numbers are only allowed') || message.includes('replica set member or mongos')) {
+        console.warn('[Database] MongoDB transactions unavailable; running operation without transaction')
+        return callback(undefined)
+      }
+      throw error
+    } finally {
+      await session.endSession()
     }
   }
 
@@ -190,6 +206,19 @@ class DatabaseService {
       await safeCreateIndex(this.moderationAiJobs, { status: 1, lockedUntil: 1, createdAt: 1 })
       await safeCreateIndex(this.moderationAiJobs, { messageId: 1, promptVersion: 1 }, { unique: true })
 
+      await safeCreateIndex(this.communityVideoEvents, { roomId: 1, status: 1, scheduledStartAt: 1 })
+      await safeCreateIndex(this.communityVideoEvents, { visibility: 1, status: 1, scheduledStartAt: 1 })
+      await safeCreateIndex(this.communityVideoEvents, { hostIds: 1, scheduledStartAt: -1 })
+      await safeCreateIndex(this.communityVideoEvents, { status: 1, scheduledStartAt: 1, 'reminders.fifteenMinutesSentAt': 1 })
+
+      await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, userId: 1 }, { unique: true })
+      await safeCreateIndex(this.communityVideoEventRegistrations, { userId: 1, status: 1, registeredAt: -1 })
+      await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, status: 1, joinedAt: -1 })
+      await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, reminder15mSentAt: 1 })
+
+      await safeCreateIndex(this.communityVideoEventQuestions, { eventId: 1, status: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityVideoEventQuestions, { userId: 1, createdAt: -1 })
+
     } catch (error) {
       console.error('❌ MongoDB index creation/verification failed:', error)
       throw error
@@ -308,6 +337,20 @@ class DatabaseService {
 
   get moderationAiJobs(): Collection {
     return this.db.collection(process.env.DB_MODERATION_AI_JOBS_COLLECTION || 'moderationAiJobs')
+  }
+
+  get communityVideoEvents(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_VIDEO_EVENTS_COLLECTION || 'communityVideoEvents')
+  }
+
+  get communityVideoEventRegistrations(): Collection {
+    return this.db.collection(
+      process.env.DB_COMMUNITY_VIDEO_EVENT_REGISTRATIONS_COLLECTION || 'communityVideoEventRegistrations'
+    )
+  }
+
+  get communityVideoEventQuestions(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_VIDEO_EVENT_QUESTIONS_COLLECTION || 'communityVideoEventQuestions')
   }
 }
 
