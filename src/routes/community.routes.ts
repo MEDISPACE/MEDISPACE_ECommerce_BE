@@ -13,19 +13,84 @@ import {
   sendMessageController
 } from '~/controllers/community.controllers'
 import {
+  cancelVideoEventRegistrationController,
+  getVideoEventDetailController,
+  joinVideoEventController,
+  listMyVideoEventsController,
+  listVideoEventQuestionsController,
+  listVideoEventsController,
+  registerVideoEventController,
+  submitVideoEventQuestionController
+} from '~/controllers/communityVideoEvents.controllers'
+import {
   createRoomValidator,
   createAppealValidator,
+  eventIdValidator,
   messageIdValidator,
   paginationValidator,
   reportMessageValidator,
   roomIdValidator,
-  sendMessageValidator
+  sendMessageValidator,
+  submitVideoQuestionValidator
 } from '~/middlewares/community.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
-import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
+import { accessTokenValidator, optionalAccessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const communityRouter = Router()
+
+communityRouter.get('/video-events', optionalAccessTokenValidator, paginationValidator, wrapRequestHandler(listVideoEventsController))
+communityRouter.get(
+  '/video-events/my',
+  accessTokenValidator,
+  verifiedUserValidator,
+  paginationValidator,
+  wrapRequestHandler(listMyVideoEventsController)
+)
+communityRouter.get(
+  '/video-events/:eventId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  wrapRequestHandler(getVideoEventDetailController)
+)
+communityRouter.post(
+  '/video-events/:eventId/register',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  wrapRequestHandler(registerVideoEventController)
+)
+communityRouter.post(
+  '/video-events/:eventId/cancel-registration',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  wrapRequestHandler(cancelVideoEventRegistrationController)
+)
+communityRouter.post(
+  '/video-events/:eventId/join',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  wrapRequestHandler(joinVideoEventController)
+)
+communityRouter.get(
+  '/video-events/:eventId/questions',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  paginationValidator,
+  wrapRequestHandler(listVideoEventQuestionsController)
+)
+communityRouter.post(
+  '/video-events/:eventId/questions',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  submitVideoQuestionValidator,
+  wrapRequestHandler(submitVideoEventQuestionController)
+)
 
 // Public list of rooms (optionally filter by visibility)
 communityRouter.get('/rooms', wrapRequestHandler(listRoomsController))
