@@ -21,18 +21,10 @@ const mockCommunityVideoEventRegistrations = {
   countDocuments: vi.fn(),
   find: vi.fn(),
 }
-const mockCommunityVideoEventQuestions = {
-  insertOne: vi.fn(),
-  findOneAndUpdate: vi.fn(),
-  updateOne: vi.fn(),
-  find: vi.fn(),
-  countDocuments: vi.fn(),
-}
 const withTransaction = vi.fn(async (callback: any) => callback(undefined))
 const notifyVideoEventReminder = vi.fn()
 const createJoinToken = vi.fn()
 const getWsUrl = vi.fn(() => 'wss://livekit.test')
-const reviewText = vi.fn()
 const emit = vi.fn()
 
 vi.mock('~/services/database.services', () => ({
@@ -41,7 +33,6 @@ vi.mock('~/services/database.services', () => ({
     communityRoomMembers: mockCommunityRoomMembers,
     communityVideoEvents: mockCommunityVideoEvents,
     communityVideoEventRegistrations: mockCommunityVideoEventRegistrations,
-    communityVideoEventQuestions: mockCommunityVideoEventQuestions,
     withTransaction,
   },
 }))
@@ -52,10 +43,6 @@ vi.mock('~/services/livekit.services', () => ({
 
 vi.mock('~/services/notifications.services', () => ({
   default: { notifyVideoEventReminder },
-}))
-
-vi.mock('~/services/aiModeration.services', () => ({
-  default: { reviewText },
 }))
 
 vi.mock('~/sockets/chat.socket', () => ({
@@ -184,25 +171,6 @@ describe('CommunityVideoEventsService functional rules', () => {
     mockCommunityVideoEventRegistrations.findOne.mockResolvedValue(null)
 
     await expect(communityVideoEventsService.joinEvent(event._id, new ObjectId())).rejects.toMatchObject({ status: 403 })
-  })
-
-  it('submitQuestion auto-hides severe rule-based content and marks AI error safely', async () => {
-    process.env.AI_MODERATION_ENABLED = 'true'
-    const userId = new ObjectId()
-    const event = makeEvent({ status: 'live' })
-    const questionId = new ObjectId()
-    mockCommunityVideoEvents.findOne.mockResolvedValue(event)
-    mockCommunityVideoEventQuestions.insertOne.mockResolvedValueOnce({ insertedId: questionId })
-    reviewText.mockRejectedValueOnce(new Error('AI down'))
-    mockCommunityVideoEventQuestions.updateOne.mockRejectedValueOnce(new Error('DB temporarily down'))
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-
-    const result = await communityVideoEventsService.submitQuestion(event._id, userId, 'Call me at 0901234567')
-    await new Promise((resolve) => setTimeout(resolve, 0))
-
-    expect(result.question.status).toMatch(/pending|hidden/)
-    expect(errorSpy).toHaveBeenCalled()
-    errorSpy.mockRestore()
   })
 
   it('listEvents personalizes private visibility for authenticated room members without empty $and for anonymous users', async () => {

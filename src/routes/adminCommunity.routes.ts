@@ -15,11 +15,9 @@ import {
   endAdminVideoEventController,
   getVideoEventDetailController,
   listAdminVideoEventRegistrationsController,
-  listVideoEventQuestionsController,
   listVideoEventsController,
   startAdminVideoEventController,
   updateAdminVideoEventController,
-  updateAdminVideoEventQuestionController,
   updateAdminVideoEventRegistrationController
 } from '~/controllers/communityVideoEvents.controllers'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -30,10 +28,8 @@ import {
   inviteMemberValidator,
   memberActionValidator,
   paginationValidator,
-  questionIdValidator,
   roomIdValidator,
   updateVideoEventValidator,
-  updateVideoQuestionValidator,
   updateVideoRegistrationValidator,
   updateRoomValidator,
   userIdParamValidator
@@ -89,19 +85,6 @@ adminCommunityRouter.patch(
   userIdParamValidator,
   updateVideoRegistrationValidator,
   wrapRequestHandler(updateAdminVideoEventRegistrationController)
-)
-adminCommunityRouter.get(
-  '/video-events/:eventId/questions',
-  eventIdValidator,
-  paginationValidator,
-  wrapRequestHandler(listVideoEventQuestionsController)
-)
-adminCommunityRouter.patch(
-  '/video-events/:eventId/questions/:questionId',
-  eventIdValidator,
-  questionIdValidator,
-  updateVideoQuestionValidator,
-  wrapRequestHandler(updateAdminVideoEventQuestionController)
 )
 
 export default adminCommunityRouter
