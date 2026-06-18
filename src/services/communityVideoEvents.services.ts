@@ -1,14 +1,12 @@
-import { ClientSession, ObjectId } from 'mongodb'
+import { ClientSession, ObjectId, type Document, type WithId } from 'mongodb'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { UserRole } from '~/constants/enum'
 import { ErrorWithStatus } from '~/models/Error'
 import { COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS } from '~/constants/communityVideoEvents'
 import databaseService from '~/services/database.services'
-import aiModerationService from '~/services/aiModeration.services'
 import liveKitService from '~/services/livekit.services'
 import notificationService from '~/services/notifications.services'
 import { getIO } from '~/sockets/chat.socket'
-import { moderateTextRuleBased } from '~/utils/moderation/moderationEngine'
 import {
   CommunityVideoEventAccessShape,
   isCommunityVideoEventAdmin,
@@ -19,7 +17,6 @@ export type VideoEventVisibility = 'public' | 'private'
 export type VideoEventStatus = 'draft' | 'scheduled' | 'live' | 'ended' | 'cancelled'
 export type RegistrationStatus = 'registered' | 'cancelled' | 'attended' | 'no_show' | 'removed'
 export type VideoRole = 'attendee' | 'host' | 'co_host'
-export type QuestionStatus = 'pending' | 'approved' | 'answered' | 'hidden' | 'deleted'
 
 type AuthContext = {
   userId?: ObjectId
@@ -34,6 +31,13 @@ type VideoEventHostShape = {
 
 type VideoEventAccessDoc = CommunityVideoEventAccessShape & {
   status?: VideoEventStatus
+}
+
+type CommunityVideoEventDoc = WithId<Document> & VideoEventAccessDoc & {
+  status: VideoEventStatus
+  activeRegistrationCount?: number
+  registrationRequired?: boolean
+  capacity?: number | null
 }
 
 type CreateEventParams = {
@@ -154,10 +158,10 @@ class CommunityVideoEventsService {
     return room
   }
 
-  async getEvent(eventId: ObjectId) {
+  async getEvent(eventId: ObjectId): Promise<CommunityVideoEventDoc> {
     const event = await databaseService.communityVideoEvents.findOne({ _id: eventId })
     if (!event) throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
-    return event
+    return event as CommunityVideoEventDoc
   }
 
   private async getMembership(roomId: ObjectId, userId?: ObjectId) {
@@ -271,7 +275,14 @@ class CommunityVideoEventsService {
     }
 
     const result = await databaseService.communityVideoEvents.insertOne(doc as any)
-    const event = { _id: result.insertedId, ...doc }
+    const meetingUrl = doc.meetingUrl || `/community/video-events/${result.insertedId.toString()}`
+    if (!doc.meetingUrl) {
+      await databaseService.communityVideoEvents.updateOne(
+        { _id: result.insertedId },
+        { $set: { meetingUrl, updatedAt: now } }
+      )
+    }
+    const event = { _id: result.insertedId, ...doc, meetingUrl }
     emitRoom(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.CREATED, params.roomId, event)
     emitAdmins(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.CREATED, event)
     return event
@@ -549,7 +560,10 @@ class CommunityVideoEventsService {
       )
       return databaseService.communityVideoEventRegistrations.findOne({ eventId, userId }, { session })
     })
+    const updatedEvent = await this.getEvent(eventId)
     emitUser(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.REGISTERED, userId, registration)
+    emitRoom(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, updatedEvent.roomId, updatedEvent)
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, updatedEvent)
     return registration
   }
 
@@ -686,105 +700,6 @@ class CommunityVideoEventsService {
     if (!registration) throw new ErrorWithStatus({ message: 'Không tìm thấy đăng ký.', status: HTTP_STATUS.NOT_FOUND })
     emitUser(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.REGISTRATION_UPDATED, userId, registration)
     return registration
-  }
-
-  async submitQuestion(eventId: ObjectId, userId: ObjectId, content: string, role?: UserRole) {
-    const event = await this.getEvent(eventId)
-    await this.assertCanJoinOrRegister(event, userId, role)
-    if (!['scheduled', 'live'].includes(event.status)) {
-      throw new ErrorWithStatus({ message: 'Hội thảo không nhận câu hỏi ở trạng thái hiện tại.', status: HTTP_STATUS.BAD_REQUEST })
-    }
-    const moderation = moderateTextRuleBased(content)
-    const shouldHide = moderation.severity === 'high' || moderation.severity === 'critical'
-    const now = new Date()
-    const doc = { eventId, roomId: event.roomId, userId, content: content.trim(), status: shouldHide ? 'hidden' : 'pending', moderated: { autoHidden: shouldHide, at: now, ...moderation }, pinned: false, answeredBy: null, answeredAt: null, answerSummary: null, createdAt: now, updatedAt: now }
-    const result = await databaseService.communityVideoEventQuestions.insertOne(doc as any)
-    const question = { _id: result.insertedId, ...doc }
-    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.QUESTION_NEW, eventId, question)
-    emitAdmins(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.QUESTION_NEW, question)
-
-    if (process.env.AI_MODERATION_ENABLED === 'true') {
-      aiModerationService
-        .reviewText(content, { roomId: event.roomId?.toString(), ruleResult: moderation as any })
-        .then(async (aiResult) => {
-          const aiShouldHide = aiResult.shouldHide && ['high', 'critical'].includes(aiResult.severity)
-          const updated = await databaseService.communityVideoEventQuestions.findOneAndUpdate(
-            { _id: result.insertedId },
-            {
-              $set: {
-                updatedAt: new Date(),
-                ...(aiShouldHide ? { status: 'hidden' as QuestionStatus } : {}),
-                'moderated.ai': aiResult,
-                'moderated.aiReviewedAt': new Date()
-              }
-            },
-            { returnDocument: 'after' }
-          )
-          if (updated) {
-            emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.QUESTION_UPDATED, eventId, updated)
-            emitUser(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.QUESTION_UPDATED, userId, updated)
-          }
-        })
-        .catch((error) => {
-          console.error('[CommunityVideoEvents] AI moderation failed', { eventId: eventId.toString(), questionId: result.insertedId.toString(), error })
-          databaseService.communityVideoEventQuestions
-            .updateOne(
-              { _id: result.insertedId },
-              { $set: { 'moderated.aiError': true, 'moderated.aiReviewedAt': new Date(), updatedAt: new Date() } }
-            )
-            .catch((dbError) => {
-              console.error('[CommunityVideoEvents] failed to mark AI moderation error', {
-                eventId: eventId.toString(),
-                questionId: result.insertedId.toString(),
-                error: dbError
-              })
-            })
-        })
-    }
-
-    return { question, moderation }
-  }
-
-  async listQuestions(eventId: ObjectId, context: AuthContext, params?: { page?: number; limit?: number; status?: QuestionStatus }) {
-    const event = await this.getEvent(eventId)
-    await this.assertCanViewEvent(event, context)
-    const canManage = this.isAdmin(context) || this.isHost(event, context.userId)
-    const page = params?.page || 1
-    const limit = params?.limit || 20
-    const query: any = { eventId }
-    if (params?.status) query.status = params.status
-    if (!canManage) {
-      query.$or = [{ status: { $in: ['approved', 'answered'] } }]
-      if (context.userId) query.$or.push({ userId: context.userId })
-    }
-    const skip = (page - 1) * limit
-    const [items, total] = await Promise.all([
-      databaseService.communityVideoEventQuestions.find(query).sort({ pinned: -1, createdAt: -1 }).skip(skip).limit(limit).toArray(),
-      databaseService.communityVideoEventQuestions.countDocuments(query)
-    ])
-    return { items, page, limit, total }
-  }
-
-  async updateQuestion(eventId: ObjectId, questionId: ObjectId, context: AuthContext, params: { status?: QuestionStatus; pinned?: boolean; answerSummary?: string }) {
-    const event = await this.getEvent(eventId)
-    await this.assertCanManageEvent(event, context)
-    const update: any = { updatedAt: new Date() }
-    if (params.status) update.status = params.status
-    if (params.pinned !== undefined) update.pinned = params.pinned
-    if (params.answerSummary !== undefined) update.answerSummary = params.answerSummary.trim() || null
-    if (params.status === 'answered') {
-      update.answeredBy = context.userId
-      update.answeredAt = new Date()
-    }
-    const question = await databaseService.communityVideoEventQuestions.findOneAndUpdate(
-      { _id: questionId, eventId },
-      { $set: update },
-      { returnDocument: 'after' }
-    )
-    if (!question) throw new ErrorWithStatus({ message: 'Không tìm thấy câu hỏi.', status: HTTP_STATUS.NOT_FOUND })
-    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.QUESTION_UPDATED, eventId, question)
-    emitUser(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.QUESTION_UPDATED, question.userId, question)
-    return question
   }
 
   async sendDueReminders() {
