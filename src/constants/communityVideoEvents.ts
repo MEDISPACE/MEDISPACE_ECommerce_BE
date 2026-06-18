@@ -8,8 +8,6 @@ export const COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS = {
   REGISTRATION_UPDATED: 'community:video-event:registration:updated',
   ATTENDEE_JOINED: 'community:video-event:attendee:joined',
   ATTENDEE_LEFT: 'community:video-event:attendee:left',
-  QUESTION_NEW: 'community:video-event:question:new',
-  QUESTION_UPDATED: 'community:video-event:question:updated',
   JOIN_ROOM: 'community:video-event:join',
   LEAVE_ROOM: 'community:video-event:leave'
 } as const
