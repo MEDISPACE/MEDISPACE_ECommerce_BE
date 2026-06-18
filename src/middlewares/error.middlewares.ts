@@ -8,12 +8,14 @@ export const defaultErrorHandler = (err: Error, req: Request, res: Response, _ne
   if (err instanceof ErrorWithStatus) {
     return res.status(err.status).json(omit(err, ['status']))
   }
-  Object.getOwnPropertyNames(err).forEach((key) => {
-    Object.defineProperty(err, key, { enumerable: true })
-  })
-  // Default error
-  res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+  console.error('[UnhandledError]', {
+    method: req.method,
+    path: req.originalUrl,
     message: err.message,
-    errorInfo: err
+    stack: err.stack
+  })
+
+  res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+    message: process.env.NODE_ENV === 'production' ? 'Internal Server Error' : err.message
   })
 }
