@@ -4,12 +4,14 @@ import { verifyToken } from '~/utils/jwt'
 import { TokenPayload } from '~/models/requests/User.request'
 import chatsService from '~/services/chats.services'
 import databaseService from '~/services/database.services'
+import communityVideoEventAccessService from '~/services/communityVideoEventAccess.services'
 import typesenseService from '~/services/typesense.services'
 import { checkAIRateLimit } from '~/services/ai-chat.services'
 import { ObjectId } from 'mongodb'
 import { config } from 'dotenv'
 import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
 import { TokenType, UserRole, UserStatus } from '~/constants/enum'
+import { COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS } from '~/constants/communityVideoEvents'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -305,7 +307,8 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         }
         socket.join(`community:room:${roomId}`)
         ack?.({ ok: true, roomId })
-      } catch {
+      } catch (error) {
+        console.error('[Socket] community room join failed', { roomId, userId: socket.userId, error })
         socket.emit('error', { message: 'Không thể tham gia kênh realtime cộng đồng.' })
         ack?.({ ok: false, message: 'Không thể tham gia kênh realtime cộng đồng.' })
       }
@@ -313,6 +316,32 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
     socket.on('community:room:leave', (roomId: string) => {
       socket.leave(`community:room:${roomId}`)
+    })
+
+    socket.on(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.JOIN_ROOM, async (eventId: string, ack?: (payload: { ok: boolean; eventId?: string; message?: string }) => void) => {
+      try {
+        if (!socket.userId || !ObjectId.isValid(eventId)) {
+          ack?.({ ok: false, message: 'eventId không hợp lệ' })
+          return
+        }
+        const eventObjectId = new ObjectId(eventId)
+        const userObjectId = new ObjectId(socket.userId)
+        const role = socket.userRole === 'admin'
+          ? UserRole.Admin
+          : socket.userRole === 'pharmacist'
+            ? UserRole.Pharmacist
+            : UserRole.Customer
+        await communityVideoEventAccessService.assertCanSubscribeRealtime(eventObjectId, { userId: userObjectId, role })
+        socket.join(`community:video-event:${eventId}`)
+        ack?.({ ok: true, eventId })
+      } catch (error) {
+        console.error('[Socket] community video event join failed', { eventId, userId: socket.userId, error })
+        ack?.({ ok: false, message: 'Không thể tham gia kênh realtime hội thảo.' })
+      }
+    })
+
+    socket.on(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.LEAVE_ROOM, (eventId: string) => {
+      socket.leave(`community:video-event:${eventId}`)
     })
 
     // --- FIX 3.2: emit gọn lại – chỉ dùng room-based, bỏ fetchSockets loop ---
@@ -695,12 +724,29 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           userId: socket.userId
         })
       } catch (error) {
-        // Silent fail
+        console.error('[Socket] messages:read failed', {
+          conversationId: data.conversationId,
+          userId: socket.userId,
+          error
+        })
       }
     })
 
     // Disconnect handler
     socket.on('disconnect', async () => {
+      if (socket.userId) {
+        for (const room of socket.rooms) {
+          if (room.startsWith('community:video-event:')) {
+            const eventId = room.replace('community:video-event:', '')
+            socket.to(room).emit(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.ATTENDEE_LEFT, {
+              eventId,
+              userId: socket.userId,
+              leftAt: new Date()
+            })
+          }
+        }
+      }
+
       if (socket.userId) {
         // --- FIX 3.4: decrement counter, chỉ set offline khi count về 0 ---
         const user = await databaseService.users.findOneAndUpdate(
