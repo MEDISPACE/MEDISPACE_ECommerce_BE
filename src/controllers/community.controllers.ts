@@ -127,12 +127,13 @@ export const sendMessageController = async (req: Request, res: Response, next: N
   try {
     const { userId } = req.decoded_authorization as TokenPayload
     const roomId = req.params.roomId as unknown as string
-    const { content } = req.body
+    const { content, imageUrl } = req.body
 
     const result = await communityService.sendMessage({
       roomId: new ObjectId(roomId),
       userId: new ObjectId(userId),
-      content
+      content,
+      imageUrl
     })
 
     return res.status(201).json({ message: 'Gửi tin nhắn thành công', data: result })
