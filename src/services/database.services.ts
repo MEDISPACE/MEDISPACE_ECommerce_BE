@@ -216,9 +216,6 @@ class DatabaseService {
       await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, status: 1, joinedAt: -1 })
       await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, reminder15mSentAt: 1 })
 
-      await safeCreateIndex(this.communityVideoEventQuestions, { eventId: 1, status: 1, createdAt: -1 })
-      await safeCreateIndex(this.communityVideoEventQuestions, { userId: 1, createdAt: -1 })
-
     } catch (error) {
       console.error('❌ MongoDB index creation/verification failed:', error)
       throw error
@@ -349,9 +346,6 @@ class DatabaseService {
     )
   }
 
-  get communityVideoEventQuestions(): Collection {
-    return this.db.collection(process.env.DB_COMMUNITY_VIDEO_EVENT_QUESTIONS_COLLECTION || 'communityVideoEventQuestions')
-  }
 }
 
 //Tao Object tu Class DatabaseService

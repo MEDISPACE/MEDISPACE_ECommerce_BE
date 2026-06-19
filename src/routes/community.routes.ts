@@ -17,10 +17,8 @@ import {
   getVideoEventDetailController,
   joinVideoEventController,
   listMyVideoEventsController,
-  listVideoEventQuestionsController,
   listVideoEventsController,
-  registerVideoEventController,
-  submitVideoEventQuestionController
+  registerVideoEventController
 } from '~/controllers/communityVideoEvents.controllers'
 import {
   createRoomValidator,
@@ -30,8 +28,7 @@ import {
   paginationValidator,
   reportMessageValidator,
   roomIdValidator,
-  sendMessageValidator,
-  submitVideoQuestionValidator
+  sendMessageValidator
 } from '~/middlewares/community.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
 import { accessTokenValidator, optionalAccessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
@@ -74,22 +71,6 @@ communityRouter.post(
   verifiedUserValidator,
   eventIdValidator,
   wrapRequestHandler(joinVideoEventController)
-)
-communityRouter.get(
-  '/video-events/:eventId/questions',
-  accessTokenValidator,
-  verifiedUserValidator,
-  eventIdValidator,
-  paginationValidator,
-  wrapRequestHandler(listVideoEventQuestionsController)
-)
-communityRouter.post(
-  '/video-events/:eventId/questions',
-  accessTokenValidator,
-  verifiedUserValidator,
-  eventIdValidator,
-  submitVideoQuestionValidator,
-  wrapRequestHandler(submitVideoEventQuestionController)
 )
 
 // Public list of rooms (optionally filter by visibility)

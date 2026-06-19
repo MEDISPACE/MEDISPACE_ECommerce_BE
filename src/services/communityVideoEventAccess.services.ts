@@ -1,4 +1,4 @@
-import { ObjectId } from 'mongodb'
+import { ObjectId, type Document, type WithId } from 'mongodb'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { UserRole } from '~/constants/enum'
 import { ErrorWithStatus } from '~/models/Error'
@@ -14,6 +14,10 @@ type AuthContext = {
   role?: UserRole
 }
 
+type CommunityVideoEventRealtimeDoc = WithId<Document> & CommunityVideoEventAccessShape & {
+  status?: string
+}
+
 class CommunityVideoEventAccessService {
   private isAdmin(context?: AuthContext) {
     return isCommunityVideoEventAdmin(context)
@@ -24,7 +28,7 @@ class CommunityVideoEventAccessService {
   }
 
   async assertCanSubscribeRealtime(eventId: ObjectId, context: AuthContext) {
-    const event = await databaseService.communityVideoEvents.findOne({ _id: eventId })
+    const event = await databaseService.communityVideoEvents.findOne({ _id: eventId }) as CommunityVideoEventRealtimeDoc | null
     if (!event || event.status === 'cancelled' || event.status === 'draft') {
       throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
     }

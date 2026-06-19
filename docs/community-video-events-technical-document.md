@@ -2,13 +2,13 @@
 
 ## 1. Overview
 
-Community Video Events là tính năng hội thảo video trực tuyến trong Community module của MEDISPACE. Tính năng cho phép admin tạo lịch hội thảo theo phòng cộng đồng, người dùng đăng ký tham gia, host bắt đầu/kết thúc buổi live, người tham gia vào phòng video LiveKit và gửi câu hỏi Q&A có kiểm duyệt.
+Community Video Events là tính năng hội thảo video trực tuyến trong Community module của MEDISPACE. Tính năng cho phép admin tạo link cuộc họp theo phòng cộng đồng, người dùng đăng ký tham gia, host bắt đầu/kết thúc buổi live, người tham gia vào phòng video LiveKit và trao đổi ngay bằng chat realtime của phòng cộng đồng.
 
-Mục tiêu kinh doanh là giúp MEDISPACE Pharmacy chia sẻ kiến thức, kỹ năng và kinh nghiệm chăm sóc sức khỏe tới cộng đồng trong chính ứng dụng MEDISPACE, thay vì phụ thuộc vào link họp bên ngoài như Zoom/Meet. Tính năng cũng giữ được lớp quản trị nội dung y tế: quyền xem theo room, đăng ký, Q&A moderation, nhắc lịch và audit dữ liệu tham dự.
+Mục tiêu kinh doanh là giúp MEDISPACE Pharmacy chia sẻ kiến thức, kỹ năng và kinh nghiệm chăm sóc sức khỏe tới cộng đồng trong chính ứng dụng MEDISPACE, thay vì phụ thuộc vào link họp bên ngoài như Zoom/Meet. Tính năng tập trung vào tương tác tức thời trong cuộc họp: quyền xem theo room, đăng ký, LiveKit, chat realtime, nhắc lịch và audit dữ liệu tham dự.
 
-Người dùng chính gồm `guest`, `customer/user đã xác thực`, `admin`, và `host/pharmacist`. Guest chỉ xem được danh sách public qua endpoint public. User đã xác thực có thể xem chi tiết, đăng ký, hủy đăng ký, tham gia khi event live và gửi câu hỏi. Admin có thể tạo, cập nhật, start/end/cancel event, xem registration và duyệt Q&A. Host được xác định qua `hostIds` hoặc role admin trong backend service.
+Người dùng chính gồm `guest`, `customer/user đã xác thực`, `admin`, và `host/pharmacist`. Guest chỉ xem được danh sách public qua endpoint public. User đã xác thực có thể xem chi tiết, đăng ký, hủy đăng ký, tham gia khi event live và chat trực tiếp trong phòng họp. Admin có thể tạo, cập nhật, start/end/cancel event và xem registration. Host được xác định qua `hostIds` hoặc role admin trong backend service.
 
-High-level flow: admin tạo hội thảo gắn với một community room active; user xem danh sách/chi tiết, đăng ký, nhận reminder trước giờ bắt đầu; admin/host start event; user bấm join, backend kiểm tra quyền và cấp LiveKit JWT; frontend dùng token để kết nối LiveKit room; Q&A đi qua MEDISPACE backend và Socket.IO để đảm bảo persistence/moderation.
+High-level flow: admin tạo link cuộc họp gắn với một community room active; user xem danh sách/chi tiết, đăng ký, nhận reminder trước giờ bắt đầu; admin/host start event; user bấm join, backend kiểm tra quyền và cấp LiveKit JWT; frontend dùng token để kết nối LiveKit room; chat cuộc họp dùng message API và Socket.IO hiện có của community room.
 
 ```text
 Admin/Host
@@ -20,10 +20,10 @@ MEDISPACE Backend ---- Agenda Reminder ---- Notifications
    v                    Registered Users
 MongoDB
    ^
-   | list/register/Q&A/join
+   | list/register/join/chat
 User Frontend ---- LiveKit JWT ---- LiveKit Self-host/Cloud
    |                                |
-   +-------- Socket.IO Q&A ---------+
+   +----- Socket.IO room chat ------+
 ```
 
 ## 2. Database Layer
@@ -34,14 +34,14 @@ User Frontend ---- LiveKit JWT ---- LiveKit Self-host/Cloud
 |------------|--------|---------|
 | `communityVideoEvents` | `src/services/database.services.ts` | Stores webinar/event metadata, scheduling, provider info, lifecycle state and recording metadata. |
 | `communityVideoEventRegistrations` | `src/services/database.services.ts` | Stores each user's registration/attendance state for a video event. |
-| `communityVideoEventQuestions` | `src/services/database.services.ts` | Stores Q&A questions, moderation result, pin/answer status. |
+| `communityMessages` | Existing community module | Stores realtime chat messages used inside the meeting room. |
 | `communityRooms` | Existing community module | Parent room/topic that owns event visibility and membership context. |
 | `communityRoomMembers` | Existing community module | Used for private event access, banned user checks and room membership authorization. |
 | `users` | Existing auth/user module | Joined for admin registration listing. |
 | `agendaJobs` | `src/services/scheduler.services.ts` | Agenda.js Mongo backend collection for scheduled reminder job metadata. |
 | notifications collection | `src/services/notifications.services.ts` | Created through `notificationService.createAndPush()` for 15-minute reminders. |
 
-Collection names for the three feature collections are configurable by environment variables. If not configured, defaults are `communityVideoEvents`, `communityVideoEventRegistrations`, and `communityVideoEventQuestions`.
+Collection names for the two video-event collections are configurable by environment variables. If not configured, defaults are `communityVideoEvents` and `communityVideoEventRegistrations`.
 
 ### `communityVideoEvents` Schema
 
@@ -94,28 +94,6 @@ Collection names for the three feature collections are configurable by environme
 | `removeReason` | `string \/ null` | No | Optional reason; max 500 chars in validator. |
 | `updatedAt` | `Date` | No | Set during registration, join, cancel and admin updates. |
 
-### `communityVideoEventQuestions` Schema
-
-| Field | Type | Required | Constraints / Meaning |
-|-------|------|----------|-----------------------|
-| `_id` | `ObjectId` | Yes | MongoDB primary identifier. |
-| `eventId` | `ObjectId` | Yes | References `communityVideoEvents._id`. |
-| `roomId` | `ObjectId` | Yes | Duplicated from event. |
-| `userId` | `ObjectId` | Yes | User who submitted question. |
-| `content` | `string` | Yes | Trimmed; validator requires 3-2000 chars. |
-| `status` | `'pending' \| 'approved' \| 'answered' \| 'hidden' \| 'deleted'` | Yes | Set to `hidden` when rule moderation auto-hides, otherwise `pending`. |
-| `moderated.autoHidden` | `boolean` | Yes | Whether rule-based moderation auto-hidden the question. |
-| `moderated.at` | `Date` | Yes | Rule moderation timestamp. |
-| `moderated.severity/categories/confidence/reasons` | mixed | No | Rule-based moderation output. |
-| `moderated.ai` | object | No | Async AI review result when `AI_MODERATION_ENABLED=true`. |
-| `moderated.aiReviewedAt` | `Date` | No | AI moderation timestamp. |
-| `pinned` | `boolean` | Yes | Defaults to `false`; admin/host can update. |
-| `answeredBy` | `ObjectId \/ null` | No | Set when status changes to `answered`. |
-| `answeredAt` | `Date \/ null` | No | Set when status changes to `answered`. |
-| `answerSummary` | `string \/ null` | No | Optional answer summary; max 2000 chars. |
-| `createdAt` | `Date` | Yes | Creation timestamp. |
-| `updatedAt` | `Date` | Yes | Updated on moderation/admin changes. |
-
 ### Indexes
 
 Defined in `src/services/database.services.ts`.
@@ -129,19 +107,16 @@ Defined in `src/services/database.services.ts`.
 | `communityVideoEventRegistrations` | `{ userId: 1, status: 1, registeredAt: -1 }` | none | User's registered events. |
 | `communityVideoEventRegistrations` | `{ eventId: 1, status: 1, joinedAt: -1 }` | none | Attendance listing/statistics. |
 | `communityVideoEventRegistrations` | `{ eventId: 1, reminder15mSentAt: 1 }` | none | Reminder lookup. |
-| `communityVideoEventQuestions` | `{ eventId: 1, status: 1, createdAt: -1 }` | none | Q&A queue/listing. |
-| `communityVideoEventQuestions` | `{ userId: 1, createdAt: -1 }` | none | Questions by user. |
 
 ### ERD Description
 
 ```text
 communityRooms 1 ---- N communityVideoEvents
 communityVideoEvents 1 ---- N communityVideoEventRegistrations
-communityVideoEvents 1 ---- N communityVideoEventQuestions
 users 1 ---- N communityVideoEventRegistrations
-users 1 ---- N communityVideoEventQuestions
 users N ---- N communityVideoEvents via hostIds[]
 communityRoomMembers controls access to private/banned room context
+communityMessages stores room chat used by the meeting chat panel
 agendaJobs stores scheduler job metadata for reminder processing
 ```
 
@@ -150,7 +125,7 @@ agendaJobs stores scheduler job metadata for reminder processing
 | Enum | Values | Meaning |
 |------|--------|---------|
 | `VideoEventStatus` | `draft` | Draft event, hidden from non-admin listing and socket join. |
-| `VideoEventStatus` | `scheduled` | Planned event; users can register and ask questions. |
+| `VideoEventStatus` | `scheduled` | Planned event; users can register before the host starts the live room. |
 | `VideoEventStatus` | `live` | Event is currently joinable through LiveKit token endpoint. |
 | `VideoEventStatus` | `ended` | Event finished; new registration/cancel is blocked, registered users become `no_show`. |
 | `VideoEventStatus` | `cancelled` | Event cancelled; hidden from non-admin listing. |
@@ -159,15 +134,10 @@ agendaJobs stores scheduler job metadata for reminder processing
 | `RegistrationStatus` | `attended` | User joined live session. |
 | `RegistrationStatus` | `no_show` | Event ended while registration remained `registered`. |
 | `RegistrationStatus` | `removed` | Admin removed/marked attendee removed. |
-| `QuestionStatus` | `pending` | Awaiting host/admin moderation. |
-| `QuestionStatus` | `approved` | Visible to attendees. |
-| `QuestionStatus` | `answered` | Answered by host/admin; visible to attendees. |
-| `QuestionStatus` | `hidden` | Hidden by moderation or admin. |
-| `QuestionStatus` | `deleted` | Soft-state for deleted question; no hard delete implementation. |
 
 ### Audit Fields
 
-This feature uses `createdAt` and `updatedAt` timestamps. It does not implement `deletedAt`; lifecycle soft-deletion is represented by status values such as `cancelled`, `removed`, `hidden`, or `deleted`.
+This feature uses `createdAt` and `updatedAt` timestamps. It does not implement `deletedAt`; lifecycle soft-deletion is represented by status values such as `cancelled` and `removed`.
 
 ## 3. Backend - API Layer
 
@@ -202,8 +172,8 @@ Unexpected errors use HTTP `500` with `message` and `errorInfo`.
 | `POST` | `/community/video-events/:eventId/register` | Required access token + verified user | `registerVideoEventController` | Param: `eventId` valid ObjectId | `201 { message: "Đăng ký hội thảo thành công", data: registration }` | `201`, `400`, `401`, `403`, `404`, `409`, `422`, `500` |
 | `POST` | `/community/video-events/:eventId/cancel-registration` | Required access token + verified user | `cancelVideoEventRegistrationController` | Param: `eventId` valid ObjectId | `200 { message: "Đã hủy đăng ký hội thảo", data: registration }` | `200`, `400`, `401`, `404`, `422`, `500` |
 | `POST` | `/community/video-events/:eventId/join` | Required access token + verified user | `joinVideoEventController` | Param: `eventId` valid ObjectId | `200 { message: "OK", data: { eventId, provider, wsUrl, token, role, expiresAt } }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
-| `GET` | `/community/video-events/:eventId/questions` | Required access token + verified user | `listVideoEventQuestionsController` | Param: `eventId`; query `status?: pending/approved/answered/hidden/deleted`, `page?`, `limit?` | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `401`, `403`, `404`, `422`, `500` |
-| `POST` | `/community/video-events/:eventId/questions` | Required access token + verified user | `submitVideoEventQuestionController` | Body: `content` string, 3-2000 chars | `201 { message: "Đã gửi câu hỏi", data: { question, moderation } }` | `201`, `400`, `401`, `403`, `404`, `422`, `500` |
+
+Meeting chat uses the existing community room endpoints: `GET /community/rooms/:roomId/messages` and `POST /community/rooms/:roomId/messages`. The video-event feature no longer exposes separate `/video-events/:eventId/questions` endpoints.
 
 ### Admin Community Endpoints
 
@@ -220,8 +190,6 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 | `POST` | `/admin/community/video-events/:eventId/cancel` | `cancelAdminVideoEventController` | Param: valid `eventId`. | `200 { message: "Đã hủy hội thảo", data: event }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
 | `GET` | `/admin/community/video-events/:eventId/registrations` | `listAdminVideoEventRegistrationsController` | Query: `status?: registered/cancelled/attended/no_show/removed`, `page?`, `limit?`. | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `401`, `403`, `404`, `422`, `500` |
 | `PATCH` | `/admin/community/video-events/:eventId/registrations/:userId` | `updateAdminVideoEventRegistrationController` | Body: `status?` registration enum; `removeReason?` string max 500. | `200 { message: "Cập nhật đăng ký thành công", data: registration }` | `200`, `401`, `403`, `404`, `422`, `500` |
-| `GET` | `/admin/community/video-events/:eventId/questions` | `listVideoEventQuestionsController` | Query: `status?: pending/approved/answered/hidden/deleted`, `page?`, `limit?`. Admin sees all statuses. | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `401`, `403`, `404`, `422`, `500` |
-| `PATCH` | `/admin/community/video-events/:eventId/questions/:questionId` | `updateAdminVideoEventQuestionController` | Body: `status?` question enum; `pinned?` boolean; `answerSummary?` string max 2000. | `200 { message: "Cập nhật câu hỏi thành công", data: question }` | `200`, `401`, `403`, `404`, `422`, `500` |
 
 ## 4. Backend - Business Logic
 
@@ -231,9 +199,9 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 |----------|---------|-----------------|----------------------------------------|
 | `escapeRegex(input)` | Escapes user search text before building RegExp. | `string -> string` | Prevents regex meta characters from changing search semantics. |
 | `emitRoom(event, roomId, payload)` | Emits Socket.IO event to `community:room:{roomId}`. | event name + roomId + payload -> void | Swallows errors if Socket.IO is not initialized. |
-| `emitUser(event, userId, payload)` | Emits Socket.IO event to `user:{userId}`. | event name + userId + payload -> void | Used for registration/question updates. |
-| `emitAdmins(event, payload)` | Emits Socket.IO event to `admins`. | event name + payload -> void | Used for event creation and new questions. |
-| `emitVideoEvent(event, eventId, payload)` | Emits Socket.IO event to `community:video-event:{eventId}`. | event name + eventId + payload -> void | Used for live lifecycle, attendee and Q&A updates. |
+| `emitUser(event, userId, payload)` | Emits Socket.IO event to `user:{userId}`. | event name + userId + payload -> void | Used for registration updates. |
+| `emitAdmins(event, payload)` | Emits Socket.IO event to `admins`. | event name + payload -> void | Used for event creation. |
+| `emitVideoEvent(event, eventId, payload)` | Emits Socket.IO event to `community:video-event:{eventId}`. | event name + eventId + payload -> void | Used for live lifecycle and attendee updates. |
 | `toDate(value, fieldName)` | Normalizes/validates date fields. | string/Date -> Date | Throws `400` if invalid. |
 | `normalizeStringArray(value)` | Cleans tag arrays. | unknown -> string[] | Non-arrays become `[]`; non-string/blank items are removed. |
 | `isAdmin(context)` | Checks admin role. | auth context -> boolean | Admin role comes from decoded access token. |
@@ -258,9 +226,6 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 | `joinEvent(eventId, userId, role)` | Issues LiveKit token and marks attendance. | eventId + userId + role -> join payload | Requires access and `status=live`. Non-host must be registered/attended when `registrationRequired=true`. Calls `liveKitService.createJoinToken()`, upserts registration as `attended`, emits attendee joined. |
 | `listRegistrations(eventId, context, params)` | Admin/host registration list. | eventId + context + filters -> paginated result | Requires manage permission. Joins user summary. Supports status filter. |
 | `updateRegistration(eventId, userId, context, params)` | Admin/host updates attendee status. | eventId + userId + body -> registration | Requires manage permission. If `status=removed`, records `removedBy` and `removeReason`. Emits `community:video-event:registration:updated` to user. |
-| `submitQuestion(eventId, userId, content, role)` | Stores Q&A question with moderation. | eventId + userId + content + role -> `{ question, moderation }` | Requires access. Only `scheduled` or `live` accept questions. Runs rule moderation; high/critical is auto-hidden. Emits question new to event room/admins. If AI enabled, runs async review and emits update. |
-| `listQuestions(eventId, context, params)` | Lists Q&A questions. | eventId + context + filters -> paginated result | Requires view permission. Admin/host see all. Users see approved/answered plus their own questions. Sorts pinned first, newest first. |
-| `updateQuestion(eventId, questionId, context, params)` | Admin/host updates Q&A moderation state. | ids + context + body -> question | Requires manage permission. Can update status, pinned, answerSummary. If status answered, sets answeredBy/answeredAt. Emits question updated to event and question owner. |
 | `sendDueReminders()` | Sends 15-minute reminders. | none -> `{ processedEvents }` | Finds scheduled events starting in 14-16 minutes and not event-marked sent. Sends notification to registered users without `reminder15mSentAt`, updates registration and event reminder marker. |
 
 ### `src/services/livekit.services.ts`
@@ -302,13 +267,10 @@ Validators enforce request shape before controllers:
 | Validator | Purpose |
 |-----------|---------|
 | `eventIdValidator` | Validates `params.eventId` as required ObjectId. |
-| `questionIdValidator` | Validates `params.questionId` as required ObjectId. |
 | `userIdParamValidator` | Validates `params.userId` as required ObjectId. |
 | `paginationValidator` | Validates `page` 1-100000 and `limit` 1-50. |
 | `createVideoEventValidator` | Validates admin create body. |
 | `updateVideoEventValidator` | Validates admin update body. |
-| `submitVideoQuestionValidator` | Validates Q&A content. |
-| `updateVideoQuestionValidator` | Validates Q&A moderation body. |
 | `updateVideoRegistrationValidator` | Validates registration status/removeReason body. |
 
 ## 5. Frontend
@@ -327,11 +289,11 @@ Admin navigation includes `/admin/video-events` in `src/components/layout/AdminL
 
 | Area | Mechanism | Details |
 |------|-----------|---------|
-| Server data | TanStack Query | Event list/detail/questions/registrations are queried by stable query keys and invalidated after mutations. |
+| Server data | TanStack Query | Event list/detail/registrations and room messages are queried by stable query keys and invalidated after mutations. |
 | Auth | `useAuth()` | Used to gate registration/detail/join. Unauthenticated users are redirected to login. |
-| Socket | `SocketContext` | Adds `joinCommunityVideoEvent`, `leaveCommunityVideoEvent`, and subscriber callbacks for video-event updates/questions. |
+| Socket | `SocketContext` | Adds `joinCommunityVideoEvent`, `leaveCommunityVideoEvent`, `joinCommunityRoom`, `leaveCommunityRoom`, video-event update callbacks and room message callbacks. |
 | LiveKit room | Local React state | `joinPayload` stores backend token/wsUrl. Rendering `LiveKitRoom` starts after join success. |
-| Forms | Local React state | Search, create event form, disclaimer checkbox, Q&A text and selected admin event are local states. |
+| Forms | Local React state | Search, create event form, disclaimer checkbox, meeting chat text and selected admin event are local states. |
 
 ### `src/services/communityService.ts`
 
@@ -345,8 +307,8 @@ Public/user API methods:
 | `registerVideoEvent(eventId)` | `POST /community/video-events/:eventId/register` | List/detail register button. |
 | `cancelVideoEventRegistration(eventId)` | `POST /community/video-events/:eventId/cancel-registration` | Available service method; no current button in inspected UI. |
 | `joinVideoEvent(eventId)` | `POST /community/video-events/:eventId/join` | Detail page join button after disclaimer. |
-| `listVideoEventQuestions(params)` | `GET /community/video-events/:eventId/questions` | Detail Q&A sidebar. |
-| `submitVideoEventQuestion(params)` | `POST /community/video-events/:eventId/questions` | Detail Q&A form submit. |
+| `listMessages({ roomId, page, limit })` | `GET /community/rooms/:roomId/messages` | Meeting chat panel after user joins the live room. |
+| `sendMessage({ roomId, content })` | `POST /community/rooms/:roomId/messages` | Meeting chat message submit. |
 
 Admin API methods:
 
@@ -360,8 +322,6 @@ Admin API methods:
 | `cancelVideoEvent(eventId)` | `POST /admin/community/video-events/:eventId/cancel` | Admin Cancel button. |
 | `listVideoEventRegistrations(params)` | `GET /admin/community/video-events/:eventId/registrations` | Admin selected event attendee panel. |
 | `updateVideoEventRegistration(eventId, userId, data)` | `PATCH /admin/community/video-events/:eventId/registrations/:userId` | Service exists; current page does not expose attendee remove/status actions. |
-| `listVideoEventQuestions(params)` | `GET /admin/community/video-events/:eventId/questions` | Admin selected event Q&A panel. |
-| `updateVideoEventQuestion(eventId, questionId, data)` | `PATCH /admin/community/video-events/:eventId/questions/:questionId` | Admin approve/pin/hide/answered buttons. |
 
 ### `CommunityVideoEventsPage`
 
@@ -384,17 +344,17 @@ File: `src/components/community/CommunityVideoEventDetailPage.tsx`.
 Responsibilities:
 
 - Requires login to view details; unauthenticated users see a login prompt.
-- Loads event detail and Q&A list.
-- Joins Socket.IO event room through `socket.joinCommunityVideoEvent(eventId)` and subscribes to event/question updates.
+- Loads event detail and, after joining, room chat messages.
+- Joins Socket.IO event room through `socket.joinCommunityVideoEvent(eventId)` and subscribes to event updates.
 - Shows medical disclaimer checkbox before join.
 - Allows registration when not registered and event is not ended.
 - Enables join button only when disclaimer accepted and event status is `live`.
 - Calls backend join endpoint, stores `joinPayload`, then renders `LiveKitRoom` and `VideoConference` from `@livekit/components-react`.
-- Shows Q&A list with status/pin/answer summary.
-- Allows question submission when text length is at least 3 chars.
+- Shows `Chat cuộc họp` after LiveKit join and subscribes to room message events.
+- Allows chat message submission when text is not blank.
 - Displays `recordingUrl` button if present.
 
-Loading state is `Đang tải hội thảo...`. Q&A empty state is `Chưa có câu hỏi.`. Mutations use toast errors from backend messages.
+Loading state is `Đang tải hội thảo...`. Meeting chat empty state is `Chưa có tin nhắn. Hãy trao đổi trực tiếp trong cuộc họp.`. Mutations use toast errors from backend messages.
 
 ### `AdminCommunityVideoEventsPage`
 
@@ -405,10 +365,10 @@ Responsibilities:
 - Lists active community rooms for event creation.
 - Lists/searches admin video events.
 - Creates a new LiveKit provider event with room, title, description, agenda, schedule, visibility, capacity, tags and `registrationRequired=true`.
-- Selects an event to inspect registrations and Q&A.
+- Selects an event to inspect registrations and meeting link/chat guidance.
 - Starts, ends or cancels selected event.
 - Shows registered attendees with user name/email/id and status.
-- Shows Q&A moderation queue and can approve, pin/unpin, hide, or mark answered.
+- Shows direct chat guidance instead of a separate moderation queue.
 
 Admin form defaults start time to 24 hours from page load, end time to 25 hours from page load, capacity to `300`, visibility to `public`.
 
@@ -420,7 +380,7 @@ File: `src/contexts/SocketContext.tsx`.
 
 Video event support includes:
 
-- Events listened: `community:video-event:created`, `updated`, `cancelled`, `live`, `ended`, `registered`, `question:new`, `question:updated`.
+- Events listened: `community:video-event:created`, `updated`, `cancelled`, `live`, `ended`, `registered`, and community room message events.
 - Actions exposed: `joinCommunityVideoEvent(eventId, ack?)` and `leaveCommunityVideoEvent(eventId)`.
 - Component subscriptions fan out callbacks by subscriber ID.
 
@@ -497,17 +457,16 @@ Integration files:
 - Backend: `src/sockets/chat.socket.ts`
 - Frontend: `src/contexts/SocketContext.tsx`
 
-Socket.IO is used for event lifecycle and Q&A invalidation, not for media streaming. Video/audio media goes through LiveKit.
+Socket.IO is used for event lifecycle updates and meeting chat messages, not for media streaming. Video/audio media goes through LiveKit.
 
-### AI Moderation
+### Community Room Chat
 
 Integration files:
 
-- `src/services/communityVideoEvents.services.ts`
-- `src/services/aiModeration.services.ts`
-- `src/utils/moderation/moderationEngine`
+- Backend: `src/controllers/community.controllers.ts`, `src/services/community.services.ts`
+- Frontend: `src/services/communityService.ts`, `src/components/community/CommunityVideoEventDetailPage.tsx`
 
-Question submission always runs rule-based moderation. If `AI_MODERATION_ENABLED=true`, it asynchronously calls `aiModerationService.reviewText()` and updates the question. Failures are swallowed in the async `.catch(() => {})`; the original question remains stored with rule-based moderation only.
+The meeting chat reuses `communityMessages` and the existing moderation flow for room messages. There is no separate delayed Q&A queue for video events.
 
 ## 7. Business Rules Summary
 
@@ -544,13 +503,10 @@ Question submission always runs rule-based moderation. If `AI_MODERATION_ENABLED
 31. LiveKit join tokens expire after 2 hours by default.
 32. Only admin/host LiveKit tokens can publish audio/video.
 33. Attendee LiveKit tokens can subscribe but cannot publish by default.
-34. Questions can be submitted only while event is `scheduled` or `live`.
-35. Question content must be 3-2000 characters.
-36. Rule-based high/critical moderation auto-hides questions.
-37. Non-manager users can only see approved/answered questions plus their own questions.
-38. Admin/host can see all questions.
-39. Pinned questions sort before unpinned questions.
-40. When question status becomes `answered`, backend records `answeredBy` and `answeredAt`.
+34. Meeting chat uses the parent community room message API.
+35. A user must be able to join the community room before sending meeting chat messages.
+36. Chat content must be non-empty and at most 2000 characters.
+37. Chat moderation follows the existing community message moderation flow.
 41. Reminder job only processes scheduled events starting 14-16 minutes from now.
 42. Reminder job only sends to registrations with status `registered` and no `reminder15mSentAt` field.
 43. Event-level `reminders.fifteenMinutesSentAt` prevents the same event reminder batch from running repeatedly.
@@ -558,7 +514,7 @@ Question submission always runs rule-based moderation. If `AI_MODERATION_ENABLED
 45. Socket realtime join for private events requires active/invited room membership unless admin/host.
 46. Frontend join button is disabled until user accepts the medical disclaimer and event is live.
 47. Frontend redirects unauthenticated list registration attempts to login.
-48. Q&A UI warns users not to submit personal medical information.
+48. The medical disclaimer warns users that the session is for general information and does not replace personal treatment advice.
 
 ## 8. Error Codes & Messages
 
@@ -572,7 +528,6 @@ Question submission always runs rule-based moderation. If `AI_MODERATION_ENABLED
 | `400` | `Hội thảo không còn nhận đăng ký.` | User registers ended/cancelled event. | Yes |
 | `400` | `Không thể hủy đăng ký hội thảo đã kết thúc.` | User cancels registration after event ended. | Yes |
 | `400` | `Hội thảo chưa bắt đầu.` | User calls join before event is live. | Yes |
-| `400` | `Hội thảo không nhận câu hỏi ở trạng thái hiện tại.` | User submits question outside scheduled/live state. | Yes |
 | `400` | `LiveKit chưa được cấu hình.` | Join token requested without LiveKit env vars. | Yes |
 | `403` | `Bạn không có quyền xem hội thảo này.` | User tries to view private event without membership. | Yes |
 | `403` | `Bạn đã bị cấm trong phòng liên quan.` | Banned member tries to register/join/ask. | Yes |
@@ -583,7 +538,6 @@ Question submission always runs rule-based moderation. If `AI_MODERATION_ENABLED
 | `404` | `Không tìm thấy hội thảo.` | Event not found. | Yes |
 | `404` | `Không tìm thấy đăng ký hợp lệ.` | User cancels missing/inactive registration. | Yes |
 | `404` | `Không tìm thấy đăng ký.` | Admin updates missing registration. | Yes |
-| `404` | `Không tìm thấy câu hỏi.` | Admin updates missing question. | Yes |
 | `409` | `Hội thảo đã đủ số lượng đăng ký.` | Capacity reached on registration. | Yes |
 | `422` | `roomId là bắt buộc` / `roomId không hợp lệ` | Create event validation fails. | Yes |
 | `422` | `title là bắt buộc` / `title độ dài 3-160 ký tự` | Title validation fails. | Yes |
@@ -591,8 +545,7 @@ Question submission always runs rule-based moderation. If `AI_MODERATION_ENABLED
 | `422` | `status khi tạo chỉ nhận draft|scheduled` | Create status invalid. | Yes |
 | `422` | `status không hợp lệ` | Update status invalid. | Yes |
 | `422` | `capacity không hợp lệ` | Capacity outside accepted range/type. | Yes |
-| `422` | `content độ dài 3-2000 ký tự` | Q&A content validation fails. | Yes |
-| `422` | `status câu hỏi không hợp lệ` | Update question status invalid. | Yes |
+| `422` | `content tối đa 2000 ký tự` | Community room chat content validation fails. | Yes |
 | `422` | `status đăng ký không hợp lệ` | Update registration status invalid. | Yes |
 | `422` | `page không hợp lệ` / `limit không hợp lệ` | Pagination validation fails. | Yes |
 | `500` | `{ message, errorInfo }` | Unexpected exception, Mongo error, unhandled integration error. | No, but returned by API currently. |
@@ -617,10 +570,9 @@ Socket ack errors:
 | `AGENDA_JOB_COLLECTION` | Mongo collection used by Agenda.js. | `agendaJobs` | Optional; defaults to `agendaJobs`. |
 | `DB_COMMUNITY_VIDEO_EVENTS_COLLECTION` | Mongo collection name for events. | `communityVideoEvents` | Optional; default exists. |
 | `DB_COMMUNITY_VIDEO_EVENT_REGISTRATIONS_COLLECTION` | Mongo collection name for registrations. | `communityVideoEventRegistrations` | Optional; default exists. |
-| `DB_COMMUNITY_VIDEO_EVENT_QUESTIONS_COLLECTION` | Mongo collection name for Q&A. | `communityVideoEventQuestions` | Optional; default exists. |
 | `DB_COMMUNITY_ROOMS_COLLECTION` | Existing community rooms collection used in lookups. | `communityRooms` | Optional; default exists. |
 | `USERS_COLLECTION` | Users collection for registration user lookup. | `users` | Optional; default exists. |
-| `AI_MODERATION_ENABLED` | Enables async AI moderation for questions. | `false` | Optional. |
+| `AI_MODERATION_ENABLED` | Existing community chat moderation toggle; applies to room messages when enabled by community moderation flow. | `false` | Optional. |
 | `AI_MODERATION_BASE_URL` | AI moderation provider URL used by moderation service. | `http://localhost:8001/v1` | Required only if AI moderation enabled and non-mock. |
 | `AI_MODERATION_MODEL` | AI moderation model. | `gemma-4-e4b-it.gguf` | Optional/default in moderation service. |
 | `AI_MODERATION_API_KEY` | AI provider API key. | `***redacted***` | Provider-dependent. |
@@ -640,7 +592,7 @@ Frontend attendee publishing is intentionally blocked by LiveKit token grants fo
 
 The `provider`, `providerMeetingId`, and `meetingUrl` fields are generic, but `joinEvent()` always returns `provider: livekit` and creates a LiveKit token. Non-LiveKit providers are not implemented.
 
-Admin UI can create/start/end/cancel events and moderate Q&A, but it does not currently expose a full edit form for updating existing event metadata even though `PATCH /admin/community/video-events/:eventId` exists.
+Admin UI can create/start/end/cancel events, but it does not currently expose a full edit form for updating existing event metadata even though `PATCH /admin/community/video-events/:eventId` exists.
 
 Admin UI does not expose attendee removal/status update even though `PATCH /admin/community/video-events/:eventId/registrations/:userId` exists.
 
@@ -656,11 +608,7 @@ Reminder window is 14-16 minutes before start. If scheduler is down during that 
 
 Agenda recurring job may be scheduled by every backend instance in a multi-instance deployment. Agenda's storage helps coordination, but duplicate recurring job behavior should be reviewed before horizontal scaling.
 
-Question AI moderation is async and failure is swallowed. If AI provider fails, the question remains with rule-based moderation only and no user-visible error.
-
-The Q&A `deleted` state exists but no dedicated delete endpoint exists. Admin can set status to `deleted` through update question endpoint.
-
-No automated tests for `communityVideoEvents.services.ts` or routes were found in the inspected files, despite spec mentioning a future test command.
+Automated coverage exists for service rules, frontend component behavior, API/E2E flows, and visual UI/UX screenshots. Route-level integration coverage can still be expanded around negative cases and deployment-like configuration.
 
 The current frontend imports LiveKit components directly in the detail route, which can increase bundle size. Lazy-loading LiveKit UI is a future optimization.
 
@@ -670,4 +618,4 @@ Medical disclaimer is enforced only in frontend UI before calling join. Backend 
 
 Capacity checks are not protected by a transaction. Under heavy concurrent registrations, two users could pass the count check before both upsert, so strict capacity enforcement may need transactional or atomic counter logic.
 
-No explicit rate limit exists for question submission in the inspected feature code. Spam control relies on existing auth/moderation and should be hardened for production.
+No video-event-specific chat rate limit exists in the inspected feature code. Spam control relies on existing community chat auth/moderation and should be hardened for production if needed.
