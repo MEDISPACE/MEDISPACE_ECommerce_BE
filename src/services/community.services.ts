@@ -586,7 +586,7 @@ class CommunityService {
     return databaseService.communityMessages.findOne({ _id: messageId })
   }
 
-  async sendMessage(params: { roomId: ObjectId; userId: ObjectId; content: string }) {
+  async sendMessage(params: { roomId: ObjectId; userId: ObjectId; content: string; imageUrl?: string }) {
     const member = await this.requireCanChat(params.roomId, params.userId)
     const now = new Date()
 
@@ -594,6 +594,7 @@ class CommunityService {
       roomId: params.roomId,
       senderId: params.userId,
       content: params.content,
+      imageUrl: params.imageUrl,
       status: 'visible' as MessageStatus,
       createdAt: now,
       updatedAt: now

@@ -29,8 +29,9 @@ const RATE_LIMIT_WINDOW = 3600 // 1 giờ (seconds)
 // Response dedup cache: 3 phút
 const RESPONSE_CACHE_TTL = 180
 
-// History: lấy tối đa 20 messages gần nhất (~10 lượt)
-const HISTORY_LIMIT = 20
+// History: lấy tối đa 12 messages gần nhất (~6 lượt)
+// [FIX-11] Đồng bộ với AI Service MAX_HISTORY_TURNS=6 (mỗi turn = 2 msg)
+const HISTORY_LIMIT = 12
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface AIContextProduct {
@@ -126,42 +127,62 @@ export async function checkAIRateLimit(
   }
 }
 
-// ── 3. Response Cache ─────────────────────────────────────────────────────────
+// ── 3. Response Cache ──────────────────────────────────────────────────────────
 /**
- * Key: hash của conversationId + message (50 ký tự đầu)
+ * Key: hash của conversationId + message + medicalFingerprint.
+ * medicalFingerprint: hash từ allergies + chronic_diseases của user.
+ * → Nếu user cập nhật dị ứng, cache key thay đổi → không serve response cũ (an toàn y tế).
  * TTL: 3 phút — đủ để dedup câu hỏi lặp lại trong cùng session
  */
-function _buildCacheKey(conversationId: string, message: string): string {
-  const raw = `${conversationId}:${message.slice(0, 50).toLowerCase().trim()}`
-  const hash = crypto.createHash('md5').update(raw).digest('hex').slice(0, 12)
+function _buildMedicalFingerprint(medicalInfo: Record<string, any> | null): string {
+  if (!medicalInfo) return 'no-medical'
+  const sig = [
+    ...(medicalInfo.allergies        ?? []),
+    ...(medicalInfo.chronic_diseases ?? [])
+  ].sort().join('|')
+  return crypto.createHash('md5').update(sig).digest('hex').slice(0, 8)
+}
+
+function _buildCacheKey(
+  conversationId: string,
+  message: string,
+  medicalInfo: Record<string, any> | null = null
+): string {
+  const medFP = _buildMedicalFingerprint(medicalInfo)
+  const raw   = `${conversationId}:${message.slice(0, 50).toLowerCase().trim()}:${medFP}`
+  const hash  = crypto.createHash('md5').update(raw).digest('hex').slice(0, 12)
   return `ai:resp:${hash}`
 }
 
 export async function getResponseCache(
   conversationId: string,
-  message: string
+  message: string,
+  medicalInfo: Record<string, any> | null = null
 ): Promise<AIChatResponse | null> {
-  const key = _buildCacheKey(conversationId, message)
+  const key = _buildCacheKey(conversationId, message, medicalInfo)
   return cacheService.get<AIChatResponse>(key)
 }
 
 export async function setResponseCache(
   conversationId: string,
   message: string,
-  response: AIChatResponse
+  response: AIChatResponse,
+  medicalInfo: Record<string, any> | null = null
 ): Promise<void> {
-  const key = _buildCacheKey(conversationId, message)
+  const key = _buildCacheKey(conversationId, message, medicalInfo)
   // Fire-and-forget, không block response
   cacheService.set(key, response, RESPONSE_CACHE_TTL).catch(() => {})
 }
 
-// ── 4. Non-streaming: gọi AI và trả kết quả ──────────────────────────────────
+// ── 4. Non-streaming: gọi AI và trả kết quả ────────────────────────────────────
 export async function sendToAI(payload: {
   message: string
   conversation_id: string
   user_id: string
   history: AIHistoryMessage[]
   context_products?: AIContextProduct[]
+  context_data?: Record<string, any> | null   // [FIX-10] Phase 3: orders, loyalty
+  image_url?: string                           // Vision: URL ảnh từ Cloudinary
 }): Promise<AIChatResponse> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
@@ -175,7 +196,9 @@ export async function sendToAI(payload: {
         conversation_id: payload.conversation_id,
         user_id: payload.user_id,
         history: payload.history,
-        context_products: payload.context_products || []
+        context_products: payload.context_products || [],
+        context_data: payload.context_data ?? undefined,
+        image_url: payload.image_url ?? undefined       // Vision
       }),
       signal: controller.signal
     })
@@ -256,6 +279,8 @@ export async function streamFromAI(
     user_id: string
     history: AIHistoryMessage[]
     context_products?: AIContextProduct[]
+    context_data?: Record<string, any> | null   // [FIX-10] Phase 3: orders, loyalty
+    image_url?: string                           // Vision: URL ảnh từ Cloudinary
   },
   onChunk: (chunk: string) => void,
   onDone: (response: AIChatResponse) => void,
@@ -273,7 +298,9 @@ export async function streamFromAI(
         conversation_id: payload.conversation_id,
         user_id: payload.user_id,
         history: payload.history,
-        context_products: payload.context_products || []
+        context_products: payload.context_products || [],
+        context_data: payload.context_data ?? undefined,
+        image_url: payload.image_url ?? undefined          // Vision
       }),
       signal: controller.signal
     })

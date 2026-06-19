@@ -156,6 +156,7 @@ Hệ thống quản lý **4 collections** trong Typesense:
 | `dosageInstructions` | string | optional | Hướng dẫn liều dùng |
 | `storageInstructions` | string | optional | Hướng dẫn bảo quản |
 | `createdAt` | int64 | — | Timestamp tạo |
+| `embedding` | float[] | optional, auto-embed | Vector embedding cho RAG hybrid, sinh từ `name`, `indications`, `activeIngredients`, `shortDescription`, `categoryName` bằng `ts/multilingual-e5-small` |
 
 - **Default sorting**: `rating`
 - **Token separators**: `-`, `/`, `(`, `)`, `.`, `,`
@@ -183,6 +184,7 @@ Hệ thống quản lý **4 collections** trong Typesense:
 | `viewCount` | int32 | — | Lượt xem |
 | `publishedAt` | int64 | optional | Ngày xuất bản |
 | `featuredImage` | string | index: false, optional | Ảnh đại diện |
+| `embedding` | float[] | optional, auto-embed | Vector embedding cho RAG hybrid, sinh từ `title`, `excerpt`, `content` bằng `ts/multilingual-e5-small` |
 
 - **Default sorting**: `viewCount`
 
@@ -839,7 +841,8 @@ Chưa có benchmark tự động hoặc số liệu P95/P99 được lưu trong 
 
 ## 16. Giới hạn hiện tại
 
-- **Chưa có semantic/vector search**: schema không có embedding field và query không dùng `vector_query`. Search hiện tại là lexical/full-text search.
+- **Public search vẫn chủ yếu lexical**: API search sản phẩm/bài viết phía BE chưa dùng `vector_query`; semantic/vector search hiện đang được dùng cho Chat AI RAG qua Python service.
+- **Vector RAG phụ thuộc auto-embedding Typesense**: products/articles có field `embedding` auto-embed bằng `ts/multilingual-e5-small`. Nếu collection chưa recreate/reindex hoặc model chưa load, Python RAG sẽ fallback BM25-only.
 - **Reconciliation chưa zero-downtime**: worker xóa document cũ trước khi bulk import, nên search có thể tạm thời trả ít hoặc không có kết quả trong lúc rebuild.
 - **Retry queue vẫn ở memory**: dirty marker trong Mongo đảm bảo lần reconcile sau sẽ sửa lệch dữ liệu, nhưng không lưu từng operation retry.
 - **Mỗi startup đều full reconciliation**: bảo đảm sửa lệch sau restart nhưng làm tăng startup load và tạo khoảng search rỗng.
