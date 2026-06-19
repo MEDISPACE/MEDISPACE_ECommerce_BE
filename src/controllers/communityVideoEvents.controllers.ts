@@ -64,22 +64,6 @@ export const joinVideoEventController = async (req: Request, res: Response) => {
   return res.status(200).json({ message: 'OK', data: payload })
 }
 
-export const listVideoEventQuestionsController = async (req: Request, res: Response) => {
-  const status = (req.query as any).status
-  const result = await communityVideoEventsService.listQuestions(new ObjectId(paramString(req.params.eventId)), authContext(req) || {}, {
-    status: ['pending', 'approved', 'answered', 'hidden', 'deleted'].includes(status) ? status : undefined,
-    page: Number(req.query.page || 1),
-    limit: Number(req.query.limit || 20)
-  })
-  return res.status(200).json({ message: 'OK', data: result })
-}
-
-export const submitVideoEventQuestionController = async (req: Request, res: Response) => {
-  const { userId, role } = req.decoded_authorization as TokenPayload
-  const result = await communityVideoEventsService.submitQuestion(new ObjectId(paramString(req.params.eventId)), new ObjectId(userId), req.body.content, role)
-  return res.status(201).json({ message: 'Đã gửi câu hỏi', data: result })
-}
-
 export const createAdminVideoEventController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const {
@@ -201,14 +185,4 @@ export const updateAdminVideoEventRegistrationController = async (req: Request, 
     req.body
   )
   return res.status(200).json({ message: 'Cập nhật đăng ký thành công', data: registration })
-}
-
-export const updateAdminVideoEventQuestionController = async (req: Request, res: Response) => {
-  const question = await communityVideoEventsService.updateQuestion(
-    new ObjectId(paramString(req.params.eventId)),
-    new ObjectId(paramString(req.params.questionId)),
-    authContext(req) || {},
-    req.body
-  )
-  return res.status(200).json({ message: 'Cập nhật câu hỏi thành công', data: question })
 }

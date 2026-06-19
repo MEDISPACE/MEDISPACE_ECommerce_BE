@@ -56,24 +56,6 @@ export const eventIdValidator = validate(
   )
 )
 
-export const questionIdValidator = validate(
-  checkSchema(
-    {
-      questionId: {
-        in: ['params'],
-        notEmpty: { errorMessage: 'questionId là bắt buộc' },
-        custom: {
-          options: (value) => {
-            if (!ObjectId.isValid(value)) throw new Error('questionId không hợp lệ')
-            return true
-          }
-        }
-      }
-    },
-    ['params']
-  )
-)
-
 export const appealIdValidator = validate(
   checkSchema(
     {
@@ -555,36 +537,6 @@ export const updateVideoEventValidator = validate(
       meetingUrl: { in: ['body'], optional: true, isString: { errorMessage: 'meetingUrl phải là chuỗi' }, trim: true },
       tags: stringArrayValidator('tags'),
       materials: objectArrayValidator('materials', 30)
-    },
-    ['body']
-  )
-)
-
-export const submitVideoQuestionValidator = validate(
-  checkSchema(
-    {
-      content: {
-        in: ['body'],
-        notEmpty: { errorMessage: 'content là bắt buộc' },
-        isString: { errorMessage: 'content phải là chuỗi' },
-        trim: true,
-        isLength: { options: { min: 3, max: 2000 }, errorMessage: 'content độ dài 3-2000 ký tự' }
-      }
-    },
-    ['body']
-  )
-)
-
-export const updateVideoQuestionValidator = validate(
-  checkSchema(
-    {
-      status: {
-        in: ['body'],
-        optional: true,
-        isIn: { options: [['pending', 'approved', 'answered', 'hidden', 'deleted']], errorMessage: 'status câu hỏi không hợp lệ' }
-      },
-      pinned: { in: ['body'], optional: true, isBoolean: { errorMessage: 'pinned phải là boolean' } },
-      answerSummary: { in: ['body'], optional: true, isString: { errorMessage: 'answerSummary phải là chuỗi' }, trim: true, isLength: { options: { min: 1, max: 2000 }, errorMessage: 'answerSummary tối đa 2000 ký tự' } }
     },
     ['body']
   )
