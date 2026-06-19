@@ -4,7 +4,39 @@ import Conversation from '~/models/schemas/Conversation.schema'
 import Message, { MessageType } from '~/models/schemas/Message.schema'
 import { SendMessageReqBody } from '~/models/requests/Chat.request'
 
+type ChatAccessRole = 'customer' | 'pharmacist' | 'admin'
+
 class ChatsService {
+  async assertConversationAccess(conversationId: string, userId: string, role: ChatAccessRole) {
+    const conversationObjectId = new ObjectId(conversationId)
+    const conversation = await databaseService.conversations.findOne({ _id: conversationObjectId })
+
+    if (!conversation) {
+      throw new Error('Conversation not found')
+    }
+
+    if (role === 'admin') {
+      return conversation
+    }
+
+    if (role === 'customer') {
+      if (conversation.customerId?.toString() !== userId) {
+        throw new Error('Access denied')
+      }
+      return conversation
+    }
+
+    if (conversation.type !== 'pharmacist') {
+      throw new Error('Access denied')
+    }
+
+    if (conversation.pharmacistId && conversation.pharmacistId.toString() !== userId) {
+      throw new Error('Access denied')
+    }
+
+    return conversation
+  }
+
   // Get or create conversation for customer (shared inbox - no specific pharmacist)
   async getOrCreateConversation(customerId: string, type: 'ai' | 'pharmacist' = 'ai') {
     const customerObjectId = new ObjectId(customerId)
@@ -151,9 +183,15 @@ class ChatsService {
       conversationId = new ObjectId(payload.conversationId)
 
       // Block sending to closed conversations
-      const conv = await databaseService.conversations.findOne({ _id: conversationId })
-      if (conv && conv.status === 'closed') {
+      const conv = await this.assertConversationAccess(payload.conversationId, senderId, senderRole)
+      if (conv.status === 'closed') {
         throw new Error('Conversation đã được đóng. Vui lòng bắt đầu cuộc tư vấn mới.')
+      }
+      if (senderRole === 'pharmacist' && !conv.pharmacistId) {
+        await databaseService.conversations.updateOne(
+          { _id: conversationId },
+          { $set: { pharmacistId: senderObjectId, updatedAt: new Date() } }
+        )
       }
     } else {
       // Create or get conversation for customer (shared inbox)

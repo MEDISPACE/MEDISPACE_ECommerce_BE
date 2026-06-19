@@ -365,14 +365,27 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           // Admin không gửi tin nhắn qua socket này
           if (socket.userRole === 'admin') return
 
+          const preSendConversation =
+            data.conversationId && ObjectId.isValid(data.conversationId)
+              ? await databaseService.conversations.findOne({ _id: new ObjectId(data.conversationId) })
+              : null
+          const isAiConversation =
+            socket.userRole === 'customer' &&
+            (preSendConversation?.type === 'ai' || (!preSendConversation && !data.conversationId) || data.aiMode === true)
+
           // ── Rate Limit Check (Redis-backed cho AI, in-memory cho non-AI) ────────
           if (socket.userRole === 'customer') {
-            // Dùng Redis rate limit cho AI messages (persist qua restart)
-            const rateCheck = await checkAIRateLimit(socket.userId)
-            if (!rateCheck.allowed) {
-              socket.emit('error', {
-                message: `Bạn đã vượt giới hạn tin nhắn AI (30/giờ). Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
-              })
+            if (isAiConversation) {
+              // Dùng Redis rate limit cho AI messages (persist qua restart)
+              const rateCheck = await checkAIRateLimit(socket.userId)
+              if (!rateCheck.allowed) {
+                socket.emit('error', {
+                  message: `Bạn đã vượt giới hạn tin nhắn AI (30/giờ). Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
+                })
+                return
+              }
+            } else if (!checkSocketRateLimit(socket.userId)) {
+              socket.emit('error', { message: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng chờ một chút trước khi gửi tiếp.' })
               return
             }
           } else {
@@ -497,12 +510,13 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      message: data.content,
+                      message: data.content || '',
                       conversation_id: convIdStr,
                       user_id: socket.userId,
                       history,
                       context_products: contextProducts,
-                      context_data: contextData || undefined
+                      context_data: contextData || undefined,
+                      image_url: data.imageUrl || undefined,   // Vision: forward ảnh sang AI
                     }),
                     signal: AbortSignal.timeout(65000)
                   })
@@ -609,13 +623,6 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         )
                         io.to(`conversation:${convIdStr}`).emit('message:new', systemMsg)
                       }
-                    } else {
-                      // Báo không có dược sĩ online, tiếp tục giữ AI mode
-                      const systemMsg = await chatsService.sendAIMessage(
-                        convIdStr,
-                        'Trợ lý AI nhận thấy bạn cần tư vấn từ Dược sĩ chuyên môn, tuy nhiên hiện tại các Dược sĩ đang offline. Tôi sẽ tiếp tục hỗ trợ bạn, hoặc bạn có thể để lại lời nhắn kèm SĐT.'
-                      )
-                      io.to(`conversation:${convIdStr}`).emit('message:new', systemMsg)
                     }
                   }
                 } catch (aiErr) {
@@ -656,14 +663,16 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     // Khách hàng chủ động yêu cầu chuyển sang Dược sĩ thật từ AI Mode
     socket.on('conversation:request_human', async ({ conversationId }) => {
       try {
+        if (!socket.userId || socket.userRole !== 'customer' || !ObjectId.isValid(conversationId)) {
+          socket.emit('error', { message: 'Không thể kết nối với Dược sĩ lúc này' })
+          return
+        }
+
+        await chatsService.assertConversationAccess(conversationId, socket.userId, 'customer')
+
         // 1. Kiểm tra dược sĩ online
         const onlineCount = await databaseService.users.countDocuments({ role: 1, isOnline: true })
         if (onlineCount === 0) {
-          const systemMsg = await chatsService.sendAIMessage(
-            conversationId,
-            'Hiện tại các Dược sĩ của Medispace đang không online. Trợ lý AI sẽ tiếp tục hỗ trợ bạn. Bạn cũng có thể để lại lời nhắn kèm số điện thoại.'
-          )
-          io.to(`conversation:${conversationId}`).emit('message:new', systemMsg)
           return
         }
 
