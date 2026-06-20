@@ -17,6 +17,25 @@ export interface ProductRef {
   requiresPrescription?: boolean
 }
 
+export type AIClassification =
+  | 'emergency'
+  | 'mental_health_crisis'
+  | 'prescription_request'
+  | 'personalized_dosage'
+  | 'prescription_status'
+  | 'general'
+  | 'drug_info_general'
+  | 'product_search'
+  | 'image_only_triage'
+  | 'prescription_image_info'
+  | 'product_image_info'
+  | 'image_symptom_triage'
+  | 'order_tracking'
+  | 'loyalty_inquiry'
+  | 'coupon_inquiry'
+  | 'return_request'
+  | string
+
 interface MessageSchemaType {
   _id?: ObjectId
   conversationId: ObjectId
@@ -31,7 +50,7 @@ interface MessageSchemaType {
   feedback?: 'up' | 'down' // phản hồi từ khách hàng
   isRead: boolean
   isAI?: boolean
-  aiClassification?: 'emergency' | 'prescription_request' | 'general'
+  aiClassification?: AIClassification
   createdAt?: Date
   updatedAt?: Date
 }
@@ -50,7 +69,7 @@ export default class Message {
   feedback?: 'up' | 'down'
   isRead: boolean
   isAI?: boolean
-  aiClassification?: 'emergency' | 'prescription_request' | 'general'
+  aiClassification?: AIClassification
   createdAt?: Date
   updatedAt?: Date
 
