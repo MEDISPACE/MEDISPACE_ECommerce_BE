@@ -2,13 +2,13 @@
 
 ## 1. Overview
 
-Community Video Events là tính năng hội thảo video trực tuyến trong Community module của MEDISPACE. Tính năng cho phép admin tạo link cuộc họp theo phòng cộng đồng, người dùng đăng ký tham gia, host bắt đầu/kết thúc buổi live, người tham gia vào phòng video LiveKit và trao đổi ngay bằng chat realtime của phòng cộng đồng.
+Community Video Events là tính năng hội thảo video trực tuyến trong Community module của MEDISPACE. Tính năng cho phép admin tạo link cuộc họp theo phòng cộng đồng, host bắt đầu/kết thúc buổi live, người dùng bấm link để vào phòng video LiveKit và trao đổi ngay bằng chat realtime của phòng cộng đồng.
 
-Mục tiêu kinh doanh là giúp MEDISPACE Pharmacy chia sẻ kiến thức, kỹ năng và kinh nghiệm chăm sóc sức khỏe tới cộng đồng trong chính ứng dụng MEDISPACE, thay vì phụ thuộc vào link họp bên ngoài như Zoom/Meet. Tính năng tập trung vào tương tác tức thời trong cuộc họp: quyền xem theo room, đăng ký, LiveKit, chat realtime, nhắc lịch và audit dữ liệu tham dự.
+Mục tiêu kinh doanh là giúp MEDISPACE Pharmacy chia sẻ kiến thức, kỹ năng và kinh nghiệm chăm sóc sức khỏe tới cộng đồng trong chính ứng dụng MEDISPACE, thay vì phụ thuộc vào link họp bên ngoài như Zoom/Meet. Tính năng tập trung vào tương tác tức thời trong cuộc họp: quyền xem theo room, link tham gia trực tiếp, LiveKit, chat realtime, nhắc lịch và audit dữ liệu tham dự.
 
-Người dùng chính gồm `guest`, `customer/user đã xác thực`, `admin`, và `host/pharmacist`. Guest chỉ xem được danh sách public qua endpoint public. User đã xác thực có thể xem chi tiết, đăng ký, hủy đăng ký, tham gia khi event live và chat trực tiếp trong phòng họp. Admin có thể tạo, cập nhật, start/end/cancel event và xem registration. Host được xác định qua `hostIds` hoặc role admin trong backend service.
+Người dùng chính gồm `guest`, `customer/user đã xác thực`, `admin`, và `host/pharmacist`. Guest chỉ xem được danh sách public qua endpoint public. User đã xác thực có thể xem chi tiết, tham gia bằng link khi event live và chat trực tiếp trong phòng họp. Admin có thể tạo, cập nhật, start/end/cancel event và xem danh sách tham dự. Host được xác định qua `hostIds` hoặc role admin trong backend service.
 
-High-level flow: admin tạo link cuộc họp gắn với một community room active; user xem danh sách/chi tiết, đăng ký, nhận reminder trước giờ bắt đầu; admin/host start event; user bấm join, backend kiểm tra quyền và cấp LiveKit JWT; frontend dùng token để kết nối LiveKit room; chat cuộc họp dùng message API và Socket.IO hiện có của community room.
+High-level flow: admin tạo link cuộc họp gắn với một community room active; user xem danh sách/chi tiết; admin/host start event; user bấm join, backend kiểm tra quyền và cấp LiveKit JWT; frontend dùng token để kết nối LiveKit room; chat cuộc họp dùng message API và Socket.IO hiện có của community room.
 
 ```text
 Admin/Host
@@ -20,7 +20,7 @@ MEDISPACE Backend ---- Agenda Reminder ---- Notifications
    v                    Registered Users
 MongoDB
    ^
-   | list/register/join/chat
+   | list/join/chat
 User Frontend ---- LiveKit JWT ---- LiveKit Self-host/Cloud
    |                                |
    +----- Socket.IO room chat ------+
@@ -60,7 +60,7 @@ Collection names for the two video-event collections are configurable by environ
 | `endedAt` | `Date \/ null` | Yes | Set when event ends; initially `null`. |
 | `hostIds` | `ObjectId[]` | No | Host users; admin can also manage regardless of hostIds. |
 | `speakerProfiles` | `object[]` | No | Display-only speaker metadata; defaults to empty array. |
-| `registrationRequired` | `boolean` | Yes | Defaults to `true`; if `false`, non-host join does not require registration. |
+| `registrationRequired` | `boolean` | Yes | Defaults to `false`; join by link is the default. The registration endpoints remain for reminders/capacity workflows but are not required to enter a live meeting. |
 | `capacity` | `number \/ null` | No | Validator accepts integer 1-10000 or null. Capacity counts `registered` + `attended`. |
 | `provider` | `string` | Yes | Defaults to `livekit`; service currently returns only LiveKit join payload. |
 | `providerMeetingId` | `string \/ null` | No | External provider meeting ID; defaults to `null`. |
@@ -166,7 +166,7 @@ Unexpected errors use HTTP `500` with `message` and `errorInfo`.
 
 | Method | Path | Auth | Controller | Request | Success | Status Codes |
 |--------|------|------|------------|---------|---------|--------------|
-| `GET` | `/community/video-events` | Optional; no token validator on route | `listVideoEventsController` | Query: `roomId?: ObjectId`, `status?: draft/scheduled/live/ended/cancelled`, `visibility?: public/private`, `search?: string`, `upcomingOnly?: "true"`, `page?: int 1-100000`, `limit?: int 1-50` | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `422`, `500` |
+| `GET` | `/community/video-events` | Optional; `optionalAccessTokenValidator` personalizes private visibility when a valid token is present | `listVideoEventsController` | Query: `roomId?: ObjectId`, `status?: draft/scheduled/live/ended/cancelled`, `visibility?: public/private`, `search?: string`, `upcomingOnly?: "true"`, `page?: int 1-100000`, `limit?: int 1-50` | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `422`, `500` |
 | `GET` | `/community/video-events/my` | Required access token + verified user | `listMyVideoEventsController` | Query: `status?`, `page?`, `limit?` | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `401`, `422`, `500` |
 | `GET` | `/community/video-events/:eventId` | Required access token + verified user | `getVideoEventDetailController` | Param: `eventId` valid ObjectId | `200 { message: "OK", data: eventWithRoomRegistrationCountViewerRegistration }` | `200`, `401`, `403`, `404`, `422`, `500` |
 | `POST` | `/community/video-events/:eventId/register` | Required access token + verified user | `registerVideoEventController` | Param: `eventId` valid ObjectId | `201 { message: "Đăng ký hội thảo thành công", data: registration }` | `201`, `400`, `401`, `403`, `404`, `409`, `422`, `500` |
@@ -188,6 +188,9 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 | `POST` | `/admin/community/video-events/:eventId/start` | `startAdminVideoEventController` | Param: valid `eventId`. | `200 { message: "Hội thảo đã bắt đầu", data: event }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
 | `POST` | `/admin/community/video-events/:eventId/end` | `endAdminVideoEventController` | Param: valid `eventId`. | `200 { message: "Hội thảo đã kết thúc", data: event }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
 | `POST` | `/admin/community/video-events/:eventId/cancel` | `cancelAdminVideoEventController` | Param: valid `eventId`. | `200 { message: "Đã hủy hội thảo", data: event }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
+| `GET` | `/admin/community/video-events/:eventId/participants` | `listAdminVideoEventParticipantsController` | Param: valid `eventId`. | `200 { message: "OK", data: { eventId, roomName, participants } }` where each participant has `identity`, `name`, `metadata`, `joinedAt`, `tracks`. | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
+| `POST` | `/admin/community/video-events/:eventId/participants/:userId/mute` | `muteAdminVideoEventParticipantController` | Params: valid `eventId`, valid `userId`. Body: none. | `200 { message: "Đã tắt micro người tham gia", data: { eventId, userId, action: "muted", track } }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
+| `POST` | `/admin/community/video-events/:eventId/participants/:userId/kick` | `kickAdminVideoEventParticipantController` | Params: valid `eventId`, valid `userId`. Body: none. | `200 { message: "Đã mời người tham gia khỏi phòng họp", data: { eventId, userId, action: "kicked" } }` | `200`, `400`, `401`, `403`, `404`, `422`, `500` |
 | `GET` | `/admin/community/video-events/:eventId/registrations` | `listAdminVideoEventRegistrationsController` | Query: `status?: registered/cancelled/attended/no_show/removed`, `page?`, `limit?`. | `200 { message: "OK", data: { items, page, limit, total } }` | `200`, `401`, `403`, `404`, `422`, `500` |
 | `PATCH` | `/admin/community/video-events/:eventId/registrations/:userId` | `updateAdminVideoEventRegistrationController` | Body: `status?` registration enum; `removeReason?` string max 500. | `200 { message: "Cập nhật đăng ký thành công", data: registration }` | `200`, `401`, `403`, `404`, `422`, `500` |
 
@@ -213,7 +216,7 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 | `assertCanJoinOrRegister(event, userId, role)` | Enforces join/register permission. | event + userId + role -> void | Admin/host bypass; banned room member is forbidden; private events require active/invited membership. |
 | `assertCanManageEvent(event, context)` | Enforces management permission. | event + auth context -> void | Admin or host only; otherwise `403 Bạn không có quyền quản lý hội thảo này.` |
 | `canAccessVideoEvent(eventId, context)` | Safe boolean access check. | eventId + context -> boolean | Catches all errors and returns false. Currently used as helper for potential socket/access checks. |
-| `createEvent(params)` | Creates event document. | create params -> event | Requires active room and end > start. Defaults provider/livekit, registrationRequired true, recordingStatus none, reminders null. Emits `community:video-event:created` to room and admins. |
+| `createEvent(params)` | Creates event document. | create params -> event | Requires active room and end > start. Defaults provider/livekit, registrationRequired false, recordingStatus none, reminders null. Emits `community:video-event:created` to room and admins. |
 | `updateEvent(eventId, params, context)` | Updates event metadata. | eventId + partial body + context -> updated event | Requires manage permission. Converts hostIds to ObjectIds, validates end > start, updates `updatedAt`. Emits `community:video-event:updated` to parent room and video-event room. |
 | `listEvents(params)` | Lists events with filters and permission-aware visibility. | filters -> paginated result | Non-admin cannot see `draft` or `cancelled`. Guest sees only public. Auth user sees public plus private events for active/invited rooms. Aggregates room summary and registrationCount. |
 | `listMyEvents(userId, role, params)` | Lists events where user registered/attended or is host. | userId + role + filters -> paginated result | Non-admin excludes cancelled by default. Sorts by scheduledStartAt ascending. |
@@ -223,9 +226,12 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 | `endEvent(eventId, context)` | Ends live event. | eventId + context -> updated event | Requires manage permission. Only `live` can end. Sets `status=ended`, `endedAt`; changes all remaining `registered` registrations to `no_show`; emits ended. |
 | `registerForEvent(eventId, userId, role)` | Registers user for event. | eventId + userId + role -> registration | Blocks ended/cancelled. Enforces access. Checks capacity. Upserts registration to `registered`, resets `cancelledAt`, emits `community:video-event:registered` to user. |
 | `cancelRegistration(eventId, userId)` | Cancels user's active registration. | eventId + userId -> registration | Blocks ended events. Only cancels `registered` or `attended`. Throws `404` if no active registration. |
-| `joinEvent(eventId, userId, role)` | Issues LiveKit token and marks attendance. | eventId + userId + role -> join payload | Requires access and `status=live`. Non-host must be registered/attended when `registrationRequired=true`. Calls `liveKitService.createJoinToken()`, upserts registration as `attended`, emits attendee joined. |
+| `joinEvent(eventId, userId, role)` | Issues LiveKit token and marks attendance. | eventId + userId + role -> join payload | Requires access and `status=live`. Any authenticated allowed viewer can join by link. Calls `liveKitService.createJoinToken()` with account display name/avatar, upserts attendance as `attended`, emits attendee joined. |
 | `listRegistrations(eventId, context, params)` | Admin/host registration list. | eventId + context + filters -> paginated result | Requires manage permission. Joins user summary. Supports status filter. |
 | `updateRegistration(eventId, userId, context, params)` | Admin/host updates attendee status. | eventId + userId + body -> registration | Requires manage permission. If `status=removed`, records `removedBy` and `removeReason`. Emits `community:video-event:registration:updated` to user. |
+| `listLiveParticipants(eventId, context)` | Lists currently connected LiveKit participants. | eventId + context -> `{ eventId, roomName, participants }` | Requires manage permission. Calls LiveKit RoomService `listParticipants()` for `medispace-event-{eventId}`. |
+| `muteLiveParticipantAudio(eventId, userId, context)` | Mutes a connected participant's microphone track. | eventId + userId + context -> `{ action: "muted", track }` | Requires manage permission. Calls LiveKit RoomService `getParticipant()` then `mutePublishedTrack()` for the microphone track. Throws `404` when no microphone track is published. Emits an event-room update payload. |
+| `kickLiveParticipant(eventId, userId, context)` | Disconnects a participant from the current LiveKit room. | eventId + userId + context -> `{ action: "kicked" }` | Requires manage permission. Calls LiveKit RoomService `removeParticipant()`. The participant can rejoin later if application-level access still allows it. |
 | `sendDueReminders()` | Sends 15-minute reminders. | none -> `{ processedEvents }` | Finds scheduled events starting in 14-16 minutes and not event-marked sent. Sends notification to registered users without `reminder15mSentAt`, updates registration and event reminder marker. |
 
 ### `src/services/livekit.services.ts`
@@ -234,7 +240,11 @@ All routes in `src/routes/adminCommunity.routes.ts` use `accessTokenValidator`, 
 |----------|---------|-----------------|----------------|
 | `isConfigured()` | Checks required LiveKit env vars. | none -> boolean | Requires `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_WS_URL`. |
 | `getWsUrl()` | Returns LiveKit WebSocket URL. | none -> string | Returns empty string when env missing. |
-| `createJoinToken(params)` | Creates LiveKit JWT. | `{ eventId, userId, isHost, ttl? } -> JWT string` | Throws `400 LiveKit chưa được cấu hình.` if env missing. Room is `medispace-event-{eventId}`. Host/admin can publish; attendees can subscribe only. TTL defaults to `2h`. `canPublishData=false`. |
+| `getRoomName(eventId)` | Builds the deterministic LiveKit room name. | eventId -> `medispace-event-{eventId}` | Used by join token generation and admin moderation API. |
+| `listParticipants(eventId)` | Lists connected LiveKit participants. | eventId -> participant summaries | Uses `RoomServiceClient` against the HTTPS version of `LIVEKIT_WS_URL`. Parses participant metadata and maps track sources to readable strings. |
+| `muteParticipantAudio(eventId, userId)` | Mutes a participant's microphone track. | eventId + userId -> mute result | Finds a `TrackSource.MICROPHONE` track and calls `mutePublishedTrack()`. Throws `404 Không tìm thấy micro đang bật của người tham gia.` when the participant has not published a mic track. |
+| `removeParticipant(eventId, userId)` | Kicks a participant from the current room session. | eventId + userId -> kick result | Calls `removeParticipant()`. LiveKit disconnects the participant, but does not permanently ban the identity. |
+| `createJoinToken(params)` | Creates LiveKit JWT. | `{ eventId, userId, displayName?, avatar?, isHost, ttl? } -> JWT string` | Throws `400 LiveKit chưa được cấu hình.` if env missing. Room is `medispace-event-{eventId}`. All participants can publish microphone, camera, screen share, and data. Token name uses the account display name. TTL defaults to `2h`. |
 
 ### `src/services/scheduler.services.ts`
 
@@ -289,7 +299,7 @@ Admin navigation includes `/admin/video-events` in `src/components/layout/AdminL
 
 | Area | Mechanism | Details |
 |------|-----------|---------|
-| Server data | TanStack Query | Event list/detail/registrations and room messages are queried by stable query keys and invalidated after mutations. |
+| Server data | TanStack Query | Event list/detail/registrations/live participants and room messages are queried by stable query keys and invalidated after mutations. |
 | Auth | `useAuth()` | Used to gate registration/detail/join. Unauthenticated users are redirected to login. |
 | Socket | `SocketContext` | Adds `joinCommunityVideoEvent`, `leaveCommunityVideoEvent`, `joinCommunityRoom`, `leaveCommunityRoom`, video-event update callbacks and room message callbacks. |
 | LiveKit room | Local React state | `joinPayload` stores backend token/wsUrl. Rendering `LiveKitRoom` starts after join success. |
@@ -322,6 +332,9 @@ Admin API methods:
 | `cancelVideoEvent(eventId)` | `POST /admin/community/video-events/:eventId/cancel` | Admin Cancel button. |
 | `listVideoEventRegistrations(params)` | `GET /admin/community/video-events/:eventId/registrations` | Admin selected event attendee panel. |
 | `updateVideoEventRegistration(eventId, userId, data)` | `PATCH /admin/community/video-events/:eventId/registrations/:userId` | Service exists; current page does not expose attendee remove/status actions. |
+| `listVideoEventParticipants(eventId)` | `GET /admin/community/video-events/:eventId/participants` | Admin selected live event moderation panel. |
+| `muteVideoEventParticipant(eventId, userId)` | `POST /admin/community/video-events/:eventId/participants/:userId/mute` | Admin Mute button for a connected participant. |
+| `kickVideoEventParticipant(eventId, userId)` | `POST /admin/community/video-events/:eventId/participants/:userId/kick` | Admin Kick button for a connected participant. |
 
 ### `CommunityVideoEventsPage`
 
@@ -331,11 +344,11 @@ Responsibilities:
 
 - Displays searchable list of community video events.
 - Shows status, visibility, room badge, schedule and registration count/capacity.
-- Lets authenticated users register; redirects unauthenticated users to `/login` with `from` state.
-- Invalidates `community-video-events` queries after successful registration.
+- Shows direct meeting links instead of a registration-first flow.
+- Lets users open the event detail/meeting URL; the detail page owns login and join gating.
 - Shows loading state `Đang tải lịch hội thảo...` and empty state `Chưa có hội thảo phù hợp.`.
 
-Error handling uses toast messages from `error.response.data.message` or generic `Không thể đăng ký hội thảo`.
+Error handling uses toast messages from `error.response.data.message` or generic list/detail messages.
 
 ### `CommunityVideoEventDetailPage`
 
@@ -347,7 +360,7 @@ Responsibilities:
 - Loads event detail and, after joining, room chat messages.
 - Joins Socket.IO event room through `socket.joinCommunityVideoEvent(eventId)` and subscribes to event updates.
 - Shows medical disclaimer checkbox before join.
-- Allows registration when not registered and event is not ended.
+- Opens the meeting link/detail page and lets authenticated users join directly when the event is live.
 - Enables join button only when disclaimer accepted and event status is `live`.
 - Calls backend join endpoint, stores `joinPayload`, then renders `LiveKitRoom` and `VideoConference` from `@livekit/components-react`.
 - Shows `Chat cuộc họp` after LiveKit join and subscribes to room message events.
@@ -364,10 +377,13 @@ Responsibilities:
 
 - Lists active community rooms for event creation.
 - Lists/searches admin video events.
-- Creates a new LiveKit provider event with room, title, description, agenda, schedule, visibility, capacity, tags and `registrationRequired=true`.
+- Creates a new LiveKit provider event with room, title, description, agenda, schedule, visibility, capacity, tags and `registrationRequired=false` by default.
 - Selects an event to inspect registrations and meeting link/chat guidance.
 - Starts, ends or cancels selected event.
-- Shows registered attendees with user name/email/id and status.
+- For live events, shows connected LiveKit participants with microphone state.
+- Lets admin mute a connected participant's microphone through LiveKit RoomService.
+- Lets admin kick a connected participant out of the current LiveKit room session.
+- Shows attendance/registration history with user name/email/id and status.
 - Shows direct chat guidance instead of a separate moderation queue.
 
 Admin form defaults start time to 24 hours from page load, end time to 25 hours from page load, capacity to `300`, visibility to `public`.
@@ -414,8 +430,8 @@ LiveKit token behavior:
 - TTL defaults to 2 hours.
 - `roomJoin=true`.
 - `canSubscribe=true` for all.
-- `canPublish=true` only for admin/host.
-- `canPublishData=false`.
+- `canPublish=true` for all participants so attendees can speak, open camera, and share screen.
+- `canPublishData=true` for all participants.
 
 Failure handling:
 
@@ -498,23 +514,27 @@ The meeting chat reuses `communityMessages` and the existing moderation flow for
 26. An ended event cannot be cancelled.
 27. Ending an event marks remaining `registered` users as `no_show`.
 28. Join is allowed only when event status is `live`.
-29. Non-host users must have registration when `registrationRequired=true`.
+29. Authenticated allowed viewers can join a live event by link without prior registration.
 30. Admin/host can join without registration requirement.
 31. LiveKit join tokens expire after 2 hours by default.
-32. Only admin/host LiveKit tokens can publish audio/video.
-33. Attendee LiveKit tokens can subscribe but cannot publish by default.
+32. All LiveKit join tokens can publish audio/video/screen share/data.
+33. Participant display name in LiveKit comes from the MEDISPACE account name, falling back to email/userId.
 34. Meeting chat uses the parent community room message API.
 35. A user must be able to join the community room before sending meeting chat messages.
 36. Chat content must be non-empty and at most 2000 characters.
 37. Chat moderation follows the existing community message moderation flow.
-41. Reminder job only processes scheduled events starting 14-16 minutes from now.
-42. Reminder job only sends to registrations with status `registered` and no `reminder15mSentAt` field.
-43. Event-level `reminders.fifteenMinutesSentAt` prevents the same event reminder batch from running repeatedly.
-44. Socket realtime join rejects draft/cancelled/missing events.
-45. Socket realtime join for private events requires active/invited room membership unless admin/host.
-46. Frontend join button is disabled until user accepts the medical disclaimer and event is live.
-47. Frontend redirects unauthenticated list registration attempts to login.
-48. The medical disclaimer warns users that the session is for general information and does not replace personal treatment advice.
+38. Admin/host can list connected LiveKit participants for a managed event.
+39. Admin/host can mute only an actively published microphone track; no microphone track returns a `404`.
+40. Admin/host can kick a participant from the current LiveKit room session.
+41. Kick disconnects the current session but does not permanently ban rejoin by itself.
+42. Reminder job only processes scheduled events starting 14-16 minutes from now.
+43. Reminder job only sends to registrations with status `registered` and no `reminder15mSentAt` field.
+44. Event-level `reminders.fifteenMinutesSentAt` prevents the same event reminder batch from running repeatedly.
+45. Socket realtime join rejects draft/cancelled/missing events.
+46. Socket realtime join for private events requires active/invited room membership unless admin/host.
+47. Frontend join button is disabled until user accepts the medical disclaimer and event is live.
+48. Frontend list page opens direct event links instead of forcing registration first.
+49. The medical disclaimer warns users that the session is for general information and does not replace personal treatment advice.
 
 ## 8. Error Codes & Messages
 
@@ -533,9 +553,9 @@ The meeting chat reuses `communityMessages` and the existing moderation flow for
 | `403` | `Bạn đã bị cấm trong phòng liên quan.` | Banned member tries to register/join/ask. | Yes |
 | `403` | `Hội thảo riêng tư yêu cầu quyền truy cập phòng.` | Private event register/join without active/invited membership. | Yes |
 | `403` | `Bạn không có quyền quản lý hội thảo này.` | Non-admin/non-host manages event. | Yes |
-| `403` | `Bạn cần đăng ký trước khi tham gia.` | Non-host joins registration-required event without registration. | Yes |
 | `404` | `Không tìm thấy phòng cộng đồng.` | Parent room missing/inactive on create. | Yes |
 | `404` | `Không tìm thấy hội thảo.` | Event not found. | Yes |
+| `404` | `Không tìm thấy micro đang bật của người tham gia.` | Admin mutes a participant who has not published a microphone track. | Yes |
 | `404` | `Không tìm thấy đăng ký hợp lệ.` | User cancels missing/inactive registration. | Yes |
 | `404` | `Không tìm thấy đăng ký.` | Admin updates missing registration. | Yes |
 | `409` | `Hội thảo đã đủ số lượng đăng ký.` | Capacity reached on registration. | Yes |
@@ -588,13 +608,17 @@ Deployment-specific LiveKit self-host config is stored on the LiveKit server in 
 
 Recording/Egress is not implemented. Fields `recordingUrl` and `recordingStatus` exist, but there is no LiveKit Egress worker, webhook, S3 upload pipeline or retention policy in the inspected code.
 
-Frontend attendee publishing is intentionally blocked by LiveKit token grants for non-hosts (`canPublish=false`). This fits webinar mode, but it means attendees cannot speak on camera/mic unless backend logic changes token grants.
+Attendee publishing is enabled for all participants (`canPublish=true`) so meetings behave like Google Meet: any joined user can speak, open camera, and share screen. Admin moderation currently supports listing connected LiveKit participants, muting microphone tracks, and kicking a participant from the current session.
+
+LiveKit `removeParticipant()` disconnects the participant from the current room session. It does not permanently ban that user from rejoining if the application still grants join access. A persistent ban/block list would require an additional app-level access rule before issuing new LiveKit tokens.
+
+LiveKit microphone mute only works after the participant has published a microphone track. If the user has not enabled their microphone, the backend returns `404 Không tìm thấy micro đang bật của người tham gia.`.
 
 The `provider`, `providerMeetingId`, and `meetingUrl` fields are generic, but `joinEvent()` always returns `provider: livekit` and creates a LiveKit token. Non-LiveKit providers are not implemented.
 
 Admin UI can create/start/end/cancel events, but it does not currently expose a full edit form for updating existing event metadata even though `PATCH /admin/community/video-events/:eventId` exists.
 
-Admin UI does not expose attendee removal/status update even though `PATCH /admin/community/video-events/:eventId/registrations/:userId` exists.
+Admin UI does not expose attendee removal/status update for historical registration records even though `PATCH /admin/community/video-events/:eventId/registrations/:userId` exists. Live room moderation is exposed separately through the connected participants panel.
 
 User UI service includes `cancelVideoEventRegistration()`, but inspected pages do not show a cancel registration button.
 

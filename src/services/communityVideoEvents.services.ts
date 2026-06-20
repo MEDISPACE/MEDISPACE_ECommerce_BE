@@ -258,7 +258,7 @@ class CommunityVideoEventsService {
       endedAt: null,
       hostIds: params.hostIds || [],
       speakerProfiles: Array.isArray(params.speakerProfiles) ? params.speakerProfiles : [],
-      registrationRequired: params.registrationRequired !== false,
+      registrationRequired: params.registrationRequired === true,
       capacity: params.capacity ?? null,
       provider: params.provider?.trim() || 'livekit',
       providerMeetingId: params.providerMeetingId?.trim() || null,
@@ -597,12 +597,19 @@ class CommunityVideoEventsService {
     await this.assertCanJoinOrRegister(event, userId, role)
     if (event.status !== 'live') throw new ErrorWithStatus({ message: 'Hội thảo chưa bắt đầu.', status: HTTP_STATUS.BAD_REQUEST })
     const isHost = role === UserRole.Admin || this.isHost(event, userId)
-    if (event.registrationRequired && !isHost) {
-      const registration = await databaseService.communityVideoEventRegistrations.findOne({ eventId, userId, status: { $in: ['registered', 'attended'] } })
-      if (!registration) throw new ErrorWithStatus({ message: 'Bạn cần đăng ký trước khi tham gia.', status: HTTP_STATUS.FORBIDDEN })
-    }
+    const user = await databaseService.users.findOne(
+      { _id: userId },
+      { projection: { firstName: 1, lastName: 1, email: 1, avatar: 1 } }
+    )
+    const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.email || userId.toString()
 
-    const token = await liveKitService.createJoinToken({ eventId: eventId.toString(), userId: userId.toString(), isHost })
+    const token = await liveKitService.createJoinToken({
+      eventId: eventId.toString(),
+      userId: userId.toString(),
+      displayName,
+      avatar: user?.avatar || '',
+      isHost
+    })
     const now = new Date()
     await databaseService.withTransaction(async (session) => {
       const current = await databaseService.communityVideoEventRegistrations.findOne({ eventId, userId }, { session })
@@ -700,6 +707,34 @@ class CommunityVideoEventsService {
     if (!registration) throw new ErrorWithStatus({ message: 'Không tìm thấy đăng ký.', status: HTTP_STATUS.NOT_FOUND })
     emitUser(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.REGISTRATION_UPDATED, userId, registration)
     return registration
+  }
+
+  async listLiveParticipants(eventId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const participants = await liveKitService.listParticipants(eventId.toString())
+    return { eventId: eventId.toString(), roomName: liveKitService.getRoomName(eventId.toString()), participants }
+  }
+
+  async muteLiveParticipantAudio(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.muteParticipantAudio(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-muted',
+      track: result.track
+    })
+    return result
+  }
+
+  async kickLiveParticipant(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.removeParticipant(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, { eventId, userId, action: 'participant-kicked' })
+    return result
   }
 
   async sendDueReminders() {

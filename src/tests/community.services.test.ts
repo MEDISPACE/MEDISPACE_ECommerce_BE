@@ -218,6 +218,24 @@ describe('CommunityService', () => {
     expect(mockModerationFindings.insertOne).not.toHaveBeenCalled()
   })
 
+  it('sends image-only message – status=visible, imageUrl stored', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const imageUrl = 'https://cdn.medispace.test/community/image.png'
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: userId, content: '', imageUrl, status: 'visible', moderated: { autoHidden: false } })
+
+    const result = await communityService.sendMessage({ roomId, userId, imageUrl })
+
+    expect(result.message?.imageUrl).toBe(imageUrl)
+    expect(mockCommunityMessages.insertOne).toHaveBeenCalledWith(expect.objectContaining({ content: '', imageUrl }))
+    expect(result.moderation.severity).toBe('low')
+  })
+
   it('sends message with phone number – status=hidden, severity=high, autoHidden=true', async () => {
     const roomId = new ObjectId()
     const userId = new ObjectId()
