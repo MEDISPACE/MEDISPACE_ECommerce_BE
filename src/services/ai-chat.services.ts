@@ -20,7 +20,8 @@ import { MessageType } from '~/models/schemas/Message.schema'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const AI_SERVICE_URL = process.env.CHAT_AI_URL || 'http://localhost:8003'
-const AI_TIMEOUT_MS = 60_000 // 60s — LLM có thể mất 30s
+const AI_TIMEOUT_MS = Number(process.env.CHAT_AI_TIMEOUT_MS || 60_000)
+const AI_IMAGE_TIMEOUT_MS = Number(process.env.CHAT_AI_IMAGE_TIMEOUT_MS || 180_000)
 
 // Rate limit: 30 messages/user/hour (Redis-based, survives restart)
 const RATE_LIMIT_MAX = 30
@@ -29,8 +30,7 @@ const RATE_LIMIT_WINDOW = 3600 // 1 giờ (seconds)
 // Response dedup cache: 3 phút
 const RESPONSE_CACHE_TTL = 180
 
-// History: lấy tối đa 12 messages gần nhất (~6 lượt)
-// [FIX-11] Đồng bộ với AI Service MAX_HISTORY_TURNS=6 (mỗi turn = 2 msg)
+// History: lấy tối đa 20 messages gần nhất (~10 lượt)
 const HISTORY_LIMIT = 12
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -60,6 +60,7 @@ export interface AIChatResponse {
     slug: string
     imageUrl: string
     unit: string
+    requiresPrescription?: boolean
   }>
   suggested_questions: string[]
 }
@@ -69,12 +70,16 @@ export interface AIChatResponse {
  * Load N messages gần nhất từ MongoDB và format thành history cho AI.
  * Bao gồm cả tin nhắn từ pharmacist thật — AI biết toàn bộ context.
  */
-export async function buildHistory(conversationId: string): Promise<AIHistoryMessage[]> {
+export async function buildHistory(conversationId: string, options: { excludeMessageId?: ObjectId | string } = {}): Promise<AIHistoryMessage[]> {
   try {
     const conversationObjectId = new ObjectId(conversationId)
+    const filter: Record<string, any> = { conversationId: conversationObjectId }
+    if (options.excludeMessageId) {
+      filter._id = { $ne: typeof options.excludeMessageId === 'string' ? new ObjectId(options.excludeMessageId) : options.excludeMessageId }
+    }
 
     const messages = await databaseService.messages
-      .find({ conversationId: conversationObjectId })
+      .find(filter)
       .sort({ createdAt: -1 })
       .limit(HISTORY_LIMIT)
       .toArray()
@@ -127,65 +132,78 @@ export async function checkAIRateLimit(
   }
 }
 
-// ── 3. Response Cache ──────────────────────────────────────────────────────────
+// ── 3. Response Cache ─────────────────────────────────────────────────────────
 /**
- * Key: hash của conversationId + message + medicalFingerprint.
- * medicalFingerprint: hash từ allergies + chronic_diseases của user.
- * → Nếu user cập nhật dị ứng, cache key thay đổi → không serve response cũ (an toàn y tế).
+ * Key: hash của conversationId + message (50 ký tự đầu)
  * TTL: 3 phút — đủ để dedup câu hỏi lặp lại trong cùng session
  */
-function _buildMedicalFingerprint(medicalInfo: Record<string, any> | null): string {
-  if (!medicalInfo) return 'no-medical'
-  const sig = [
-    ...(medicalInfo.allergies        ?? []),
-    ...(medicalInfo.chronic_diseases ?? [])
-  ].sort().join('|')
-  return crypto.createHash('md5').update(sig).digest('hex').slice(0, 8)
+function stableFingerprint(value: unknown): string {
+  if (value === null || value === undefined) return 'none'
+  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16)
 }
 
-function _buildCacheKey(
-  conversationId: string,
-  message: string,
-  medicalInfo: Record<string, any> | null = null
-): string {
-  const medFP = _buildMedicalFingerprint(medicalInfo)
-  const raw   = `${conversationId}:${message.slice(0, 50).toLowerCase().trim()}:${medFP}`
-  const hash  = crypto.createHash('md5').update(raw).digest('hex').slice(0, 12)
+function normalizeMessage(message: string): string {
+  return message.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function _buildCacheKey(params: {
+  userId: string
+  conversationId: string
+  message: string
+  medicalInfo?: Record<string, any> | null
+  contextProducts?: AIContextProduct[]
+  contextData?: Record<string, any> | null
+}): string {
+  const raw = JSON.stringify({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    message: normalizeMessage(params.message),
+    medical: stableFingerprint(params.medicalInfo ?? null),
+    products: stableFingerprint((params.contextProducts ?? []).map((p) => ({ id: p.mongoId, rx: p.requiresPrescription }))),
+    context: stableFingerprint(params.contextData ?? null)
+  })
+  const hash = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24)
   return `ai:resp:${hash}`
 }
 
 export async function getResponseCache(
+  userId: string,
   conversationId: string,
   message: string,
-  medicalInfo: Record<string, any> | null = null
+  medicalInfo: Record<string, any> | null = null,
+  contextProducts: AIContextProduct[] = [],
+  contextData: Record<string, any> | null = null
 ): Promise<AIChatResponse | null> {
-  const key = _buildCacheKey(conversationId, message, medicalInfo)
+  const key = _buildCacheKey({ userId, conversationId, message, medicalInfo, contextProducts, contextData })
   return cacheService.get<AIChatResponse>(key)
 }
 
 export async function setResponseCache(
+  userId: string,
   conversationId: string,
   message: string,
   response: AIChatResponse,
-  medicalInfo: Record<string, any> | null = null
+  medicalInfo: Record<string, any> | null = null,
+  contextProducts: AIContextProduct[] = [],
+  contextData: Record<string, any> | null = null
 ): Promise<void> {
-  const key = _buildCacheKey(conversationId, message, medicalInfo)
+  const key = _buildCacheKey({ userId, conversationId, message, medicalInfo, contextProducts, contextData })
   // Fire-and-forget, không block response
   cacheService.set(key, response, RESPONSE_CACHE_TTL).catch(() => {})
 }
 
-// ── 4. Non-streaming: gọi AI và trả kết quả ────────────────────────────────────
+// ── 4. Non-streaming: gọi AI và trả kết quả ──────────────────────────────────
 export async function sendToAI(payload: {
   message: string
   conversation_id: string
   user_id: string
   history: AIHistoryMessage[]
   context_products?: AIContextProduct[]
-  context_data?: Record<string, any> | null   // [FIX-10] Phase 3: orders, loyalty
-  image_url?: string                           // Vision: URL ảnh từ Cloudinary
+  context_data?: Record<string, any> | null
+  image_url?: string
 }): Promise<AIChatResponse> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), payload.image_url ? AI_IMAGE_TIMEOUT_MS : AI_TIMEOUT_MS)
 
   try {
     const response = await fetch(`${AI_SERVICE_URL}/chat`, {
@@ -198,7 +216,7 @@ export async function sendToAI(payload: {
         history: payload.history,
         context_products: payload.context_products || [],
         context_data: payload.context_data ?? undefined,
-        image_url: payload.image_url ?? undefined       // Vision
+        image_url: payload.image_url ?? undefined
       }),
       signal: controller.signal
     })
@@ -223,7 +241,8 @@ export function saveAIReplyAsync(
   conversationId: string,
   userMessage: string,
   aiResponse: AIChatResponse,
-  senderId: string
+  senderId: string,
+  options: { saveUserMessage?: boolean } = {}
 ): void {
   setImmediate(async () => {
     try {
@@ -232,18 +251,20 @@ export function saveAIReplyAsync(
       const senderObjectId = new ObjectId(senderId)
       const convObjectId = new ObjectId(conversationId)
 
-      await databaseService.messages.insertOne({
-        _id: new ObjectId(),
-        conversationId: convObjectId,
-        senderId: senderObjectId,
-        senderRole: 'customer',
-        content: userMessage,
-        type: MessageType.Text,
-        isRead: false,
-        isAI: false,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      } as any)
+      if (options.saveUserMessage !== false) {
+        await databaseService.messages.insertOne({
+          _id: new ObjectId(),
+          conversationId: convObjectId,
+          senderId: senderObjectId,
+          senderRole: 'customer',
+          content: userMessage,
+          type: MessageType.Text,
+          isRead: false,
+          isAI: false,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as any)
+      }
 
       // 2. Save AI reply
       await chatsService.sendAIMessage(
@@ -279,15 +300,15 @@ export async function streamFromAI(
     user_id: string
     history: AIHistoryMessage[]
     context_products?: AIContextProduct[]
-    context_data?: Record<string, any> | null   // [FIX-10] Phase 3: orders, loyalty
-    image_url?: string                           // Vision: URL ảnh từ Cloudinary
+    context_data?: Record<string, any> | null
+    image_url?: string
   },
   onChunk: (chunk: string) => void,
   onDone: (response: AIChatResponse) => void,
   onError: (err: Error) => void
 ): Promise<void> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), payload.image_url ? AI_IMAGE_TIMEOUT_MS : AI_TIMEOUT_MS)
 
   try {
     const response = await fetch(`${AI_SERVICE_URL}/chat/stream`, {
@@ -300,7 +321,7 @@ export async function streamFromAI(
         history: payload.history,
         context_products: payload.context_products || [],
         context_data: payload.context_data ?? undefined,
-        image_url: payload.image_url ?? undefined          // Vision
+        image_url: payload.image_url ?? undefined
       }),
       signal: controller.signal
     })
@@ -323,8 +344,8 @@ export async function streamFromAI(
       buffer = lines.pop() || '' // giữ lại dòng chưa hoàn chỉnh
 
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
+        if (!line.trim() || line.startsWith(':')) continue
+        const raw = line.startsWith('data: ') ? line.slice(6).trim() : line.trim()
         if (raw === '[DONE]') continue
 
         try {
@@ -334,8 +355,13 @@ export async function streamFromAI(
           } else if (parsed.type === 'done') {
             finalResponse = parsed as AIChatResponse
             onChunk(`data: ${JSON.stringify({ type: 'done', ...parsed })}\n\n`)
+          } else if (parsed.type === 'error') {
+            throw new Error(parsed.message || parsed.content || 'AI stream error')
           }
-        } catch {
+        } catch (err) {
+          if (err instanceof Error && err.message !== 'Unexpected end of JSON input') {
+            throw err
+          }
           // Malformed chunk — bỏ qua
         }
       }
@@ -350,3 +376,4 @@ export async function streamFromAI(
     clearTimeout(timeout)
   }
 }
+

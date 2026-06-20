@@ -26,11 +26,25 @@ import { CHATS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { UserRole } from '~/constants/enum'
 
-// ── Helper: Load PatientMedicalInfo cho AI context ───────────────────────────────
-/**
- * Lấy thông tin y tế của user (dị ứng, bệnh nền, thuốc đang dùng).
- * Trả null nếu không có hoặc query lỗi — AI vẫn chạy bình thường mà không có context này.
- */
+const chatRoleFromToken = (role?: number) =>
+  role === UserRole.Pharmacist ? 'pharmacist' : role === UserRole.Admin ? 'admin' : 'customer'
+
+const firstParam = (value: string | string[] | undefined, fallback = '') =>
+  Array.isArray(value) ? value[0] || fallback : value || fallback
+
+function validateAIMessageInput(message: string, conversationId: string, contextProducts?: unknown[], imageUrl?: string) {
+  const hasMessage = typeof message === 'string' && message.trim().length > 0
+  const hasImage = typeof imageUrl === 'string' && imageUrl.trim().length > 0
+  if (!hasMessage && !hasImage) return 'message or image_url is required'
+  if (message && message.length > 2000) return 'message must not exceed 2000 characters'
+  if (!conversationId || !ObjectId.isValid(conversationId)) return 'conversation_id is invalid'
+  if (hasImage && !/^https?:\/\//i.test(imageUrl.trim())) return 'image_url must be an http(s) URL'
+  if (contextProducts && (!Array.isArray(contextProducts) || contextProducts.length > 10)) {
+    return 'context_products must be an array with at most 10 items'
+  }
+  return null
+}
+
 async function loadMedicalContext(userId: string): Promise<Record<string, any> | null> {
   try {
     const info = await databaseService.patientMedicalInfos.findOne(
@@ -38,8 +52,6 @@ async function loadMedicalContext(userId: string): Promise<Record<string, any> |
       { projection: { allergies: 1, chronic_diseases: 1, current_medications: 1, blood_type: 1 } }
     )
     if (!info) return null
-
-    // Chỉ trả về nếu có data thực sự (không gửi object trống về AI)
     const hasData =
       (info.allergies?.length ?? 0) > 0 ||
       (info.chronic_diseases?.length ?? 0) > 0 ||
@@ -48,14 +60,14 @@ async function loadMedicalContext(userId: string): Promise<Record<string, any> |
     if (!hasData) return null
 
     return {
-      allergies:           info.allergies           ?? [],
-      chronic_diseases:    info.chronic_diseases    ?? [],
+      allergies: info.allergies ?? [],
+      chronic_diseases: info.chronic_diseases ?? [],
       current_medications: (info.current_medications ?? []).map((m: any) => ({
-        drug_name:  m.drug_name,
-        dosage:     m.dosage,
-        frequency:  m.frequency,
+        drug_name: m.drug_name,
+        dosage: m.dosage,
+        frequency: m.frequency
       })),
-      blood_type: info.blood_type ?? null,
+      blood_type: info.blood_type ?? null
     }
   } catch (err) {
     console.error('[AI Chat] loadMedicalContext error:', err)
@@ -65,7 +77,6 @@ async function loadMedicalContext(userId: string): Promise<Record<string, any> |
 
 async function loadCommerceContext(userId: string): Promise<Record<string, any>> {
   const userObjectId = new ObjectId(userId)
-
   const [orders, loyalty] = await Promise.all([
     databaseService.orders
       .find(
@@ -86,18 +97,11 @@ async function loadCommerceContext(userId: string): Promise<Record<string, any>>
       .sort({ createdAt: -1 })
       .limit(3)
       .toArray()
-      .catch((err) => {
-        console.error('[AI Chat] load recent orders error:', err)
-        return []
-      }),
-    loyaltyService.getAccountInfo(userObjectId).catch((err) => {
-      console.error('[AI Chat] load loyalty context error:', err)
-      return null
-    })
+      .catch(() => []),
+    loyaltyService.getAccountInfo(userObjectId).catch(() => null)
   ])
 
   const context: Record<string, any> = {}
-
   if (orders.length > 0) {
     context.orders = orders.map((order: any) => ({
       _id: order._id?.toString(),
@@ -115,7 +119,6 @@ async function loadCommerceContext(userId: string): Promise<Record<string, any>>
         prescriptionRequired: item.prescriptionRequired
       }))
     }))
-
     context.purchaseHistory = orders
       .flatMap((order: any) =>
         (order.items || []).slice(0, 3).map((item: any) => ({
@@ -141,7 +144,6 @@ async function loadCommerceContext(userId: string): Promise<Record<string, any>>
       progressToNextTier: loyalty.progressToNextTier
     }
   }
-
   return context
 }
 
@@ -220,15 +222,14 @@ export const getMessagesController = async (
     })
   }
 
-  const conversationIdStr = Array.isArray(conversationId) ? conversationId[0] : conversationId
+  const conversationIdStr = firstParam(conversationId)
+  await chatsService.assertConversationAccess(conversationIdStr, userId, chatRoleFromToken(role))
 
-  await chatsService.assertConversationAccess(
+  const result = await chatsService.getMessages(
     conversationIdStr,
-    userId,
-    role === UserRole.Pharmacist ? 'pharmacist' : role === UserRole.Admin ? 'admin' : 'customer'
+    parseInt(firstParam(page, '1')),
+    parseInt(firstParam(limit, '50'))
   )
-
-  const result = await chatsService.getMessages(conversationIdStr, parseInt(page), parseInt(limit))
 
   return res.json({
     message: CHATS_MESSAGES.GET_MESSAGES_SUCCESS,
@@ -265,11 +266,7 @@ export const getConversationController = async (req: Request, res: Response) => 
     })
   }
 
-  await chatsService.assertConversationAccess(
-    conversationId as string,
-    userId,
-    role === UserRole.Pharmacist ? 'pharmacist' : role === UserRole.Admin ? 'admin' : 'customer'
-  )
+  await chatsService.assertConversationAccess(conversationId as string, userId, chatRoleFromToken(role))
 
   return res.json({
     message: CHATS_MESSAGES.GET_CONVERSATION_SUCCESS,
@@ -345,8 +342,7 @@ export const saveMessageFeedbackController = async (req: Request, res: Response)
     })
   }
 
-  const messageIdStr = Array.isArray(messageId) ? messageId[0] : messageId
-  await chatsService.saveMessageFeedback(messageIdStr, userId, feedback)
+  await chatsService.saveMessageFeedback(firstParam(messageId), userId, feedback)
 
   return res.json({
     message: 'Lưu feedback tin nhắn thành công'
@@ -365,14 +361,23 @@ export const aiChatController = async (
 ) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const { message, conversation_id, context_products, image_url } = req.body
+  const messageText = message || ''
 
-  // 1. Rate limit + medical context song song (không tăng latency)
+  const inputError = validateAIMessageInput(messageText, conversation_id, context_products, image_url)
+  if (inputError) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: inputError })
+  }
+
+  const conversation = await chatsService.assertConversationAccess(conversation_id, userId, 'customer')
+  if (conversation.status === 'closed') {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Conversation is closed' })
+  }
+
   const [rateCheck, medicalInfo, commerceContext] = await Promise.all([
     checkAIRateLimit(userId),
     loadMedicalContext(userId),
     loadCommerceContext(userId)
   ])
-
   if (!rateCheck.allowed) {
     return res.status(429).json({
       message: `Bạn đã vượt giới hạn ${30} tin nhắn/giờ với AI. Vui lòng thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`,
@@ -380,43 +385,44 @@ export const aiChatController = async (
     })
   }
 
-  // 2. Check response dedup cache — bỏ qua nếu có ảnh (mỗi ảnh là unique)
-  if (!image_url) {
-    const cached = await getResponseCache(conversation_id, message, medicalInfo)
-    if (cached) {
-      return res.json({
-        message: 'Phản hồi từ AI thành công',
-        result: cached,
-        cached: true
-      })
-    }
+  const contextData: Record<string, any> = {}
+  if (medicalInfo) contextData.medicalInfo = medicalInfo
+  Object.assign(contextData, commerceContext)
+  const contextDataOrNull = Object.keys(contextData).length > 0 ? contextData : null
+  const contextProducts = context_products || []
+
+  // 2. Check response dedup cache. Skip images because each image is unique.
+  const cached = image_url
+    ? null
+    : await getResponseCache(userId, conversation_id, messageText, medicalInfo, contextProducts, contextDataOrNull)
+  if (cached) {
+    return res.json({
+      message: 'Phản hồi từ AI thành công',
+      result: cached,
+      cached: true
+    })
   }
 
   // 3. Load history từ MongoDB (bao gồm cả tin pharmacist thật)
   const history = await buildHistory(conversation_id)
 
-  // 4. Build context_data: chỉ đưa vào fields có data thực sự
-  const contextData: Record<string, any> = {}
-  if (medicalInfo) contextData.medicalInfo = medicalInfo
-  Object.assign(contextData, commerceContext)
-
-  // 5. Gọi AI Service
+  // 4. Gọi AI Service
   const aiResponse = await sendToAI({
-    message,
+    message: messageText,
     conversation_id,
     user_id: userId,
     history,
-    context_products: context_products || [],
-    context_data: Object.keys(contextData).length > 0 ? contextData : null,
-    image_url: image_url || undefined                    // Vision
+    context_products: contextProducts,
+    context_data: contextDataOrNull,
+    image_url: image_url || undefined
   })
 
-  // 6. Save vào MongoDB (async, không block user)
-  saveAIReplyAsync(conversation_id, message, aiResponse, userId)
+  // 5. Save vào MongoDB (async, không block user)
+  saveAIReplyAsync(conversation_id, messageText, aiResponse, userId)
 
-  // 7. Cache response (async, không block) — bỏ qua nếu có ảnh
+  // 6. Cache response (async, không block)
   if (!image_url) {
-    setResponseCache(conversation_id, message, aiResponse, medicalInfo)
+    setResponseCache(userId, conversation_id, messageText, aiResponse, medicalInfo, contextProducts, contextDataOrNull)
   }
 
   return res.json({
@@ -436,21 +442,37 @@ export const aiStreamController = async (
   res: Response
 ) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const { message, conversation_id, context_products: contextStr } = req.query
+  const { message, conversation_id, context_products: contextStr, image_url } = req.query
+  const messageText = firstParam(message)
+  const conversationId = firstParam(conversation_id)
+  const imageUrl = firstParam(image_url)
 
-  if (!message || !conversation_id) {
+  if ((!messageText && !imageUrl) || !conversationId) {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({
       message: 'message và conversation_id là bắt buộc'
     })
   }
 
-  // 1. Rate limit + medical context song song (không tăng latency)
+  const inputError = validateAIMessageInput(messageText, conversationId, undefined, imageUrl || undefined)
+  if (inputError) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: inputError })
+  }
+
+  if (!ObjectId.isValid(conversationId)) {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'conversation_id is invalid' })
+  }
+
+  const conversation = await chatsService.assertConversationAccess(conversationId, userId, 'customer')
+  if (conversation.status === 'closed') {
+    return res.status(HTTP_STATUS.BAD_REQUEST).json({ message: 'Conversation is closed' })
+  }
+
+  // 1. Rate limit check
   const [rateCheck, medicalInfo, commerceContext] = await Promise.all([
     checkAIRateLimit(userId),
     loadMedicalContext(userId),
     loadCommerceContext(userId)
   ])
-
   if (!rateCheck.allowed) {
     return res.status(429).json({
       message: `Bạn đã vượt giới hạn tin nhắn AI. Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
@@ -462,17 +484,19 @@ export const aiStreamController = async (
   if (contextStr) {
     try {
       contextProducts = JSON.parse(contextStr)
+      if (!Array.isArray(contextProducts) || contextProducts.length > 10) contextProducts = []
     } catch {
       // Ignore malformed context
     }
   }
 
   // 3. Load history từ MongoDB
-  const history = await buildHistory(conversation_id)
+  const history = await buildHistory(conversationId)
 
   const contextData: Record<string, any> = {}
   if (medicalInfo) contextData.medicalInfo = medicalInfo
   Object.assign(contextData, commerceContext)
+  const contextDataOrNull = Object.keys(contextData).length > 0 ? contextData : null
 
   // 4. Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream')
@@ -489,20 +513,23 @@ export const aiStreamController = async (
   // 5. Stream từ AI Service
   await streamFromAI(
     {
-      message,
-      conversation_id,
+      message: messageText,
+      conversation_id: conversationId,
       user_id: userId,
       history,
       context_products: contextProducts,
-      context_data: Object.keys(contextData).length > 0 ? contextData : null
+      context_data: contextDataOrNull,
+      image_url: imageUrl || undefined
     },
     (chunk) => {
       res.write(chunk)
     },
     (finalResponse) => {
       // Khi stream done: lưu MongoDB + cache (async)
-      saveAIReplyAsync(conversation_id, message, finalResponse, userId)
-      setResponseCache(conversation_id, message, finalResponse, medicalInfo)
+      saveAIReplyAsync(conversationId, messageText, finalResponse, userId)
+      if (!imageUrl) {
+        setResponseCache(userId, conversationId, messageText, finalResponse, medicalInfo, contextProducts, contextDataOrNull)
+      }
     },
     (err) => {
       console.error('[AI Stream] Error:', err.message)
