@@ -1,10 +1,42 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
 import Conversation from '~/models/schemas/Conversation.schema'
-import Message, { MessageType } from '~/models/schemas/Message.schema'
+import Message, { AIClassification, MessageType } from '~/models/schemas/Message.schema'
 import { SendMessageReqBody } from '~/models/requests/Chat.request'
 
+type ChatAccessRole = 'customer' | 'pharmacist' | 'admin'
+
 class ChatsService {
+  async assertConversationAccess(conversationId: string, userId: string, role: ChatAccessRole) {
+    if (!ObjectId.isValid(conversationId)) {
+      throw new Error('Conversation not found')
+    }
+
+    const conversation = await databaseService.conversations.findOne({ _id: new ObjectId(conversationId) })
+    if (!conversation) {
+      throw new Error('Conversation not found')
+    }
+
+    if (role === 'admin') return conversation
+
+    if (role === 'customer') {
+      if (conversation.customerId?.toString() !== userId) {
+        throw new Error('Access denied')
+      }
+      return conversation
+    }
+
+    if (conversation.type !== 'pharmacist') {
+      throw new Error('Access denied')
+    }
+
+    if (conversation.pharmacistId && conversation.pharmacistId.toString() !== userId) {
+      throw new Error('Access denied')
+    }
+
+    return conversation
+  }
+
   // Get or create conversation for customer (shared inbox - no specific pharmacist)
   async getOrCreateConversation(customerId: string, type: 'ai' | 'pharmacist' = 'ai') {
     const customerObjectId = new ObjectId(customerId)
@@ -151,8 +183,14 @@ class ChatsService {
       conversationId = new ObjectId(payload.conversationId)
 
       // Block sending to closed conversations
-      const conv = await databaseService.conversations.findOne({ _id: conversationId })
-      if (conv && conv.status === 'closed') {
+      const conv = await this.assertConversationAccess(payload.conversationId, senderId, senderRole)
+      if (senderRole === 'pharmacist' && !conv.pharmacistId && conv.status !== 'closed') {
+        await databaseService.conversations.updateOne(
+          { _id: conversationId },
+          { $set: { pharmacistId: senderObjectId, updatedAt: new Date() } }
+        )
+      }
+      if (conv.status === 'closed') {
         throw new Error('Conversation đã được đóng. Vui lòng bắt đầu cuộc tư vấn mới.')
       }
     } else {
@@ -206,7 +244,7 @@ class ChatsService {
   async sendAIMessage(
     conversationId: string,
     content: string,
-    classification?: 'emergency' | 'prescription_request' | 'general',
+    classification?: AIClassification,
     type: MessageType = MessageType.Text,
     productRef?: any,
     suggestedProducts?: any[],
@@ -279,6 +317,8 @@ class ChatsService {
 
   // Mark messages as read
   async markAsRead(conversationId: string, userId: string, userRole: 'customer' | 'pharmacist') {
+    await this.assertConversationAccess(conversationId, userId, userRole)
+
     const conversationObjectId = new ObjectId(conversationId)
     const userObjectId = new ObjectId(userId)
 

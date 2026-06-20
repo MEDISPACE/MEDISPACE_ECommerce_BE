@@ -1,14 +1,14 @@
-/**
+﻿/**
  * ai-chat.services.ts
- * BE Proxy Service for AI Chat — Phase 3
+ * BE Proxy Service for AI Chat â€” Phase 3
  *
  * Responsibilities:
- *  1. Load conversation history từ MongoDB (source of truth)
+ *  1. Load conversation history tá»« MongoDB (source of truth)
  *  2. Redis-based rate limiting (30 msg/user/hour)
- *  3. Response dedup cache (3 phút TTL)
- *  4. Proxy HTTP request → AI Service (non-streaming)
- *  5. Proxy SSE stream → AI Service (streaming)
- *  6. Save AI reply vào MongoDB (async, non-blocking)
+ *  3. Response dedup cache (3 phÃºt TTL)
+ *  4. Proxy HTTP request â†’ AI Service (non-streaming)
+ *  5. Proxy SSE stream â†’ AI Service (streaming)
+ *  6. Save AI reply vÃ o MongoDB (async, non-blocking)
  */
 
 import { ObjectId } from 'mongodb'
@@ -18,21 +18,22 @@ import chatsService from './chats.services'
 import cacheService, { redis } from './cache.services'
 import { MessageType } from '~/models/schemas/Message.schema'
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const AI_SERVICE_URL = process.env.CHAT_AI_URL || 'http://localhost:8003'
-const AI_TIMEOUT_MS = 60_000 // 60s — LLM có thể mất 30s
+const AI_TIMEOUT_MS = Number(process.env.CHAT_AI_TIMEOUT_MS || 60_000)
+const AI_IMAGE_TIMEOUT_MS = Number(process.env.CHAT_AI_IMAGE_TIMEOUT_MS || 180_000)
 
 // Rate limit: 30 messages/user/hour (Redis-based, survives restart)
 const RATE_LIMIT_MAX = 30
-const RATE_LIMIT_WINDOW = 3600 // 1 giờ (seconds)
+const RATE_LIMIT_WINDOW = 3600 // 1 giá» (seconds)
 
-// Response dedup cache: 3 phút
+// Response dedup cache: 3 phÃºt
 const RESPONSE_CACHE_TTL = 180
 
-// History: lấy tối đa 20 messages gần nhất (~10 lượt)
-const HISTORY_LIMIT = 20
+// History: láº¥y tá»‘i Ä‘a 20 messages gáº§n nháº¥t (~10 lÆ°á»£t)
+const HISTORY_LIMIT = 12
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface AIContextProduct {
   mongoId: string
   name: string
@@ -59,26 +60,31 @@ export interface AIChatResponse {
     slug: string
     imageUrl: string
     unit: string
+    requiresPrescription?: boolean
   }>
   suggested_questions: string[]
 }
 
-// ── 1. Build History từ MongoDB ───────────────────────────────────────────────
+// â”€â”€ 1. Build History tá»« MongoDB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
- * Load N messages gần nhất từ MongoDB và format thành history cho AI.
- * Bao gồm cả tin nhắn từ pharmacist thật — AI biết toàn bộ context.
+ * Load N messages gáº§n nháº¥t tá»« MongoDB vÃ  format thÃ nh history cho AI.
+ * Bao gá»“m cáº£ tin nháº¯n tá»« pharmacist tháº­t â€” AI biáº¿t toÃ n bá»™ context.
  */
-export async function buildHistory(conversationId: string): Promise<AIHistoryMessage[]> {
+export async function buildHistory(conversationId: string, options: { excludeMessageId?: ObjectId | string } = {}): Promise<AIHistoryMessage[]> {
   try {
     const conversationObjectId = new ObjectId(conversationId)
+    const filter: Record<string, any> = { conversationId: conversationObjectId }
+    if (options.excludeMessageId) {
+      filter._id = { $ne: typeof options.excludeMessageId === 'string' ? new ObjectId(options.excludeMessageId) : options.excludeMessageId }
+    }
 
     const messages = await databaseService.messages
-      .find({ conversationId: conversationObjectId })
+      .find(filter)
       .sort({ createdAt: -1 })
       .limit(HISTORY_LIMIT)
       .toArray()
 
-    // Reverse để oldest first, rồi map sang format AI
+    // Reverse Ä‘á»ƒ oldest first, rá»“i map sang format AI
     return messages
       .reverse()
       .filter((m) => m.content && m.content.trim())
@@ -92,11 +98,11 @@ export async function buildHistory(conversationId: string): Promise<AIHistoryMes
   }
 }
 
-// ── 2. Rate Limiting (Redis) ──────────────────────────────────────────────────
+// â”€â”€ 2. Rate Limiting (Redis) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
- * Kiểm tra rate limit per user.
+ * Kiá»ƒm tra rate limit per user.
  * Returns: { allowed: boolean, remaining: number, resetIn: number }
- * Dùng Redis INCR + EXPIRE (atomic, survives restart)
+ * DÃ¹ng Redis INCR + EXPIRE (atomic, survives restart)
  */
 export async function checkAIRateLimit(
   userId: string
@@ -104,10 +110,10 @@ export async function checkAIRateLimit(
   const key = `rate:ai:${userId}`
 
   try {
-    // INCR trả về giá trị sau khi tăng
+    // INCR tráº£ vá» giÃ¡ trá»‹ sau khi tÄƒng
     const count = await redis.incr(key)
 
-    // Lần đầu tiên trong window → set TTL
+    // Láº§n Ä‘áº§u tiÃªn trong window â†’ set TTL
     if (count === 1) {
       await redis.expire(key, RATE_LIMIT_WINDOW)
     }
@@ -121,50 +127,83 @@ export async function checkAIRateLimit(
       resetIn: ttl > 0 ? ttl : RATE_LIMIT_WINDOW
     }
   } catch {
-    // Redis down → allow request (graceful degradation)
+    // Redis down â†’ allow request (graceful degradation)
     return { allowed: true, remaining: RATE_LIMIT_MAX, resetIn: RATE_LIMIT_WINDOW }
   }
 }
 
-// ── 3. Response Cache ─────────────────────────────────────────────────────────
+// â”€â”€ 3. Response Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
- * Key: hash của conversationId + message (50 ký tự đầu)
- * TTL: 3 phút — đủ để dedup câu hỏi lặp lại trong cùng session
+ * Key: hash cá»§a conversationId + message (50 kÃ½ tá»± Ä‘áº§u)
+ * TTL: 3 phÃºt â€” Ä‘á»§ Ä‘á»ƒ dedup cÃ¢u há»i láº·p láº¡i trong cÃ¹ng session
  */
-function _buildCacheKey(conversationId: string, message: string): string {
-  const raw = `${conversationId}:${message.slice(0, 50).toLowerCase().trim()}`
-  const hash = crypto.createHash('md5').update(raw).digest('hex').slice(0, 12)
+function stableFingerprint(value: unknown): string {
+  if (value === null || value === undefined) return 'none'
+  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16)
+}
+
+function normalizeMessage(message: string): string {
+  return message.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function _buildCacheKey(params: {
+  userId: string
+  conversationId: string
+  message: string
+  medicalInfo?: Record<string, any> | null
+  contextProducts?: AIContextProduct[]
+  contextData?: Record<string, any> | null
+}): string {
+  const raw = JSON.stringify({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    message: normalizeMessage(params.message),
+    medical: stableFingerprint(params.medicalInfo ?? null),
+    products: stableFingerprint((params.contextProducts ?? []).map((p) => ({ id: p.mongoId, rx: p.requiresPrescription }))),
+    context: stableFingerprint(params.contextData ?? null)
+  })
+  const hash = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24)
   return `ai:resp:${hash}`
 }
 
 export async function getResponseCache(
+  userId: string,
   conversationId: string,
-  message: string
+  message: string,
+  medicalInfo: Record<string, any> | null = null,
+  contextProducts: AIContextProduct[] = [],
+  contextData: Record<string, any> | null = null
 ): Promise<AIChatResponse | null> {
-  const key = _buildCacheKey(conversationId, message)
+  const key = _buildCacheKey({ userId, conversationId, message, medicalInfo, contextProducts, contextData })
   return cacheService.get<AIChatResponse>(key)
 }
 
 export async function setResponseCache(
+  userId: string,
   conversationId: string,
   message: string,
-  response: AIChatResponse
+  response: AIChatResponse,
+  medicalInfo: Record<string, any> | null = null,
+  contextProducts: AIContextProduct[] = [],
+  contextData: Record<string, any> | null = null
 ): Promise<void> {
-  const key = _buildCacheKey(conversationId, message)
-  // Fire-and-forget, không block response
+  const key = _buildCacheKey({ userId, conversationId, message, medicalInfo, contextProducts, contextData })
+  // Fire-and-forget, khÃ´ng block response
   cacheService.set(key, response, RESPONSE_CACHE_TTL).catch(() => {})
 }
 
-// ── 4. Non-streaming: gọi AI và trả kết quả ──────────────────────────────────
+// â”€â”€ 4. Non-streaming: gá»i AI vÃ  tráº£ káº¿t quáº£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function sendToAI(payload: {
   message: string
   conversation_id: string
   user_id: string
   history: AIHistoryMessage[]
   context_products?: AIContextProduct[]
+  context_data?: Record<string, any> | null
+  image_url?: string
 }): Promise<AIChatResponse> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), payload.image_url ? AI_IMAGE_TIMEOUT_MS : AI_TIMEOUT_MS)
 
   try {
     const response = await fetch(`${AI_SERVICE_URL}/chat`, {
@@ -175,7 +214,9 @@ export async function sendToAI(payload: {
         conversation_id: payload.conversation_id,
         user_id: payload.user_id,
         history: payload.history,
-        context_products: payload.context_products || []
+        context_products: payload.context_products || [],
+        context_data: payload.context_data ?? undefined,
+        image_url: payload.image_url ?? undefined
       }),
       signal: controller.signal
     })
@@ -191,36 +232,39 @@ export async function sendToAI(payload: {
   }
 }
 
-// ── 5. Save AI reply vào MongoDB (async, non-blocking) ────────────────────────
+// â”€â”€ 5. Save AI reply vÃ o MongoDB (async, non-blocking) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
- * Gọi sau khi nhận được response từ AI.
- * Không await — fire-and-forget để không block user.
+ * Gá»i sau khi nháº­n Ä‘Æ°á»£c response tá»« AI.
+ * KhÃ´ng await â€” fire-and-forget Ä‘á»ƒ khÃ´ng block user.
  */
 export function saveAIReplyAsync(
   conversationId: string,
   userMessage: string,
   aiResponse: AIChatResponse,
-  senderId: string
+  senderId: string,
+  options: { saveUserMessage?: boolean } = {}
 ): void {
   setImmediate(async () => {
     try {
-      // 1. Save user message nếu chưa có
-      // (Nếu FE đã lưu qua /messages thì skip, ở đây assume FE chưa lưu)
+      // 1. Save user message náº¿u chÆ°a cÃ³
+      // (Náº¿u FE Ä‘Ã£ lÆ°u qua /messages thÃ¬ skip, á»Ÿ Ä‘Ã¢y assume FE chÆ°a lÆ°u)
       const senderObjectId = new ObjectId(senderId)
       const convObjectId = new ObjectId(conversationId)
 
-      await databaseService.messages.insertOne({
-        _id: new ObjectId(),
-        conversationId: convObjectId,
-        senderId: senderObjectId,
-        senderRole: 'customer',
-        content: userMessage,
-        type: MessageType.Text,
-        isRead: false,
-        isAI: false,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      } as any)
+      if (options.saveUserMessage !== false) {
+        await databaseService.messages.insertOne({
+          _id: new ObjectId(),
+          conversationId: convObjectId,
+          senderId: senderObjectId,
+          senderRole: 'customer',
+          content: userMessage,
+          type: MessageType.Text,
+          isRead: false,
+          isAI: false,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as any)
+      }
 
       // 2. Save AI reply
       await chatsService.sendAIMessage(
@@ -234,15 +278,15 @@ export function saveAIReplyAsync(
       )
     } catch (err) {
       console.error('[AI Chat] saveAIReplyAsync error:', err)
-      // Không throw — user đã nhận response rồi
+      // KhÃ´ng throw â€” user Ä‘Ã£ nháº­n response rá»“i
     }
   })
 }
 
-// ── 6. SSE Streaming proxy ────────────────────────────────────────────────────
+// â”€â”€ 6. SSE Streaming proxy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
- * Stream response từ AI Service về FE qua SSE.
- * Gọi trong controller với res.write() để forward chunks.
+ * Stream response tá»« AI Service vá» FE qua SSE.
+ * Gá»i trong controller vá»›i res.write() Ä‘á»ƒ forward chunks.
  *
  * AI service stream format:
  *   data: {"type":"chunk","content":"text..."}
@@ -256,13 +300,15 @@ export async function streamFromAI(
     user_id: string
     history: AIHistoryMessage[]
     context_products?: AIContextProduct[]
+    context_data?: Record<string, any> | null
+    image_url?: string
   },
   onChunk: (chunk: string) => void,
   onDone: (response: AIChatResponse) => void,
   onError: (err: Error) => void
 ): Promise<void> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), payload.image_url ? AI_IMAGE_TIMEOUT_MS : AI_TIMEOUT_MS)
 
   try {
     const response = await fetch(`${AI_SERVICE_URL}/chat/stream`, {
@@ -273,7 +319,9 @@ export async function streamFromAI(
         conversation_id: payload.conversation_id,
         user_id: payload.user_id,
         history: payload.history,
-        context_products: payload.context_products || []
+        context_products: payload.context_products || [],
+        context_data: payload.context_data ?? undefined,
+        image_url: payload.image_url ?? undefined
       }),
       signal: controller.signal
     })
@@ -293,11 +341,11 @@ export async function streamFromAI(
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
-      buffer = lines.pop() || '' // giữ lại dòng chưa hoàn chỉnh
+      buffer = lines.pop() || '' // giá»¯ láº¡i dÃ²ng chÆ°a hoÃ n chá»‰nh
 
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
+        if (!line.trim() || line.startsWith(':')) continue
+        const raw = line.startsWith('data: ') ? line.slice(6).trim() : line.trim()
         if (raw === '[DONE]') continue
 
         try {
@@ -307,9 +355,14 @@ export async function streamFromAI(
           } else if (parsed.type === 'done') {
             finalResponse = parsed as AIChatResponse
             onChunk(`data: ${JSON.stringify({ type: 'done', ...parsed })}\n\n`)
+          } else if (parsed.type === 'error') {
+            throw new Error(parsed.message || parsed.content || 'AI stream error')
           }
-        } catch {
-          // Malformed chunk — bỏ qua
+        } catch (err) {
+          if (err instanceof Error && err.message !== 'Unexpected end of JSON input') {
+            throw err
+          }
+          // Malformed chunk â€” bá» qua
         }
       }
     }
@@ -323,3 +376,4 @@ export async function streamFromAI(
     clearTimeout(timeout)
   }
 }
+

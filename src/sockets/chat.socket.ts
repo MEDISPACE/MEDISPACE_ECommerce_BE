@@ -1,4 +1,4 @@
-import { Server as SocketIOServer, Socket } from 'socket.io'
+﻿import { Server as SocketIOServer, Socket } from 'socket.io'
 import { Server as HTTPServer } from 'http'
 import { verifyToken } from '~/utils/jwt'
 import { TokenPayload } from '~/models/requests/User.request'
@@ -12,19 +12,34 @@ import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
 import { TokenType, UserRole, UserStatus } from '~/constants/enum'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const GREETING_RESPONSE = 'Chào bạn, mình là Trợ lý Sức khỏe AI của Medispace. Mình có thể hỗ trợ bạn tra cứu thông tin thuốc, sản phẩm, đơn hàng hoặc hướng dẫn kết nối Dược sĩ khi cần. Bạn cần mình hỗ trợ gì hôm nay?'
+
+function normalizeVietnameseText(value: string): string {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function isSimpleGreeting(content?: string, imageUrl?: string): boolean {
+  if (imageUrl) return false
+  const normalized = normalizeVietnameseText(content || '').replace(/[!?.。\s]+$/g, '')
+  return /^(chao|chao ban|xin chao|hello|hi|hey|alo|aloo|medispace oi)$/.test(normalized)
+}
 
 config()
 
-// ── Intent keyword detection (nhanh, không cần gọi LLM) ───────────────────────
+// â”€â”€ Intent keyword detection (nhanh, khÃ´ng cáº§n gá»i LLM) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const ORDER_KEYWORDS = [
-  'đơn hàng', 'ord-', 'đặt hàng', 'giao hàng', 'vận chuyển', 'tracking',
-  'đến đâu', 'bao giờ giao', 'tình trạng đơn', 'trạng thái đơn',
-  'đã mua', 'lịch sử mua', 'mua gì', 'mua ngày', 'hóa đơn'
+  'Ä‘Æ¡n hÃ ng', 'ord-', 'Ä‘áº·t hÃ ng', 'giao hÃ ng', 'váº­n chuyá»ƒn', 'tracking',
+  'Ä‘áº¿n Ä‘Ã¢u', 'bao giá» giao', 'tÃ¬nh tráº¡ng Ä‘Æ¡n', 'tráº¡ng thÃ¡i Ä‘Æ¡n',
+  'Ä‘Ã£ mua', 'lá»‹ch sá»­ mua', 'mua gÃ¬', 'mua ngÃ y', 'hÃ³a Ä‘Æ¡n'
 ]
 const LOYALTY_KEYWORDS = [
-  'điểm thưởng', 'điểm tích lũy', 'hạng thành viên', 'thành viên',
-  'hạng bạc', 'hạng vàng', 'hạng kim', 'loyalty', 'tích điểm',
-  'bao nhiêu điểm', 'còn điểm', 'điểm của tôi'
+  'Ä‘iá»ƒm thÆ°á»Ÿng', 'Ä‘iá»ƒm tÃ­ch lÅ©y', 'háº¡ng thÃ nh viÃªn', 'thÃ nh viÃªn',
+  'háº¡ng báº¡c', 'háº¡ng vÃ ng', 'háº¡ng kim', 'loyalty', 'tÃ­ch Ä‘iá»ƒm',
+  'bao nhiÃªu Ä‘iá»ƒm', 'cÃ²n Ä‘iá»ƒm', 'Ä‘iá»ƒm cá»§a tÃ´i'
 ]
 
 function detectContextIntent(message: string): 'order' | 'loyalty' | null {
@@ -34,14 +49,14 @@ function detectContextIntent(message: string): 'order' | 'loyalty' | null {
   return null
 }
 
-// ── Extract order numbers từ message (e.g. ORD-1767014893436-927 hoặc DH...) ──
+// â”€â”€ Extract order numbers tá»« message (e.g. ORD-1767014893436-927 hoáº·c DH...) â”€â”€
 function extractOrderNumbers(message: string): string[] {
-  // Match ORD-xxx và DH-xxx patterns
+  // Match ORD-xxx vÃ  DH-xxx patterns
   const matches = message.match(/(?:ORD|DH)[-\w]+/gi) || []
   return [...new Set(matches.map(m => m.toUpperCase()))]
 }
 
-// ── Fetch real user data từ MongoDB để inject vào AI context ──────────────────
+// â”€â”€ Fetch real user data tá»« MongoDB Ä‘á»ƒ inject vÃ o AI context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function fetchUserContextData(
   userId: string,
   intent: 'order' | 'loyalty',
@@ -52,37 +67,37 @@ async function fetchUserContextData(
       const mentionedOrderNumbers = extractOrderNumbers(message)
       console.log('[Socket] fetchUserContextData | userId:', userId, '| mentioned orders:', mentionedOrderNumbers)
 
-      // 1. Lấy 5 đơn hàng gần nhất của user đang login
+      // 1. Láº¥y 5 Ä‘Æ¡n hÃ ng gáº§n nháº¥t cá»§a user Ä‘ang login
       const recentOrders = await databaseService.orders
         .find({ userId: new ObjectId(userId) })
         .sort({ createdAt: -1 })
         .limit(5)
         .toArray()
 
-      // 2. Nếu user nhắc đến orderNumber cụ thể → tìm thêm đơn đó
+      // 2. Náº¿u user nháº¯c Ä‘áº¿n orderNumber cá»¥ thá»ƒ â†’ tÃ¬m thÃªm Ä‘Æ¡n Ä‘Ã³
       let mentionedOrders: any[] = []
       if (mentionedOrderNumbers.length > 0) {
         mentionedOrders = await databaseService.orders
           .find({
             orderNumber: { $in: mentionedOrderNumbers },
-            userId: new ObjectId(userId)   // Chỉ lấy nếu thuộc user này
+            userId: new ObjectId(userId)   // Chá»‰ láº¥y náº¿u thuá»™c user nÃ y
           })
           .toArray()
 
-        // Log nếu order tồn tại nhưng không thuộc user này
+        // Log náº¿u order tá»“n táº¡i nhÆ°ng khÃ´ng thuá»™c user nÃ y
         if (mentionedOrders.length === 0 && mentionedOrderNumbers.length > 0) {
           const anyMatch = await databaseService.orders.findOne({
             orderNumber: { $in: mentionedOrderNumbers }
           })
           if (anyMatch) {
-            console.log('[Socket] Order', mentionedOrderNumbers, 'tồn tại nhưng thuộc user khác')
+            console.log('[Socket] Order', mentionedOrderNumbers, 'tá»“n táº¡i nhÆ°ng thuá»™c user khÃ¡c')
           } else {
-            console.log('[Socket] Order', mentionedOrderNumbers, 'không tồn tại trong DB')
+            console.log('[Socket] Order', mentionedOrderNumbers, 'khÃ´ng tá»“n táº¡i trong DB')
           }
         }
       }
 
-      // 3. Merge: ưu tiên đơn được nhắc đến, sau đó recent orders
+      // 3. Merge: Æ°u tiÃªn Ä‘Æ¡n Ä‘Æ°á»£c nháº¯c Ä‘áº¿n, sau Ä‘Ã³ recent orders
       const allOrders = [...mentionedOrders]
       for (const o of recentOrders) {
         if (!allOrders.find((x: any) => x._id?.toString() === o._id?.toString())) {
@@ -91,7 +106,7 @@ async function fetchUserContextData(
       }
 
       if (!allOrders.length) {
-        // Không có đơn nào → trả về flag để AI biết user chưa có đơn
+        // KhÃ´ng cÃ³ Ä‘Æ¡n nÃ o â†’ tráº£ vá» flag Ä‘á»ƒ AI biáº¿t user chÆ°a cÃ³ Ä‘Æ¡n
         return { orders: [], purchaseHistory: [], noOrdersFound: true }
       }
 
@@ -105,7 +120,7 @@ async function fetchUserContextData(
           : 'N/A',
         trackingCode: o.trackingNumber || null,
         items: (o.items || []).slice(0, 3).map((item: any) => ({
-          name: item.name || 'Sản phẩm',
+          name: item.name || 'Sáº£n pháº©m',
           quantity: item.quantity || 1,
           price: item.unitPrice || 0
         }))
@@ -120,7 +135,7 @@ async function fetchUserContextData(
           purchaseHistory.push({
             date,
             orderCode: o.orderNumber,
-            productName: item.name || 'Sản phẩm',
+            productName: item.name || 'Sáº£n pháº©m',
             quantity: item.quantity || 1
           })
         }
@@ -148,9 +163,9 @@ async function fetchUserContextData(
   return null
 }
 
-// ── Socket Rate Limiting ─────────────────────────────────────────────────────
-// Đã chuyển sang Redis-backed rate limit (checkAIRateLimit từ ai-chat.services)
-// In-memory fallback vẫn giữ cho non-AI messages (pharmacist)
+// â”€â”€ Socket Rate Limiting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ÄÃ£ chuyá»ƒn sang Redis-backed rate limit (checkAIRateLimit tá»« ai-chat.services)
+// In-memory fallback váº«n giá»¯ cho non-AI messages (pharmacist)
 const SOCKET_RATE_LIMIT_MAX = 15
 const SOCKET_RATE_LIMIT_WINDOW_MS = 60_000
 const socketMessageCounts = new Map<string, { count: number; resetAt: number }>()
@@ -175,6 +190,15 @@ function checkSocketRateLimit(userId: string): boolean {
 interface AuthenticatedSocket extends Socket {
   userId?: string
   userRole?: 'customer' | 'pharmacist' | 'admin'
+}
+
+const socketChatRole = (socket: AuthenticatedSocket) => socket.userRole || 'customer'
+
+async function assertSocketConversationAccess(socket: AuthenticatedSocket, conversationId: string) {
+  if (!socket.userId || !socket.userRole || !ObjectId.isValid(conversationId)) {
+    throw new Error('Access denied')
+  }
+  return chatsService.assertConversationAccess(conversationId, socket.userId, socketChatRole(socket))
 }
 
 let _io: SocketIOServer | null = null
@@ -238,7 +262,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
   // Connection handler
   io.on('connection', async (socket: AuthenticatedSocket) => {
-    // --- FIX 3.4: dùng atomic increment thay bool để handle đa tab ---
+    // --- FIX 3.4: dÃ¹ng atomic increment thay bool Ä‘á»ƒ handle Ä‘a tab ---
     if (socket.userId) {
       await databaseService.users.updateOne(
         { _id: new ObjectId(socket.userId) },
@@ -278,19 +302,26 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     })
 
     // Join conversation room
-    socket.on('conversation:join', (conversationId: string) => {
-      socket.join(`conversation:${conversationId}`)
+    socket.on('conversation:join', async (conversationId: string) => {
+      try {
+        await assertSocketConversationAccess(socket, conversationId)
+        socket.join(`conversation:${conversationId}`)
+      } catch {
+        socket.emit('error', { message: 'Access denied' })
+      }
     })
 
     // Leave conversation room
     socket.on('conversation:leave', (conversationId: string) => {
-      socket.leave(`conversation:${conversationId}`)
+      if (ObjectId.isValid(conversationId)) {
+        socket.leave(`conversation:${conversationId}`)
+      }
     })
 
     socket.on('community:room:join', async (roomId: string, ack?: (payload: { ok: boolean; roomId?: string; message?: string }) => void) => {
       try {
         if (!socket.userId || !ObjectId.isValid(roomId)) {
-          ack?.({ ok: false, message: 'roomId không hợp lệ' })
+          ack?.({ ok: false, message: 'roomId khÃ´ng há»£p lá»‡' })
           return
         }
         const roomObjectId = new ObjectId(roomId)
@@ -299,15 +330,15 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         const member = await databaseService.communityRoomMembers.findOne({ roomId: roomObjectId, userId: userObjectId })
         const canAccess = socket.userRole === 'admin' || (Boolean(room) && member?.status === 'active')
         if (!canAccess) {
-          socket.emit('error', { message: 'Bạn chưa tham gia phòng cộng đồng này.' })
-          ack?.({ ok: false, message: 'Bạn chưa tham gia phòng cộng đồng này.' })
+          socket.emit('error', { message: 'Báº¡n chÆ°a tham gia phÃ²ng cá»™ng Ä‘á»“ng nÃ y.' })
+          ack?.({ ok: false, message: 'Báº¡n chÆ°a tham gia phÃ²ng cá»™ng Ä‘á»“ng nÃ y.' })
           return
         }
         socket.join(`community:room:${roomId}`)
         ack?.({ ok: true, roomId })
       } catch {
-        socket.emit('error', { message: 'Không thể tham gia kênh realtime cộng đồng.' })
-        ack?.({ ok: false, message: 'Không thể tham gia kênh realtime cộng đồng.' })
+        socket.emit('error', { message: 'KhÃ´ng thá»ƒ tham gia kÃªnh realtime cá»™ng Ä‘á»“ng.' })
+        ack?.({ ok: false, message: 'KhÃ´ng thá»ƒ tham gia kÃªnh realtime cá»™ng Ä‘á»“ng.' })
       }
     })
 
@@ -315,7 +346,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
       socket.leave(`community:room:${roomId}`)
     })
 
-    // --- FIX 3.2: emit gọn lại – chỉ dùng room-based, bỏ fetchSockets loop ---
+    // --- FIX 3.2: emit gá»n láº¡i â€“ chá»‰ dÃ¹ng room-based, bá» fetchSockets loop ---
     socket.on(
       'message:send',
       async (data: {
@@ -333,23 +364,23 @@ export const initChatSocket = (httpServer: HTTPServer) => {
             return
           }
 
-          // Admin không gửi tin nhắn qua socket này
+          // Admin khÃ´ng gá»­i tin nháº¯n qua socket nÃ y
           if (socket.userRole === 'admin') return
 
-          // ── Rate Limit Check (Redis-backed cho AI, in-memory cho non-AI) ────────
+          // â”€â”€ Rate Limit Check (Redis-backed cho AI, in-memory cho non-AI) â”€â”€â”€â”€â”€â”€â”€â”€
           if (socket.userRole === 'customer') {
-            // Dùng Redis rate limit cho AI messages (persist qua restart)
+            // DÃ¹ng Redis rate limit cho AI messages (persist qua restart)
             const rateCheck = await checkAIRateLimit(socket.userId)
             if (!rateCheck.allowed) {
               socket.emit('error', {
-                message: `Bạn đã vượt giới hạn tin nhắn AI (30/giờ). Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
+                message: `Báº¡n Ä‘Ã£ vÆ°á»£t giá»›i háº¡n tin nháº¯n AI (30/giá»). Thá»­ láº¡i sau ${Math.ceil(rateCheck.resetIn / 60)} phÃºt.`
               })
               return
             }
           } else {
-            // Pharmacist dùng in-memory rate limit (ít quan trọng hơn)
+            // Pharmacist dÃ¹ng in-memory rate limit (Ã­t quan trá»ng hÆ¡n)
             if (!checkSocketRateLimit(socket.userId)) {
-              socket.emit('error', { message: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng chờ một chút trước khi gửi tiếp.' })
+              socket.emit('error', { message: 'Báº¡n Ä‘ang gá»­i tin nháº¯n quÃ¡ nhanh. Vui lÃ²ng chá» má»™t chÃºt trÆ°á»›c khi gá»­i tiáº¿p.' })
               return
             }
           }
@@ -358,18 +389,18 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
           const convIdStr = message.conversationId.toString()
 
-          // 1. Gửi đến conversation room (tất cả đang xem conversation này)
+          // 1. Gá»­i Ä‘áº¿n conversation room (táº¥t cáº£ Ä‘ang xem conversation nÃ y)
           io.to(`conversation:${convIdStr}`).emit('message:new', message)
 
           if (socket.userRole === 'customer') {
-            // Customer gửi → broadcast cho pharmacists để cập nhật list
+            // Customer gá»­i â†’ broadcast cho pharmacists Ä‘á»ƒ cáº­p nháº­t list
             io.to('pharmacists').emit('message:new', message)
 
             const conversation = await databaseService.conversations.findOne({
               _id: new ObjectId(convIdStr)
             })
 
-            // Detect tin nhắn đầu tiên → notify admin realtime
+            // Detect tin nháº¯n Ä‘áº§u tiÃªn â†’ notify admin realtime
             const msgCount = await databaseService.messages.countDocuments({
               conversationId: new ObjectId(convIdStr)
             })
@@ -379,9 +410,22 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
             if (conversation) {
               if (conversation.type === 'ai') {
-                // Khách hàng đang ở AI Mode
+                // Fast path for simple greetings: no RAG, no LLM slot, near-instant response.
+                if (isSimpleGreeting(data.content, data.imageUrl)) {
+                  const aiMessage = await chatsService.sendAIMessage(
+                    convIdStr,
+                    GREETING_RESPONSE,
+                    'general'
+                  )
+                  io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
+                  io.to(`conversation:${convIdStr}`).emit('message:stream:done', { conversationId: convIdStr })
+                  io.to('pharmacists').emit('message:new', aiMessage)
+                  return
+                }
+
+                // KhÃ¡ch hÃ ng Ä‘ang á»Ÿ AI Mode
                 try {
-                  // 1. Lấy lịch sử hội thoại (Conversation Memory) - tối đa 6 tin nhắn trước tin nhắn hiện tại
+                  // 1. Láº¥y lá»‹ch sá»­ há»™i thoáº¡i (Conversation Memory) - tá»‘i Ä‘a 6 tin nháº¯n trÆ°á»›c tin nháº¯n hiá»‡n táº¡i
                   const dbMessages = await databaseService.messages
                     .find({
                       conversationId: new ObjectId(convIdStr),
@@ -392,7 +436,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     .toArray()
 
                   // FIX: Include ALL message types (customer + AI + pharmacist)
-                  // Pharmacist messages → 'assistant' role (AI biết DS đã nói gì)
+                  // Pharmacist messages â†’ 'assistant' role (AI biáº¿t DS Ä‘Ã£ nÃ³i gÃ¬)
                   const history = dbMessages
                     .reverse()
                     .filter((m: any) => m.type === 'text' && m.content?.trim())
@@ -401,14 +445,14 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       content: m.content.trim()
                     }))
 
-                  // 2. Tìm kiếm sản phẩm liên quan (RAG) - Chỉ lấy sản phẩm không kê đơn (requiresPrescription: false)
+                  // 2. TÃ¬m kiáº¿m sáº£n pháº©m liÃªn quan (RAG) - Chá»‰ láº¥y sáº£n pháº©m khÃ´ng kÃª Ä‘Æ¡n (requiresPrescription: false)
                   let contextProducts: any[] = []
                   try {
                     let tsResult = await typesenseService.searchProducts({
                       q: data.content || '',
-                      limit: 6, // Tăng từ 3 → 6 (Task 2.3) để AI có context phong phú hơn
+                      limit: 6, // TÄƒng tá»« 3 â†’ 6 (Task 2.3) Ä‘á»ƒ AI cÃ³ context phong phÃº hÆ¡n
                       inStock: true,
-                      requiresPrescription: false
+                      requiresPrescription: undefined
                     })
 
                     let hits = tsResult?.hits
@@ -417,7 +461,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       const query = data.content || ''
                       const mongoFilter: Record<string, any> = {
                         isActive: true,
-                        requiresPrescription: false,
+                        requiresPrescription: { $in: [true, false] },
                         stockQuantity: { $gt: 0 }
                       }
                       if (query) {
@@ -438,7 +482,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     contextProducts = hits?.map((h: any) => {
                       const doc = h.document
                       const defaultVariant = doc.priceVariants?.find((v: any) => v.isDefault) || doc.priceVariants?.[0]
-                      const unit = defaultVariant?.unit || 'Sản phẩm'
+                      const unit = defaultVariant?.unit || 'Sáº£n pháº©m'
                       return {
                         mongoId: doc.mongoId || doc._id?.toString() || '',
                         name: doc.name,
@@ -447,7 +491,8 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         indications: doc.indications || doc.details?.indications || '',
                         slug: doc.slug || '',
                         imageUrl: doc.featuredImage || '',
-                        unit: unit
+                        unit: unit,
+                        requiresPrescription: Boolean(doc.requiresPrescription)
                       }
                     }) || []
                   } catch (tsErr) {
@@ -456,7 +501,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
                   const aiServiceUrl = process.env.CHAT_AI_URL || 'http://localhost:8003'
 
-                  // ── Phase 3: Fetch real user data (orders, loyalty) để inject vào AI ──
+                  // â”€â”€ Phase 3: Fetch real user data (orders, loyalty) Ä‘á»ƒ inject vÃ o AI â”€â”€
                   const contextIntent = detectContextIntent(data.content || '')
                   let contextData: Record<string, any> | null = null
                   if (contextIntent) {
@@ -467,14 +512,15 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      message: data.content,
+                      message: data.content || '',
                       conversation_id: convIdStr,
                       user_id: socket.userId,
                       history,
                       context_products: contextProducts,
-                      context_data: contextData || undefined
+                      context_data: contextData || undefined,
+                      image_url: data.imageUrl || undefined
                     }),
-                    signal: AbortSignal.timeout(65000)
+                    signal: AbortSignal.timeout(data.imageUrl ? 180000 : 65000)
                   })
 
                   if (!aiRes.body) throw new Error("No response body from AI stream");
@@ -482,6 +528,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   const reader = aiRes.body.getReader()
                   const decoder = new TextDecoder()
                   let aiData: any = null
+                  let streamError: Error | null = null
                   let buffer = ''
 
                   // Emit streaming start
@@ -496,12 +543,12 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     buffer = lines.pop() || ''
 
                     for (const line of lines) {
-                      // Bỏ qua comment lines (SSE heartbeat: ': heartbeat')
+                      // Bá» qua comment lines (SSE heartbeat: ': heartbeat')
                       if (!line.trim() || line.startsWith(':')) continue
-                      // Bỏ qua [DONE] terminator
+                      // Bá» qua [DONE] terminator
                       if (line === 'data: [DONE]') continue
 
-                      // FIX BUG: SSE format là 'data: {...}' — phải strip prefix 'data: '
+                      // FIX BUG: SSE format lÃ  'data: {...}' â€” pháº£i strip prefix 'data: '
                       let jsonStr = line
                       if (line.startsWith('data: ')) {
                         jsonStr = line.slice(6).trim()
@@ -518,7 +565,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         } else if (parsed.type === 'done') {
                           aiData = parsed
                         } else if (parsed.type === 'error') {
-                          throw new Error(parsed.message || parsed.content)
+                          streamError = new Error(parsed.message || parsed.content || 'AI stream error')
                         }
                       } catch (e) {
                         // ignore JSON parse error for incomplete/malformed lines
@@ -526,6 +573,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     }
                   }
 
+                  if (streamError) throw streamError
                   if (!aiData) throw new Error("AI Stream disconnected early")
 
                   const suggestedProducts = aiData.products_suggested && Array.isArray(aiData.products_suggested)
@@ -535,8 +583,8 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         price: prod.price,
                         slug: prod.slug || '',
                         imageUrl: prod.imageUrl || '',
-                        unit: prod.unit || 'Sản phẩm',
-                        requiresPrescription: false
+                        unit: prod.unit || 'Sáº£n pháº©m',
+                        requiresPrescription: Boolean(prod.requiresPrescription)
                       }))
                     : undefined
 
@@ -551,14 +599,15 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   )
 
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
-                  io.to('pharmacists').emit('message:new', aiMessage) // DS thấy AI reply
+                  io.to(`conversation:${convIdStr}`).emit('message:stream:done', { conversationId: convIdStr })
+                  io.to('pharmacists').emit('message:new', aiMessage) // DS tháº¥y AI reply
 
-                  // Nếu AI nhận diện cần chuyển giao sang Dược sĩ (ví dụ hỏi mua thuốc kê đơn)
+                  // Náº¿u AI nháº­n diá»‡n cáº§n chuyá»ƒn giao sang DÆ°á»£c sÄ© (vÃ­ dá»¥ há»i mua thuá»‘c kÃª Ä‘Æ¡n)
                   if (aiData.is_escalated) {
                     // Check online pharmacists
                     const onlineCount = await databaseService.users.countDocuments({ role: 1, isOnline: true })
                     if (onlineCount > 0) {
-                      // Cập nhật type cuộc trò chuyện thành pharmacist
+                      // Cáº­p nháº­t type cuá»™c trÃ² chuyá»‡n thÃ nh pharmacist
                       await databaseService.conversations.updateOne(
                         { _id: new ObjectId(convIdStr) },
                         { $set: { type: 'pharmacist', updatedAt: new Date() } }
@@ -580,7 +629,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         io.to(`conversation:${convIdStr}`).emit('message:new', systemMsg)
                       }
                     } else {
-                      // Báo không có dược sĩ online, tiếp tục giữ AI mode
+                      // BÃ¡o khÃ´ng cÃ³ dÆ°á»£c sÄ© online, tiáº¿p tá»¥c giá»¯ AI mode
                       const systemMsg = await chatsService.sendAIMessage(
                         convIdStr,
                         'Trợ lý AI nhận thấy bạn cần tư vấn từ Dược sĩ chuyên môn, tuy nhiên hiện tại các Dược sĩ đang offline. Tôi sẽ tiếp tục hỗ trợ bạn, hoặc bạn có thể để lại lời nhắn kèm SĐT.'
@@ -590,12 +639,16 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   }
                 } catch (aiErr) {
                   console.error('Error calling AI Service:', aiErr)
-                  const fallback = 'Trợ lý Ảo hiện đang gặp sự cố. Bạn có muốn kết nối với Dược sĩ thật không?'
+                  io.to(`conversation:${convIdStr}`).emit('message:stream:error', {
+                    conversationId: convIdStr,
+                    message: aiErr instanceof Error ? aiErr.message : 'AI stream error'
+                  })
+                  const fallback = 'Trợ lý ảo hiện đang gặp sự cố. Bạn có muốn kết nối với Dược sĩ thật không?'
                   const aiMessage = await chatsService.sendAIMessage(convIdStr, fallback)
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
                 }
               } else {
-                // Khách hàng đang ở luồng Dược sĩ thật (pharmacist) nhưng chưa được assign
+                // KhÃ¡ch hÃ ng Ä‘ang á»Ÿ luá»“ng DÆ°á»£c sÄ© tháº­t (pharmacist) nhÆ°ng chÆ°a Ä‘Æ°á»£c assign
                 if (!conversation.pharmacistId) {
                   const { pharmacistId } = await chatsService.assignPharmacist(convIdStr)
                   if (pharmacistId) {
@@ -610,7 +663,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
               }
             }
           } else {
-            // Pharmacist gửi → notify customer cụ thể
+            // Pharmacist gá»­i â†’ notify customer cá»¥ thá»ƒ
             const conversation = await chatsService.getConversationById(convIdStr)
             if (conversation) {
               const customerIdStr = conversation.customerId.toString()
@@ -623,10 +676,13 @@ export const initChatSocket = (httpServer: HTTPServer) => {
       }
     )
 
-    // Khách hàng chủ động yêu cầu chuyển sang Dược sĩ thật từ AI Mode
+    // KhÃ¡ch hÃ ng chá»§ Ä‘á»™ng yÃªu cáº§u chuyá»ƒn sang DÆ°á»£c sÄ© tháº­t tá»« AI Mode
     socket.on('conversation:request_human', async ({ conversationId }) => {
       try {
-        // 1. Kiểm tra dược sĩ online
+        // 1. Kiá»ƒm tra dÆ°á»£c sÄ© online
+        if (socket.userRole !== 'customer') throw new Error('Access denied')
+        const conversation = await assertSocketConversationAccess(socket, conversationId)
+        if (conversation.status === 'closed') throw new Error('Conversation is closed')
         const onlineCount = await databaseService.users.countDocuments({ role: 1, isOnline: true })
         if (onlineCount === 0) {
           const systemMsg = await chatsService.sendAIMessage(
@@ -637,19 +693,19 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           return
         }
 
-        // 2. Chuyển đổi type cuộc hội thoại thành pharmacist
+        // 2. Chuyá»ƒn Ä‘á»•i type cuá»™c há»™i thoáº¡i thÃ nh pharmacist
         await databaseService.conversations.updateOne(
           { _id: new ObjectId(conversationId) },
           { $set: { type: 'pharmacist', updatedAt: new Date() } }
         )
 
-        // 3. Gán dược sĩ
+        // 3. GÃ¡n dÆ°á»£c sÄ©
         const { pharmacistId } = await chatsService.assignPharmacist(conversationId)
 
-        // 4. Gửi tin nhắn thông báo hệ thống kết nối
+        // 4. Gá»­i tin nháº¯n thÃ´ng bÃ¡o há»‡ thá»‘ng káº¿t ná»‘i
         const systemMsg = await chatsService.sendAIMessage(
           conversationId,
-          'Đang kết nối bạn với Dược sĩ của Medispace...'
+                          'Đang kết nối bạn với Dược sĩ của Medispace...'
         )
         io.to(`conversation:${conversationId}`).emit('message:new', systemMsg)
 
@@ -662,23 +718,33 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           io.to('pharmacists').emit('conversation:assigned', assignedPayload)
         }
       } catch (error) {
-        socket.emit('error', { message: 'Không thể kết nối với Dược sĩ lúc này' })
+        socket.emit('error', { message: 'KhÃ´ng thá»ƒ káº¿t ná»‘i vá»›i DÆ°á»£c sÄ© lÃºc nÃ y' })
       }
     })
 
     // Typing indicator
-    socket.on('typing:start', (conversationId: string) => {
-      socket.to(`conversation:${conversationId}`).emit('typing:user', {
-        userId: socket.userId,
-        conversationId
-      })
+    socket.on('typing:start', async (conversationId: string) => {
+      try {
+        await assertSocketConversationAccess(socket, conversationId)
+        socket.to(`conversation:${conversationId}`).emit('typing:user', {
+          userId: socket.userId,
+          conversationId
+        })
+      } catch {
+        socket.emit('error', { message: 'Access denied' })
+      }
     })
 
-    socket.on('typing:stop', (conversationId: string) => {
-      socket.to(`conversation:${conversationId}`).emit('typing:stop', {
-        userId: socket.userId,
-        conversationId
-      })
+    socket.on('typing:stop', async (conversationId: string) => {
+      try {
+        await assertSocketConversationAccess(socket, conversationId)
+        socket.to(`conversation:${conversationId}`).emit('typing:stop', {
+          userId: socket.userId,
+          conversationId
+        })
+      } catch {
+        socket.emit('error', { message: 'Access denied' })
+      }
     })
 
     // Mark messages as read
@@ -686,6 +752,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
       try {
         if (!socket.userId || !socket.userRole) return
         if (socket.userRole === 'admin') return
+        await assertSocketConversationAccess(socket, data.conversationId)
 
         await chatsService.markAsRead(data.conversationId, socket.userId, socket.userRole)
 
@@ -701,7 +768,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     // Disconnect handler
     socket.on('disconnect', async () => {
       if (socket.userId) {
-        // --- FIX 3.4: decrement counter, chỉ set offline khi count về 0 ---
+        // --- FIX 3.4: decrement counter, chá»‰ set offline khi count vá» 0 ---
         const user = await databaseService.users.findOneAndUpdate(
           { _id: new ObjectId(socket.userId) },
           {
@@ -725,3 +792,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
   return io
 }
+
+
+
+
