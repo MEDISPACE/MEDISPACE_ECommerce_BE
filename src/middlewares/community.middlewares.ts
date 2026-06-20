@@ -203,10 +203,29 @@ export const sendMessageValidator = validate(
     {
       content: {
         in: ['body'],
-        notEmpty: { errorMessage: 'content là bắt buộc' },
+        optional: true,
         isString: { errorMessage: 'content phải là chuỗi' },
         trim: true,
-        isLength: { options: { min: 1, max: 2000 }, errorMessage: 'content tối đa 2000 ký tự' }
+        isLength: { options: { max: 2000 }, errorMessage: 'content tối đa 2000 ký tự' }
+      },
+      imageUrl: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'imageUrl phải là chuỗi' },
+        trim: true,
+        isURL: { options: { require_protocol: true }, errorMessage: 'imageUrl không hợp lệ' },
+        isLength: { options: { max: 1000 }, errorMessage: 'imageUrl tối đa 1000 ký tự' }
+      },
+      _messagePayload: {
+        in: ['body'],
+        custom: {
+          options: (_value, { req }) => {
+            const content = typeof req.body?.content === 'string' ? req.body.content.trim() : ''
+            const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : ''
+            if (!content && !imageUrl) throw new Error('Tin nhắn phải có nội dung hoặc ảnh')
+            return true
+          }
+        }
       }
     },
     ['body']
