@@ -56,7 +56,6 @@ export interface AIChatReqBody {
   conversation_id: string
   /** Sản phẩm đang xem (FE truyền từ trang product) */
   context_products?: AIChatContextProduct[]
-  /** Vision: URL ảnh được upload lên Cloudinary (nếu user gửi ảnh) */
   image_url?: string
 }
 
@@ -64,8 +63,9 @@ export interface AIChatReqBody {
  * GET /api/chats/ai-stream — SSE streaming AI chat
  */
 export interface AIStreamReqQuery {
-  message: string
-  conversation_id: string
+  message?: string
+  conversation_id?: string
   context_products?: string // JSON string (query param)
+  image_url?: string
 }
 

@@ -4,7 +4,6 @@ import { verifyToken } from '~/utils/jwt'
 import { TokenPayload } from '~/models/requests/User.request'
 import chatsService from '~/services/chats.services'
 import databaseService from '~/services/database.services'
-import communityVideoEventAccessService from '~/services/communityVideoEventAccess.services'
 import typesenseService from '~/services/typesense.services'
 import { checkAIRateLimit } from '~/services/ai-chat.services'
 import { ObjectId } from 'mongodb'
@@ -12,8 +11,24 @@ import { config } from 'dotenv'
 import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
 import { TokenType, UserRole, UserStatus } from '~/constants/enum'
 import { COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS } from '~/constants/communityVideoEvents'
+import communityVideoEventAccessService from '~/services/communityVideoEventAccess.services'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const GREETING_RESPONSE = 'Chào bạn, mình là Trợ lý Sức khỏe AI của Medispace. Mình có thể hỗ trợ bạn tra cứu thông tin thuốc, sản phẩm, đơn hàng hoặc hướng dẫn kết nối Dược sĩ khi cần. Bạn cần mình hỗ trợ gì hôm nay?'
+
+function normalizeVietnameseText(value: string): string {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function isSimpleGreeting(content?: string, imageUrl?: string): boolean {
+  if (imageUrl) return false
+  const normalized = normalizeVietnameseText(content || '').replace(/[!?.。\s]+$/g, '')
+  return /^(chao|chao ban|xin chao|hello|hi|hey|alo|aloo|medispace oi)$/.test(normalized)
+}
 
 config()
 
@@ -179,6 +194,15 @@ interface AuthenticatedSocket extends Socket {
   userRole?: 'customer' | 'pharmacist' | 'admin'
 }
 
+const socketChatRole = (socket: AuthenticatedSocket) => socket.userRole || 'customer'
+
+async function assertSocketConversationAccess(socket: AuthenticatedSocket, conversationId: string) {
+  if (!socket.userId || !socket.userRole || !ObjectId.isValid(conversationId)) {
+    throw new Error('Access denied')
+  }
+  return chatsService.assertConversationAccess(conversationId, socket.userId, socketChatRole(socket))
+}
+
 let _io: SocketIOServer | null = null
 
 export const getIO = (): SocketIOServer => {
@@ -280,13 +304,20 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     })
 
     // Join conversation room
-    socket.on('conversation:join', (conversationId: string) => {
-      socket.join(`conversation:${conversationId}`)
+    socket.on('conversation:join', async (conversationId: string) => {
+      try {
+        await assertSocketConversationAccess(socket, conversationId)
+        socket.join(`conversation:${conversationId}`)
+      } catch {
+        socket.emit('error', { message: 'Access denied' })
+      }
     })
 
     // Leave conversation room
     socket.on('conversation:leave', (conversationId: string) => {
-      socket.leave(`conversation:${conversationId}`)
+      if (ObjectId.isValid(conversationId)) {
+        socket.leave(`conversation:${conversationId}`)
+      }
     })
 
     socket.on('community:room:join', async (roomId: string, ack?: (payload: { ok: boolean; roomId?: string; message?: string }) => void) => {
@@ -307,8 +338,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         }
         socket.join(`community:room:${roomId}`)
         ack?.({ ok: true, roomId })
-      } catch (error) {
-        console.error('[Socket] community room join failed', { roomId, userId: socket.userId, error })
+      } catch {
         socket.emit('error', { message: 'Không thể tham gia kênh realtime cộng đồng.' })
         ack?.({ ok: false, message: 'Không thể tham gia kênh realtime cộng đồng.' })
       }
@@ -321,7 +351,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     socket.on(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.JOIN_ROOM, async (eventId: string, ack?: (payload: { ok: boolean; eventId?: string; message?: string }) => void) => {
       try {
         if (!socket.userId || !ObjectId.isValid(eventId)) {
-          ack?.({ ok: false, message: 'eventId không hợp lệ' })
+          ack?.({ ok: false, message: 'eventId kh?ng h?p l?' })
           return
         }
         const eventObjectId = new ObjectId(eventId)
@@ -336,7 +366,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         ack?.({ ok: true, eventId })
       } catch (error) {
         console.error('[Socket] community video event join failed', { eventId, userId: socket.userId, error })
-        ack?.({ ok: false, message: 'Không thể tham gia kênh realtime hội thảo.' })
+        ack?.({ ok: false, message: 'Kh?ng th? tham gia k?nh realtime h?i th?o.' })
       }
     })
 
@@ -365,27 +395,14 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           // Admin không gửi tin nhắn qua socket này
           if (socket.userRole === 'admin') return
 
-          const preSendConversation =
-            data.conversationId && ObjectId.isValid(data.conversationId)
-              ? await databaseService.conversations.findOne({ _id: new ObjectId(data.conversationId) })
-              : null
-          const isAiConversation =
-            socket.userRole === 'customer' &&
-            (preSendConversation?.type === 'ai' || (!preSendConversation && !data.conversationId) || data.aiMode === true)
-
           // ── Rate Limit Check (Redis-backed cho AI, in-memory cho non-AI) ────────
           if (socket.userRole === 'customer') {
-            if (isAiConversation) {
-              // Dùng Redis rate limit cho AI messages (persist qua restart)
-              const rateCheck = await checkAIRateLimit(socket.userId)
-              if (!rateCheck.allowed) {
-                socket.emit('error', {
-                  message: `Bạn đã vượt giới hạn tin nhắn AI (30/giờ). Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
-                })
-                return
-              }
-            } else if (!checkSocketRateLimit(socket.userId)) {
-              socket.emit('error', { message: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng chờ một chút trước khi gửi tiếp.' })
+            // Dùng Redis rate limit cho AI messages (persist qua restart)
+            const rateCheck = await checkAIRateLimit(socket.userId)
+            if (!rateCheck.allowed) {
+              socket.emit('error', {
+                message: `Bạn đã vượt giới hạn tin nhắn AI (30/giờ). Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
+              })
               return
             }
           } else {
@@ -421,17 +438,29 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
             if (conversation) {
               if (conversation.type === 'ai') {
+                // Fast path for simple greetings: no RAG, no LLM slot, near-instant response.
+                if (isSimpleGreeting(data.content, data.imageUrl)) {
+                  const aiMessage = await chatsService.sendAIMessage(
+                    convIdStr,
+                    GREETING_RESPONSE,
+                    'general'
+                  )
+                  io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
+                  io.to(`conversation:${convIdStr}`).emit('message:stream:done', { conversationId: convIdStr })
+                  io.to('pharmacists').emit('message:new', aiMessage)
+                  return
+                }
+
                 // Khách hàng đang ở AI Mode
                 try {
-                  // 1. Lấy lịch sử hội thoại (Conversation Memory)
-                  // [FIX-11] limit(12) = 6 turns × 2 msg/turn, đồng bộ với HISTORY_LIMIT=12
+                  // 1. Lấy lịch sử hội thoại (Conversation Memory) - tối đa 6 tin nhắn trước tin nhắn hiện tại
                   const dbMessages = await databaseService.messages
                     .find({
                       conversationId: new ObjectId(convIdStr),
                       _id: { $ne: message._id }
                     })
                     .sort({ createdAt: -1 })
-                    .limit(12)
+                    .limit(6)
                     .toArray()
 
                   // FIX: Include ALL message types (customer + AI + pharmacist)
@@ -451,7 +480,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       q: data.content || '',
                       limit: 6, // Tăng từ 3 → 6 (Task 2.3) để AI có context phong phú hơn
                       inStock: true,
-                      requiresPrescription: false
+                      requiresPrescription: undefined
                     })
 
                     let hits = tsResult?.hits
@@ -460,7 +489,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       const query = data.content || ''
                       const mongoFilter: Record<string, any> = {
                         isActive: true,
-                        requiresPrescription: false,
+                        requiresPrescription: { $in: [true, false] },
                         stockQuantity: { $gt: 0 }
                       }
                       if (query) {
@@ -490,7 +519,8 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         indications: doc.indications || doc.details?.indications || '',
                         slug: doc.slug || '',
                         imageUrl: doc.featuredImage || '',
-                        unit: unit
+                        unit: unit,
+                        requiresPrescription: Boolean(doc.requiresPrescription)
                       }
                     }) || []
                   } catch (tsErr) {
@@ -516,9 +546,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       history,
                       context_products: contextProducts,
                       context_data: contextData || undefined,
-                      image_url: data.imageUrl || undefined,   // Vision: forward ảnh sang AI
+                      image_url: data.imageUrl || undefined
                     }),
-                    signal: AbortSignal.timeout(65000)
+                    signal: AbortSignal.timeout(data.imageUrl ? 180000 : 65000)
                   })
 
                   if (!aiRes.body) throw new Error("No response body from AI stream");
@@ -526,6 +556,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   const reader = aiRes.body.getReader()
                   const decoder = new TextDecoder()
                   let aiData: any = null
+                  let streamError: Error | null = null
                   let buffer = ''
 
                   // Emit streaming start
@@ -562,7 +593,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         } else if (parsed.type === 'done') {
                           aiData = parsed
                         } else if (parsed.type === 'error') {
-                          throw new Error(parsed.message || parsed.content)
+                          streamError = new Error(parsed.message || parsed.content || 'AI stream error')
                         }
                       } catch (e) {
                         // ignore JSON parse error for incomplete/malformed lines
@@ -570,6 +601,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     }
                   }
 
+                  if (streamError) throw streamError
                   if (!aiData) throw new Error("AI Stream disconnected early")
 
                   const suggestedProducts = aiData.products_suggested && Array.isArray(aiData.products_suggested)
@@ -580,7 +612,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         slug: prod.slug || '',
                         imageUrl: prod.imageUrl || '',
                         unit: prod.unit || 'Sản phẩm',
-                        requiresPrescription: false
+                        requiresPrescription: Boolean(prod.requiresPrescription)
                       }))
                     : undefined
 
@@ -595,6 +627,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   )
 
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
+                  io.to(`conversation:${convIdStr}`).emit('message:stream:done', { conversationId: convIdStr })
                   io.to('pharmacists').emit('message:new', aiMessage) // DS thấy AI reply
 
                   // Nếu AI nhận diện cần chuyển giao sang Dược sĩ (ví dụ hỏi mua thuốc kê đơn)
@@ -623,11 +656,22 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                         )
                         io.to(`conversation:${convIdStr}`).emit('message:new', systemMsg)
                       }
+                    } else {
+                      // Báo không có dược sĩ online, tiếp tục giữ AI mode
+                      const systemMsg = await chatsService.sendAIMessage(
+                        convIdStr,
+                        'Trợ lý AI nhận thấy bạn cần tư vấn từ Dược sĩ chuyên môn, tuy nhiên hiện tại các Dược sĩ đang offline. Tôi sẽ tiếp tục hỗ trợ bạn, hoặc bạn có thể để lại lời nhắn kèm SĐT.'
+                      )
+                      io.to(`conversation:${convIdStr}`).emit('message:new', systemMsg)
                     }
                   }
                 } catch (aiErr) {
                   console.error('Error calling AI Service:', aiErr)
-                  const fallback = 'Trợ lý Ảo hiện đang gặp sự cố. Bạn có muốn kết nối với Dược sĩ thật không?'
+                  io.to(`conversation:${convIdStr}`).emit('message:stream:error', {
+                    conversationId: convIdStr,
+                    message: aiErr instanceof Error ? aiErr.message : 'AI stream error'
+                  })
+                  const fallback = 'Trợ lý ảo hiện đang gặp sự cố. Bạn có muốn kết nối với Dược sĩ thật không?'
                   const aiMessage = await chatsService.sendAIMessage(convIdStr, fallback)
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
                 }
@@ -663,16 +707,17 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     // Khách hàng chủ động yêu cầu chuyển sang Dược sĩ thật từ AI Mode
     socket.on('conversation:request_human', async ({ conversationId }) => {
       try {
-        if (!socket.userId || socket.userRole !== 'customer' || !ObjectId.isValid(conversationId)) {
-          socket.emit('error', { message: 'Không thể kết nối với Dược sĩ lúc này' })
-          return
-        }
-
-        await chatsService.assertConversationAccess(conversationId, socket.userId, 'customer')
-
         // 1. Kiểm tra dược sĩ online
+        if (socket.userRole !== 'customer') throw new Error('Access denied')
+        const conversation = await assertSocketConversationAccess(socket, conversationId)
+        if (conversation.status === 'closed') throw new Error('Conversation is closed')
         const onlineCount = await databaseService.users.countDocuments({ role: 1, isOnline: true })
         if (onlineCount === 0) {
+          const systemMsg = await chatsService.sendAIMessage(
+            conversationId,
+            'Hiện tại các Dược sĩ của Medispace đang không online. Trợ lý AI sẽ tiếp tục hỗ trợ bạn. Bạn cũng có thể để lại lời nhắn kèm số điện thoại.'
+          )
+          io.to(`conversation:${conversationId}`).emit('message:new', systemMsg)
           return
         }
 
@@ -688,7 +733,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
         // 4. Gửi tin nhắn thông báo hệ thống kết nối
         const systemMsg = await chatsService.sendAIMessage(
           conversationId,
-          'Đang kết nối bạn với Dược sĩ của Medispace...'
+                          'Đang kết nối bạn với Dược sĩ của Medispace...'
         )
         io.to(`conversation:${conversationId}`).emit('message:new', systemMsg)
 
@@ -706,18 +751,28 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     })
 
     // Typing indicator
-    socket.on('typing:start', (conversationId: string) => {
-      socket.to(`conversation:${conversationId}`).emit('typing:user', {
-        userId: socket.userId,
-        conversationId
-      })
+    socket.on('typing:start', async (conversationId: string) => {
+      try {
+        await assertSocketConversationAccess(socket, conversationId)
+        socket.to(`conversation:${conversationId}`).emit('typing:user', {
+          userId: socket.userId,
+          conversationId
+        })
+      } catch {
+        socket.emit('error', { message: 'Access denied' })
+      }
     })
 
-    socket.on('typing:stop', (conversationId: string) => {
-      socket.to(`conversation:${conversationId}`).emit('typing:stop', {
-        userId: socket.userId,
-        conversationId
-      })
+    socket.on('typing:stop', async (conversationId: string) => {
+      try {
+        await assertSocketConversationAccess(socket, conversationId)
+        socket.to(`conversation:${conversationId}`).emit('typing:stop', {
+          userId: socket.userId,
+          conversationId
+        })
+      } catch {
+        socket.emit('error', { message: 'Access denied' })
+      }
     })
 
     // Mark messages as read
@@ -725,6 +780,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
       try {
         if (!socket.userId || !socket.userRole) return
         if (socket.userRole === 'admin') return
+        await assertSocketConversationAccess(socket, data.conversationId)
 
         await chatsService.markAsRead(data.conversationId, socket.userId, socket.userRole)
 
@@ -733,11 +789,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           userId: socket.userId
         })
       } catch (error) {
-        console.error('[Socket] messages:read failed', {
-          conversationId: data.conversationId,
-          userId: socket.userId,
-          error
-        })
+        // Silent fail
       }
     })
 
@@ -781,3 +833,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
   return io
 }
+
+
+
+
