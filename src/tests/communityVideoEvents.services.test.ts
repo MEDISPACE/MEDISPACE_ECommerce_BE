@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ObjectId } from 'mongodb'
 import { UserRole } from '~/constants/enum'
 
+const mockUsers = { findOne: vi.fn() }
 const mockCommunityRooms = { findOne: vi.fn() }
 const mockCommunityRoomMembers = { findOne: vi.fn(), find: vi.fn() }
 const mockCommunityVideoEvents = {
@@ -25,11 +26,16 @@ const withTransaction = vi.fn(async (callback: any) => callback(undefined))
 const notifyVideoEventReminder = vi.fn()
 const createJoinToken = vi.fn()
 const getWsUrl = vi.fn(() => 'wss://livekit.test')
+const getRoomName = vi.fn((eventId: string) => `medispace-event-${eventId}`)
+const listParticipants = vi.fn()
+const muteParticipantAudio = vi.fn()
+const removeParticipant = vi.fn()
 const emit = vi.fn()
 
 vi.mock('~/services/database.services', () => ({
   default: {
     communityRooms: mockCommunityRooms,
+    users: mockUsers,
     communityRoomMembers: mockCommunityRoomMembers,
     communityVideoEvents: mockCommunityVideoEvents,
     communityVideoEventRegistrations: mockCommunityVideoEventRegistrations,
@@ -38,7 +44,7 @@ vi.mock('~/services/database.services', () => ({
 }))
 
 vi.mock('~/services/livekit.services', () => ({
-  default: { createJoinToken, getWsUrl },
+  default: { createJoinToken, getWsUrl, getRoomName, listParticipants, muteParticipantAudio, removeParticipant },
 }))
 
 vi.mock('~/services/notifications.services', () => ({
@@ -83,6 +89,7 @@ describe('CommunityVideoEventsService functional rules', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.AI_MODERATION_ENABLED = 'false'
+    mockUsers.findOne.mockResolvedValue({ firstName: 'Medi', lastName: 'Member', email: 'member@medispace.local', avatar: 'avatar.png' })
   })
 
   it('creates an event only for an active community room and normalizes optional fields', async () => {
@@ -150,7 +157,7 @@ describe('CommunityVideoEventsService functional rules', () => {
     await expect(communityVideoEventsService.registerForEvent(event._id, new ObjectId())).rejects.toMatchObject({ status: 409 })
   })
 
-  it('joinEvent requires live status and returns LiveKit payload for registered user', async () => {
+  it('joinEvent requires live status and returns LiveKit payload with account display name', async () => {
     const userId = new ObjectId()
     const event = makeEvent({ status: 'live' })
     mockCommunityVideoEvents.findOne.mockResolvedValue(event)
@@ -162,15 +169,32 @@ describe('CommunityVideoEventsService functional rules', () => {
 
     expect(payload.token).toBe('mock-token')
     expect(payload.wsUrl).toBe('wss://livekit.test')
-    expect(createJoinToken).toHaveBeenCalledWith({ eventId: event._id.toString(), userId: userId.toString(), isHost: false })
+    expect(createJoinToken).toHaveBeenCalledWith({
+      eventId: event._id.toString(),
+      userId: userId.toString(),
+      displayName: 'Medi Member',
+      avatar: 'avatar.png',
+      isHost: false,
+    })
   })
 
-  it('joinEvent blocks unregistered attendee when registration is required', async () => {
+  it('joinEvent allows attendee to enter by link without prior registration', async () => {
+    const userId = new ObjectId()
     const event = makeEvent({ status: 'live', registrationRequired: true })
     mockCommunityVideoEvents.findOne.mockResolvedValue(event)
     mockCommunityVideoEventRegistrations.findOne.mockResolvedValue(null)
+    mockCommunityVideoEvents.updateOne.mockResolvedValueOnce({ modifiedCount: 1 })
+    mockCommunityVideoEventRegistrations.updateOne.mockResolvedValue({ modifiedCount: 1, upsertedCount: 1 })
+    createJoinToken.mockResolvedValueOnce('mock-token')
 
-    await expect(communityVideoEventsService.joinEvent(event._id, new ObjectId())).rejects.toMatchObject({ status: 403 })
+    const payload = await communityVideoEventsService.joinEvent(event._id, userId)
+
+    expect(payload.token).toBe('mock-token')
+    expect(mockCommunityVideoEventRegistrations.updateOne).toHaveBeenCalledWith(
+      { eventId: event._id, userId },
+      expect.objectContaining({ $set: expect.objectContaining({ status: 'attended' }) }),
+      expect.objectContaining({ upsert: true }),
+    )
   })
 
   it('listEvents personalizes private visibility for authenticated room members without empty $and for anonymous users', async () => {
@@ -208,5 +232,35 @@ describe('CommunityVideoEventsService functional rules', () => {
       { _id: event._id },
       expect.objectContaining({ $set: expect.objectContaining({ 'reminders.fifteenMinutesSentAt': expect.any(Date) }) }),
     )
+  })
+
+  it('lists LiveKit participants only when requester can manage the event', async () => {
+    const adminId = new ObjectId()
+    const event = makeEvent({ status: 'live' })
+    mockCommunityVideoEvents.findOne.mockResolvedValue(event)
+    listParticipants.mockResolvedValueOnce([{ identity: adminId.toString(), name: 'Admin', tracks: [] }])
+
+    const result = await communityVideoEventsService.listLiveParticipants(event._id, { userId: adminId, role: UserRole.Admin })
+
+    expect(result.roomName).toBe(`medispace-event-${event._id.toString()}`)
+    expect(result.participants).toHaveLength(1)
+    expect(listParticipants).toHaveBeenCalledWith(event._id.toString())
+
+    await expect(communityVideoEventsService.listLiveParticipants(event._id, { userId: new ObjectId(), role: UserRole.Customer })).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('mutes and kicks LiveKit participants only after event manage permission passes', async () => {
+    const adminId = new ObjectId()
+    const targetUserId = new ObjectId()
+    const event = makeEvent({ status: 'live' })
+    mockCommunityVideoEvents.findOne.mockResolvedValue(event)
+    muteParticipantAudio.mockResolvedValueOnce({ eventId: event._id.toString(), userId: targetUserId.toString(), action: 'muted', track: { sid: 'TR_AUDIO', source: 'microphone', muted: true } })
+    removeParticipant.mockResolvedValueOnce({ eventId: event._id.toString(), userId: targetUserId.toString(), action: 'kicked' })
+
+    await expect(communityVideoEventsService.muteLiveParticipantAudio(event._id, targetUserId, { userId: adminId, role: UserRole.Admin })).resolves.toMatchObject({ action: 'muted' })
+    await expect(communityVideoEventsService.kickLiveParticipant(event._id, targetUserId, { userId: adminId, role: UserRole.Admin })).resolves.toMatchObject({ action: 'kicked' })
+
+    expect(muteParticipantAudio).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
+    expect(removeParticipant).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
   })
 })
