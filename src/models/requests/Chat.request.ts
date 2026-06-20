@@ -56,14 +56,16 @@ export interface AIChatReqBody {
   conversation_id: string
   /** Sản phẩm đang xem (FE truyền từ trang product) */
   context_products?: AIChatContextProduct[]
+  image_url?: string
 }
 
 /**
  * GET /api/chats/ai-stream — SSE streaming AI chat
  */
 export interface AIStreamReqQuery {
-  message: string
-  conversation_id: string
+  message?: string
+  conversation_id?: string
   context_products?: string // JSON string (query param)
+  image_url?: string
 }
 
