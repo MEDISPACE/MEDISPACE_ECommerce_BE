@@ -66,6 +66,15 @@ function emitToAdmins(event: string, payload: unknown) {
 }
 
 class CommunityService {
+  private async attachMessageSender(message: any) {
+    if (!message?.senderId) return message
+    const sender = await databaseService.users.findOne(
+      { _id: message.senderId },
+      { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 } }
+    )
+    return sender ? { ...message, sender } : message
+  }
+
   private roomMetricsPipeline(match: Record<string, unknown>, viewerId?: ObjectId) {
     const pipeline: any[] = [
       { $match: match },
@@ -567,11 +576,12 @@ class CommunityService {
               roomId: 1,
               senderId: 1,
               content: 1,
+              imageUrl: 1,
               status: 1,
               createdAt: 1,
               updatedAt: 1,
               moderated: 1,
-              sender: { _id: 1, firstName: 1, lastName: 1, avatar: 1, role: 1 }
+              sender: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 }
             }
           }
         ])
@@ -586,15 +596,20 @@ class CommunityService {
     return databaseService.communityMessages.findOne({ _id: messageId })
   }
 
-  async sendMessage(params: { roomId: ObjectId; userId: ObjectId; content: string; imageUrl?: string }) {
+  async sendMessage(params: { roomId: ObjectId; userId: ObjectId; content?: string; imageUrl?: string }) {
     const member = await this.requireCanChat(params.roomId, params.userId)
     const now = new Date()
+    const content = params.content?.trim() || ''
+    const imageUrl = params.imageUrl?.trim() || ''
+    if (!content && !imageUrl) {
+      throw new ErrorWithStatus({ message: 'Tin nhắn phải có nội dung hoặc ảnh.', status: HTTP_STATUS.BAD_REQUEST })
+    }
 
     const baseMessage: any = {
       roomId: params.roomId,
       senderId: params.userId,
-      content: params.content,
-      imageUrl: params.imageUrl,
+      content,
+      ...(imageUrl ? { imageUrl } : {}),
       status: 'visible' as MessageStatus,
       createdAt: now,
       updatedAt: now
@@ -602,7 +617,7 @@ class CommunityService {
 
     const insert = await databaseService.communityMessages.insertOne(baseMessage)
     const messageId = insert.insertedId
-    const moderation = moderateTextRuleBased(params.content)
+    const moderation = moderateTextRuleBased(content)
 
     const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
     let findingId: ObjectId | undefined
@@ -645,18 +660,19 @@ class CommunityService {
 
     await databaseService.communityMessages.updateOne({ _id: messageId }, update)
     const stored = await databaseService.communityMessages.findOne({ _id: messageId })
+    const messageWithSender = stored ? await this.attachMessageSender(stored) : stored
 
-    if (stored) {
-      aiModerationService.enqueueMessageReview({ message: stored, ruleResult: moderation }).catch(() => {})
+    if (messageWithSender) {
+      aiModerationService.enqueueMessageReview({ message: messageWithSender, ruleResult: moderation }).catch(() => {})
     }
 
-    if (stored?.status === 'visible') {
-      emitCommunity('community:message:new', params.roomId, stored)
+    if (messageWithSender?.status === 'visible') {
+      emitCommunity('community:message:new', params.roomId, messageWithSender)
     } else {
-      emitToUser('community:message:hidden', params.userId, stored)
+      emitToUser('community:message:hidden', params.userId, messageWithSender)
     }
 
-    return { message: stored, moderation, memberRole: member.role as MemberRole }
+    return { message: messageWithSender, moderation, memberRole: member.role as MemberRole }
   }
 
   async reportMessage(params: { messageId: ObjectId; reporterId: ObjectId; reason?: string }) {
