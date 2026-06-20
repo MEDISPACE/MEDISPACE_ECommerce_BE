@@ -68,9 +68,12 @@ const paymentMethodSchema = {
 
 // Shipping method validation
 const shippingMethodSchema = {
-  isIn: {
-    options: [[...Object.values(ShippingMethod)]],
-    errorMessage: ORDERS_MESSAGES.SHIPPING_METHOD_INVALID
+  custom: {
+    options: (value: string) => {
+      if (Object.values(ShippingMethod).includes(value as ShippingMethod)) return true
+      if (/^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(value)) return true
+      throw new Error(ORDERS_MESSAGES.SHIPPING_METHOD_INVALID)
+    }
   }
 }
 
@@ -115,9 +118,7 @@ export const createOrderValidator = validate(
       },
       shippingMethod: {
         optional: true,
-        isString: {
-          errorMessage: 'Invalid shipping method format' // Relaxed validation
-        }
+        ...shippingMethodSchema
       },
       notes: {
         optional: true,
@@ -127,6 +128,13 @@ export const createOrderValidator = validate(
         isLength: {
           options: { max: 500 },
           errorMessage: ORDERS_MESSAGES.NOTES_TOO_LONG
+        }
+      },
+      prescriptionId: {
+        optional: true,
+        custom: {
+          options: (value: string) => ObjectId.isValid(value),
+          errorMessage: 'Mã đơn thuốc không hợp lệ.'
         }
       }
     },

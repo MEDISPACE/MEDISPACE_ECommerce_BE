@@ -9,13 +9,31 @@ import {
   updateAdminRoomController,
   updateRoomMemberController
 } from '~/controllers/adminCommunity.controllers'
+import {
+  cancelAdminVideoEventController,
+  createAdminVideoEventController,
+  endAdminVideoEventController,
+  getVideoEventDetailController,
+  kickAdminVideoEventParticipantController,
+  listAdminVideoEventParticipantsController,
+  listAdminVideoEventRegistrationsController,
+  listVideoEventsController,
+  muteAdminVideoEventParticipantController,
+  startAdminVideoEventController,
+  updateAdminVideoEventController,
+  updateAdminVideoEventRegistrationController
+} from '~/controllers/communityVideoEvents.controllers'
 import { adminRequired } from '~/middlewares/admin.middlewares'
 import {
   createRoomValidator,
+  createVideoEventValidator,
+  eventIdValidator,
   inviteMemberValidator,
   memberActionValidator,
   paginationValidator,
   roomIdValidator,
+  updateVideoEventValidator,
+  updateVideoRegistrationValidator,
   updateRoomValidator,
   userIdParamValidator
 } from '~/middlewares/community.middlewares'
@@ -44,6 +62,49 @@ adminCommunityRouter.post(
   roomIdValidator,
   inviteMemberValidator,
   wrapRequestHandler(inviteRoomMemberController)
+)
+
+adminCommunityRouter.get('/video-events', paginationValidator, wrapRequestHandler(listVideoEventsController))
+adminCommunityRouter.post('/video-events', createVideoEventValidator, wrapRequestHandler(createAdminVideoEventController))
+adminCommunityRouter.get('/video-events/:eventId', eventIdValidator, wrapRequestHandler(getVideoEventDetailController))
+adminCommunityRouter.patch(
+  '/video-events/:eventId',
+  eventIdValidator,
+  updateVideoEventValidator,
+  wrapRequestHandler(updateAdminVideoEventController)
+)
+adminCommunityRouter.post('/video-events/:eventId/start', eventIdValidator, wrapRequestHandler(startAdminVideoEventController))
+adminCommunityRouter.post('/video-events/:eventId/end', eventIdValidator, wrapRequestHandler(endAdminVideoEventController))
+adminCommunityRouter.post('/video-events/:eventId/cancel', eventIdValidator, wrapRequestHandler(cancelAdminVideoEventController))
+adminCommunityRouter.get(
+  '/video-events/:eventId/participants',
+  eventIdValidator,
+  wrapRequestHandler(listAdminVideoEventParticipantsController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/mute',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(muteAdminVideoEventParticipantController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/kick',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(kickAdminVideoEventParticipantController)
+)
+adminCommunityRouter.get(
+  '/video-events/:eventId/registrations',
+  eventIdValidator,
+  paginationValidator,
+  wrapRequestHandler(listAdminVideoEventRegistrationsController)
+)
+adminCommunityRouter.patch(
+  '/video-events/:eventId/registrations/:userId',
+  eventIdValidator,
+  userIdParamValidator,
+  updateVideoRegistrationValidator,
+  wrapRequestHandler(updateAdminVideoEventRegistrationController)
 )
 
 export default adminCommunityRouter

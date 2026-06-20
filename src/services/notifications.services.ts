@@ -384,6 +384,21 @@ class NotificationService {
       io
     )
   }
+
+  async notifyVideoEventReminder(userId: ObjectId, eventTitle: string, eventId: string, io?: SocketIOServer): Promise<void> {
+    await this.createAndPush(
+      {
+        userId,
+        type: 'reminder',
+        title: 'Hội thảo sắp bắt đầu',
+        message: `"${eventTitle}" sẽ bắt đầu trong 15 phút.`,
+        actionUrl: `/community/video-events/${eventId}`,
+        metadata: { eventId },
+        targetRole: 'customer'
+      },
+      io
+    )
+  }
 }
 
 const notificationService = new NotificationService()
