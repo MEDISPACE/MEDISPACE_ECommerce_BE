@@ -67,7 +67,28 @@ const productSchema = {
     { name: 'packSize', type: 'string' as const, optional: true },
     { name: 'dosageInstructions', type: 'string' as const, optional: true },
     { name: 'storageInstructions', type: 'string' as const, optional: true },
-    { name: 'createdAt', type: 'int64' as const }
+    { name: 'createdAt', type: 'int64' as const },
+    // ── Hybrid RAG: Vector Embedding (Typesense v27+ built-in) ───────────────
+    // model ts/multilingual-e5-small: hỗ trợ tiếng Việt, ~500MB RAM, dim=384
+    // embed tự động khi index document — không cần gọi API ngoài
+    // optional=true: document cũ không có embedding vẫn index được (backward compat)
+    {
+      name: 'embedding',
+      type: 'float[]' as const,
+      optional: true,
+      embed: {
+        from: [
+          'name',               // Tên sản phẩm
+          'indications',        // Chỉ định — quan trọng nhất cho RAG triệu chứng
+          'activeIngredients',  // Thành phần hoạt chất
+          'shortDescription',   // Mô tả ngắn
+          'categoryName'        // Danh mục
+        ],
+        model_config: {
+          model_name: 'ts/multilingual-e5-small'
+        }
+      }
+    }
   ],
   default_sorting_field: 'rating',
   token_separators: ['-', '/', '(', ')', '.', ',']
@@ -94,7 +115,21 @@ const articleSchema = {
     { name: 'isFeatured', type: 'bool' as const, facet: true },
     { name: 'viewCount', type: 'int32' as const },
     { name: 'publishedAt', type: 'int64' as const, optional: true },
-    { name: 'featuredImage', type: 'string' as const, index: false, optional: true }
+    { name: 'featuredImage', type: 'string' as const, index: false, optional: true },
+    // ── Hybrid RAG: Vector Embedding cho bài viết sức khỏe ───────────────────
+    // Embed từ title + excerpt + content — giúp tìm bài viết theo ngữ nghĩa
+    // không chỉ theo keyword (VD: "cao huyết áp" → bài về tim mạch, muối)
+    {
+      name: 'embedding',
+      type: 'float[]' as const,
+      optional: true,
+      embed: {
+        from: ['title', 'excerpt', 'content'],
+        model_config: {
+          model_name: 'ts/multilingual-e5-small'
+        }
+      }
+    }
   ],
   default_sorting_field: 'viewCount'
 }

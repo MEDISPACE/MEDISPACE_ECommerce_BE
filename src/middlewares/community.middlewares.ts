@@ -38,6 +38,24 @@ export const messageIdValidator = validate(
   )
 )
 
+export const eventIdValidator = validate(
+  checkSchema(
+    {
+      eventId: {
+        in: ['params'],
+        notEmpty: { errorMessage: 'eventId là bắt buộc' },
+        custom: {
+          options: (value) => {
+            if (!ObjectId.isValid(value)) throw new Error('eventId không hợp lệ')
+            return true
+          }
+        }
+      }
+    },
+    ['params']
+  )
+)
+
 export const appealIdValidator = validate(
   checkSchema(
     {
@@ -185,10 +203,29 @@ export const sendMessageValidator = validate(
     {
       content: {
         in: ['body'],
-        notEmpty: { errorMessage: 'content là bắt buộc' },
+        optional: true,
         isString: { errorMessage: 'content phải là chuỗi' },
         trim: true,
-        isLength: { options: { min: 1, max: 2000 }, errorMessage: 'content tối đa 2000 ký tự' }
+        isLength: { options: { max: 2000 }, errorMessage: 'content tối đa 2000 ký tự' }
+      },
+      imageUrl: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'imageUrl phải là chuỗi' },
+        trim: true,
+        isURL: { options: { require_protocol: true }, errorMessage: 'imageUrl không hợp lệ' },
+        isLength: { options: { max: 1000 }, errorMessage: 'imageUrl tối đa 1000 ký tự' }
+      },
+      _messagePayload: {
+        in: ['body'],
+        custom: {
+          options: (_value, { req }) => {
+            const content = typeof req.body?.content === 'string' ? req.body.content.trim() : ''
+            const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : ''
+            if (!content && !imageUrl) throw new Error('Tin nhắn phải có nội dung hoặc ảnh')
+            return true
+          }
+        }
       }
     },
     ['body']
@@ -363,6 +400,176 @@ export const inviteMemberValidator = validate(
         isEmail: { errorMessage: 'email không hợp lệ' },
         trim: true
       }
+    },
+    ['body']
+  )
+)
+
+const dateValidator = (fieldName: string): any => ({
+  in: ['body'],
+  notEmpty: { errorMessage: `${fieldName} là bắt buộc` },
+  custom: {
+    options: (value: string) => {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) throw new Error(`${fieldName} không hợp lệ`)
+      return true
+    }
+  }
+})
+
+const optionalDateValidator = (fieldName: string): any => ({
+  in: ['body'],
+  optional: true,
+  custom: {
+    options: (value: string) => {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) throw new Error(`${fieldName} không hợp lệ`)
+      return true
+    }
+  }
+})
+
+const objectIdArrayValidator = (fieldName: string, maxLength = 20): any => ({
+  in: ['body'],
+  optional: true,
+  isArray: { options: { max: maxLength }, errorMessage: `${fieldName} phải là mảng và tối đa ${maxLength} phần tử` },
+  custom: {
+    options: (value: unknown) => {
+      if (!Array.isArray(value)) return true
+      if (value.length > maxLength) throw new Error(`${fieldName} tối đa ${maxLength} phần tử`)
+      if (value.some((id) => typeof id !== 'string' || !ObjectId.isValid(id))) {
+        throw new Error(`${fieldName} chứa ObjectId không hợp lệ`)
+      }
+      return true
+    }
+  }
+})
+
+const stringArrayValidator = (fieldName: string, maxLength = 30, maxItemLength = 80): any => ({
+  in: ['body'],
+  optional: true,
+  isArray: { options: { max: maxLength }, errorMessage: `${fieldName} phải là mảng và tối đa ${maxLength} phần tử` },
+  custom: {
+    options: (value: unknown) => {
+      if (!Array.isArray(value)) return true
+      if (value.length > maxLength) throw new Error(`${fieldName} tối đa ${maxLength} phần tử`)
+      if (value.some((item) => typeof item !== 'string' || item.trim().length === 0 || item.trim().length > maxItemLength)) {
+        throw new Error(`${fieldName} chỉ nhận chuỗi 1-${maxItemLength} ký tự`)
+      }
+      return true
+    }
+  }
+})
+
+const objectArrayValidator = (fieldName: string, maxLength = 20): any => ({
+  in: ['body'],
+  optional: true,
+  isArray: { options: { max: maxLength }, errorMessage: `${fieldName} phải là mảng và tối đa ${maxLength} phần tử` },
+  custom: {
+    options: (value: unknown) => {
+      if (!Array.isArray(value)) return true
+      if (value.length > maxLength) throw new Error(`${fieldName} tối đa ${maxLength} phần tử`)
+      if (value.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
+        throw new Error(`${fieldName} chỉ nhận object`)
+      }
+      return true
+    }
+  }
+})
+
+export const createVideoEventValidator = validate(
+  checkSchema(
+    {
+      roomId: {
+        in: ['body'],
+        notEmpty: { errorMessage: 'roomId là bắt buộc' },
+        custom: {
+          options: (value) => {
+            if (!ObjectId.isValid(value)) throw new Error('roomId không hợp lệ')
+            return true
+          }
+        }
+      },
+      title: {
+        in: ['body'],
+        notEmpty: { errorMessage: 'title là bắt buộc' },
+        isString: { errorMessage: 'title phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 3, max: 160 }, errorMessage: 'title độ dài 3-160 ký tự' }
+      },
+      description: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'description phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 3000 }, errorMessage: 'description tối đa 3000 ký tự' }
+      },
+      agenda: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'agenda phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 3000 }, errorMessage: 'agenda tối đa 3000 ký tự' }
+      },
+      visibility: {
+        in: ['body'],
+        notEmpty: { errorMessage: 'visibility là bắt buộc' },
+        isIn: { options: [['public', 'private']], errorMessage: 'visibility chỉ nhận public|private' }
+      },
+      status: {
+        in: ['body'],
+        optional: true,
+        isIn: { options: [['draft', 'scheduled']], errorMessage: 'status khi tạo chỉ nhận draft|scheduled' }
+      },
+      scheduledStartAt: dateValidator('scheduledStartAt'),
+      scheduledEndAt: dateValidator('scheduledEndAt'),
+      hostIds: objectIdArrayValidator('hostIds', 50),
+      speakerProfiles: objectArrayValidator('speakerProfiles'),
+      registrationRequired: { in: ['body'], optional: true, isBoolean: { errorMessage: 'registrationRequired phải là boolean' } },
+      capacity: { in: ['body'], optional: { options: { nullable: true } }, isInt: { options: { min: 1, max: 10000 }, errorMessage: 'capacity không hợp lệ' }, toInt: true },
+      provider: { in: ['body'], optional: true, isString: { errorMessage: 'provider phải là chuỗi' }, trim: true },
+      providerMeetingId: { in: ['body'], optional: true, isString: { errorMessage: 'providerMeetingId phải là chuỗi' }, trim: true },
+      meetingUrl: { in: ['body'], optional: true, isString: { errorMessage: 'meetingUrl phải là chuỗi' }, trim: true },
+      tags: stringArrayValidator('tags'),
+      materials: objectArrayValidator('materials', 30)
+    },
+    ['body']
+  )
+)
+
+export const updateVideoEventValidator = validate(
+  checkSchema(
+    {
+      title: { in: ['body'], optional: true, isString: { errorMessage: 'title phải là chuỗi' }, trim: true, isLength: { options: { min: 3, max: 160 }, errorMessage: 'title độ dài 3-160 ký tự' } },
+      description: { in: ['body'], optional: true, isString: { errorMessage: 'description phải là chuỗi' }, trim: true, isLength: { options: { min: 1, max: 3000 }, errorMessage: 'description tối đa 3000 ký tự' } },
+      agenda: { in: ['body'], optional: true, isString: { errorMessage: 'agenda phải là chuỗi' }, trim: true, isLength: { options: { min: 1, max: 3000 }, errorMessage: 'agenda tối đa 3000 ký tự' } },
+      visibility: { in: ['body'], optional: true, isIn: { options: [['public', 'private']], errorMessage: 'visibility chỉ nhận public|private' } },
+      status: { in: ['body'], optional: true, isIn: { options: [['draft', 'scheduled']], errorMessage: 'status khi cập nhật chỉ nhận draft|scheduled. Dùng endpoint start/end/cancel cho lifecycle.' } },
+      scheduledStartAt: optionalDateValidator('scheduledStartAt'),
+      scheduledEndAt: optionalDateValidator('scheduledEndAt'),
+      hostIds: objectIdArrayValidator('hostIds', 50),
+      speakerProfiles: objectArrayValidator('speakerProfiles'),
+      registrationRequired: { in: ['body'], optional: true, isBoolean: { errorMessage: 'registrationRequired phải là boolean' } },
+      capacity: { in: ['body'], optional: { options: { nullable: true } }, isInt: { options: { min: 1, max: 10000 }, errorMessage: 'capacity không hợp lệ' }, toInt: true },
+      provider: { in: ['body'], optional: true, isString: { errorMessage: 'provider phải là chuỗi' }, trim: true },
+      providerMeetingId: { in: ['body'], optional: true, isString: { errorMessage: 'providerMeetingId phải là chuỗi' }, trim: true },
+      meetingUrl: { in: ['body'], optional: true, isString: { errorMessage: 'meetingUrl phải là chuỗi' }, trim: true },
+      tags: stringArrayValidator('tags'),
+      materials: objectArrayValidator('materials', 30)
+    },
+    ['body']
+  )
+)
+
+export const updateVideoRegistrationValidator = validate(
+  checkSchema(
+    {
+      status: {
+        in: ['body'],
+        optional: true,
+        isIn: { options: [['registered', 'cancelled', 'attended', 'no_show', 'removed']], errorMessage: 'status đăng ký không hợp lệ' }
+      },
+      removeReason: { in: ['body'], optional: true, isString: { errorMessage: 'removeReason phải là chuỗi' }, trim: true, isLength: { options: { min: 1, max: 500 }, errorMessage: 'removeReason tối đa 500 ký tự' } }
     },
     ['body']
   )

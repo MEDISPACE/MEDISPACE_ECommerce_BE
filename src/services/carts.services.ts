@@ -130,12 +130,17 @@ class CartService {
         const newUnitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
         const newCampaignId = campaign?._id
 
-        // Chỉ cập nhật nếu giá thay đổi (campaign bật/tắt/hết hạn)
-        if (item.unitPrice !== newUnitPrice || item.originalUnitPrice !== originalPrice) {
+        const prescriptionRequired = product.requiresPrescription || false
+        if (
+          item.unitPrice !== newUnitPrice ||
+          item.originalUnitPrice !== originalPrice ||
+          item.prescriptionRequired !== prescriptionRequired
+        ) {
           item.unitPrice = newUnitPrice
           item.originalUnitPrice = originalPrice
           item.totalPrice = newUnitPrice * item.quantity
           item.campaignId = newCampaignId
+          item.prescriptionRequired = prescriptionRequired
           hasChanges = true
         }
       } catch {
@@ -206,11 +211,27 @@ class CartService {
     // Get or create cart
     const { cart } = await this.getCart(userId, sessionId)
 
+    // Determine unit
+    const unit: string = requestedUnit || product.priceVariants?.find((v: any) => v.isDefault)?.unit || product.priceVariants?.[0]?.unit || 'Sản phẩm'
+
     // Convert cart to Cart instance for methods
     const cartInstance = new Cart(cart)
-
-    // Determine unit
-    let unit: string = requestedUnit || product.priceVariants?.find((v: any) => v.isDefault)?.unit || product.priceVariants?.[0]?.unit || 'Sản phẩm'
+    const existingItem = cartInstance.items.find(
+      (item) => item.productId.toString() === productId.toString() && item.unit === unit
+    )
+    const newQuantity = (existingItem?.quantity || 0) + quantity
+    if (newQuantity > (product.maxOrderQuantity || 10)) {
+      throw new ErrorWithStatus({
+        message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+    if (product.stockQuantity < newQuantity * quantityPerUnit) {
+      throw new ErrorWithStatus({
+        message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
 
     // Determine original price based on unit
     const selectedVariant = product.priceVariants?.find((v: any) => v.unit === unit)
@@ -271,19 +292,18 @@ class CartService {
     sessionId?: string,
     unit?: string
   ) {
-    if (quantity < 1 || quantity > 10) {
-      throw new ErrorWithStatus({
-        message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
-        status: HTTP_STATUS.BAD_REQUEST
-      })
-    }
-
     // Check stock availability
     const product = await productsService.getProductById(productId.toString())
     if (!product) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.PRODUCT_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+    if (quantity < 1 || quantity > (product.maxOrderQuantity || 10)) {
+      throw new ErrorWithStatus({
+        message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
+        status: HTTP_STATUS.BAD_REQUEST
       })
     }
 
@@ -495,7 +515,7 @@ class CartService {
 
       if (product.stockQuantity < requiredStock) {
         throw new ErrorWithStatus({
-          message: `Insufficient stock for ${item.name}. Available: ${Math.floor(product.stockQuantity / quantityPerUnit)} ${item.unit}`,
+          message: CARTS_MESSAGES.INSUFFICIENT_STOCK,
           status: HTTP_STATUS.BAD_REQUEST
         })
       }

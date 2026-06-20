@@ -1,14 +1,14 @@
-﻿/**
+/**
  * ai-chat.services.ts
- * BE Proxy Service for AI Chat â€” Phase 3
+ * BE Proxy Service for AI Chat — Phase 3
  *
  * Responsibilities:
- *  1. Load conversation history tá»« MongoDB (source of truth)
+ *  1. Load conversation history từ MongoDB (source of truth)
  *  2. Redis-based rate limiting (30 msg/user/hour)
- *  3. Response dedup cache (3 phÃºt TTL)
- *  4. Proxy HTTP request â†’ AI Service (non-streaming)
- *  5. Proxy SSE stream â†’ AI Service (streaming)
- *  6. Save AI reply vÃ o MongoDB (async, non-blocking)
+ *  3. Response dedup cache (3 phút TTL)
+ *  4. Proxy HTTP request → AI Service (non-streaming)
+ *  5. Proxy SSE stream → AI Service (streaming)
+ *  6. Save AI reply vào MongoDB (async, non-blocking)
  */
 
 import { ObjectId } from 'mongodb'
@@ -18,22 +18,22 @@ import chatsService from './chats.services'
 import cacheService, { redis } from './cache.services'
 import { MessageType } from '~/models/schemas/Message.schema'
 
-// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Config ────────────────────────────────────────────────────────────────────
 const AI_SERVICE_URL = process.env.CHAT_AI_URL || 'http://localhost:8003'
 const AI_TIMEOUT_MS = Number(process.env.CHAT_AI_TIMEOUT_MS || 60_000)
 const AI_IMAGE_TIMEOUT_MS = Number(process.env.CHAT_AI_IMAGE_TIMEOUT_MS || 180_000)
 
 // Rate limit: 30 messages/user/hour (Redis-based, survives restart)
 const RATE_LIMIT_MAX = 30
-const RATE_LIMIT_WINDOW = 3600 // 1 giá» (seconds)
+const RATE_LIMIT_WINDOW = 3600 // 1 giờ (seconds)
 
-// Response dedup cache: 3 phÃºt
+// Response dedup cache: 3 phút
 const RESPONSE_CACHE_TTL = 180
 
-// History: láº¥y tá»‘i Ä‘a 20 messages gáº§n nháº¥t (~10 lÆ°á»£t)
+// History: lấy tối đa 20 messages gần nhất (~10 lượt)
 const HISTORY_LIMIT = 12
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Types ─────────────────────────────────────────────────────────────────────
 export interface AIContextProduct {
   mongoId: string
   name: string
@@ -65,10 +65,10 @@ export interface AIChatResponse {
   suggested_questions: string[]
 }
 
-// â”€â”€ 1. Build History tá»« MongoDB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 1. Build History từ MongoDB ───────────────────────────────────────────────
 /**
- * Load N messages gáº§n nháº¥t tá»« MongoDB vÃ  format thÃ nh history cho AI.
- * Bao gá»“m cáº£ tin nháº¯n tá»« pharmacist tháº­t â€” AI biáº¿t toÃ n bá»™ context.
+ * Load N messages gần nhất từ MongoDB và format thành history cho AI.
+ * Bao gồm cả tin nhắn từ pharmacist thật — AI biết toàn bộ context.
  */
 export async function buildHistory(conversationId: string, options: { excludeMessageId?: ObjectId | string } = {}): Promise<AIHistoryMessage[]> {
   try {
@@ -84,7 +84,7 @@ export async function buildHistory(conversationId: string, options: { excludeMes
       .limit(HISTORY_LIMIT)
       .toArray()
 
-    // Reverse Ä‘á»ƒ oldest first, rá»“i map sang format AI
+    // Reverse để oldest first, rồi map sang format AI
     return messages
       .reverse()
       .filter((m) => m.content && m.content.trim())
@@ -98,11 +98,11 @@ export async function buildHistory(conversationId: string, options: { excludeMes
   }
 }
 
-// â”€â”€ 2. Rate Limiting (Redis) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 2. Rate Limiting (Redis) ──────────────────────────────────────────────────
 /**
- * Kiá»ƒm tra rate limit per user.
+ * Kiểm tra rate limit per user.
  * Returns: { allowed: boolean, remaining: number, resetIn: number }
- * DÃ¹ng Redis INCR + EXPIRE (atomic, survives restart)
+ * Dùng Redis INCR + EXPIRE (atomic, survives restart)
  */
 export async function checkAIRateLimit(
   userId: string
@@ -110,10 +110,10 @@ export async function checkAIRateLimit(
   const key = `rate:ai:${userId}`
 
   try {
-    // INCR tráº£ vá» giÃ¡ trá»‹ sau khi tÄƒng
+    // INCR trả về giá trị sau khi tăng
     const count = await redis.incr(key)
 
-    // Láº§n Ä‘áº§u tiÃªn trong window â†’ set TTL
+    // Lần đầu tiên trong window → set TTL
     if (count === 1) {
       await redis.expire(key, RATE_LIMIT_WINDOW)
     }
@@ -127,15 +127,15 @@ export async function checkAIRateLimit(
       resetIn: ttl > 0 ? ttl : RATE_LIMIT_WINDOW
     }
   } catch {
-    // Redis down â†’ allow request (graceful degradation)
+    // Redis down → allow request (graceful degradation)
     return { allowed: true, remaining: RATE_LIMIT_MAX, resetIn: RATE_LIMIT_WINDOW }
   }
 }
 
-// â”€â”€ 3. Response Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 3. Response Cache ─────────────────────────────────────────────────────────
 /**
- * Key: hash cá»§a conversationId + message (50 kÃ½ tá»± Ä‘áº§u)
- * TTL: 3 phÃºt â€” Ä‘á»§ Ä‘á»ƒ dedup cÃ¢u há»i láº·p láº¡i trong cÃ¹ng session
+ * Key: hash của conversationId + message (50 ký tự đầu)
+ * TTL: 3 phút — đủ để dedup câu hỏi lặp lại trong cùng session
  */
 function stableFingerprint(value: unknown): string {
   if (value === null || value === undefined) return 'none'
@@ -188,11 +188,11 @@ export async function setResponseCache(
   contextData: Record<string, any> | null = null
 ): Promise<void> {
   const key = _buildCacheKey({ userId, conversationId, message, medicalInfo, contextProducts, contextData })
-  // Fire-and-forget, khÃ´ng block response
+  // Fire-and-forget, không block response
   cacheService.set(key, response, RESPONSE_CACHE_TTL).catch(() => {})
 }
 
-// â”€â”€ 4. Non-streaming: gá»i AI vÃ  tráº£ káº¿t quáº£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 4. Non-streaming: gọi AI và trả kết quả ──────────────────────────────────
 export async function sendToAI(payload: {
   message: string
   conversation_id: string
@@ -232,10 +232,10 @@ export async function sendToAI(payload: {
   }
 }
 
-// â”€â”€ 5. Save AI reply vÃ o MongoDB (async, non-blocking) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 5. Save AI reply vào MongoDB (async, non-blocking) ────────────────────────
 /**
- * Gá»i sau khi nháº­n Ä‘Æ°á»£c response tá»« AI.
- * KhÃ´ng await â€” fire-and-forget Ä‘á»ƒ khÃ´ng block user.
+ * Gọi sau khi nhận được response từ AI.
+ * Không await — fire-and-forget để không block user.
  */
 export function saveAIReplyAsync(
   conversationId: string,
@@ -246,8 +246,8 @@ export function saveAIReplyAsync(
 ): void {
   setImmediate(async () => {
     try {
-      // 1. Save user message náº¿u chÆ°a cÃ³
-      // (Náº¿u FE Ä‘Ã£ lÆ°u qua /messages thÃ¬ skip, á»Ÿ Ä‘Ã¢y assume FE chÆ°a lÆ°u)
+      // 1. Save user message nếu chưa có
+      // (Nếu FE đã lưu qua /messages thì skip, ở đây assume FE chưa lưu)
       const senderObjectId = new ObjectId(senderId)
       const convObjectId = new ObjectId(conversationId)
 
@@ -278,15 +278,15 @@ export function saveAIReplyAsync(
       )
     } catch (err) {
       console.error('[AI Chat] saveAIReplyAsync error:', err)
-      // KhÃ´ng throw â€” user Ä‘Ã£ nháº­n response rá»“i
+      // Không throw — user đã nhận response rồi
     }
   })
 }
 
-// â”€â”€ 6. SSE Streaming proxy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 6. SSE Streaming proxy ────────────────────────────────────────────────────
 /**
- * Stream response tá»« AI Service vá» FE qua SSE.
- * Gá»i trong controller vá»›i res.write() Ä‘á»ƒ forward chunks.
+ * Stream response từ AI Service về FE qua SSE.
+ * Gọi trong controller với res.write() để forward chunks.
  *
  * AI service stream format:
  *   data: {"type":"chunk","content":"text..."}
@@ -341,7 +341,7 @@ export async function streamFromAI(
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
-      buffer = lines.pop() || '' // giá»¯ láº¡i dÃ²ng chÆ°a hoÃ n chá»‰nh
+      buffer = lines.pop() || '' // giữ lại dòng chưa hoàn chỉnh
 
       for (const line of lines) {
         if (!line.trim() || line.startsWith(':')) continue
@@ -362,7 +362,7 @@ export async function streamFromAI(
           if (err instanceof Error && err.message !== 'Unexpected end of JSON input') {
             throw err
           }
-          // Malformed chunk â€” bá» qua
+          // Malformed chunk — bỏ qua
         }
       }
     }
