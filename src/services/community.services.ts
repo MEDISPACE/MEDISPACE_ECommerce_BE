@@ -80,11 +80,41 @@ function emitToAdmins(event: string, payload: unknown) {
 class CommunityService {
   private async attachMessageSender(message: any) {
     if (!message?.senderId) return message
-    const sender = await databaseService.users.findOne(
-      { _id: message.senderId },
-      { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 } }
-    )
-    return sender ? { ...message, sender } : message
+    const [sender, replyTo] = await Promise.all([
+      databaseService.users.findOne(
+        { _id: message.senderId },
+        { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 } }
+      ),
+      message.replyToMessageId
+        ? databaseService.communityMessages
+            .aggregate([
+              { $match: { _id: message.replyToMessageId } },
+              {
+                $lookup: {
+                  from: process.env.USERS_COLLECTION || 'users',
+                  localField: 'senderId',
+                  foreignField: '_id',
+                  as: 'sender'
+                }
+              },
+              { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
+              {
+                $project: {
+                  _id: 1,
+                  roomId: 1,
+                  senderId: 1,
+                  content: 1,
+                  imageUrl: 1,
+                  status: 1,
+                  createdAt: 1,
+                  sender: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 }
+                }
+              }
+            ])
+            .next()
+        : Promise.resolve(null)
+    ])
+    return { ...message, ...(sender ? { sender } : {}), ...(replyTo ? { replyTo } : {}) }
   }
 
   private normalizeRoomMetadata(params: RoomMetadataParams) {
@@ -95,12 +125,16 @@ class CommunityService {
     if (params.coverImage !== undefined) update.coverImage = params.coverImage.trim() || undefined
     if (params.guidelines !== undefined) {
       update.guidelines = Array.isArray(params.guidelines)
-        ? params.guidelines.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 8)
+        ? params.guidelines
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+            .slice(0, 8)
         : undefined
     }
     if (params.pinnedMessage !== undefined) update.pinnedMessage = params.pinnedMessage.trim() || undefined
     if (params.featured !== undefined) update.featured = Boolean(params.featured)
-    if (params.sortOrder !== undefined && Number.isFinite(Number(params.sortOrder))) update.sortOrder = Number(params.sortOrder)
+    if (params.sortOrder !== undefined && Number.isFinite(Number(params.sortOrder)))
+      update.sortOrder = Number(params.sortOrder)
     return update
   }
 
@@ -199,11 +233,11 @@ class CommunityService {
     }
 
     const addFields: any = {
-        memberCount: { $ifNull: [{ $arrayElemAt: ['$memberStats.count', 0] }, 0] },
-        messageCount: { $ifNull: [{ $arrayElemAt: ['$messageStats.messageCount', 0] }, 0] },
-        lastMessageAt: { $arrayElemAt: ['$messageStats.lastMessageAt', 0] },
-        lastMessagePreview: { $arrayElemAt: ['$messageStats.lastMessagePreview', 0] },
-        unreadCount: 0
+      memberCount: { $ifNull: [{ $arrayElemAt: ['$memberStats.count', 0] }, 0] },
+      messageCount: { $ifNull: [{ $arrayElemAt: ['$messageStats.messageCount', 0] }, 0] },
+      lastMessageAt: { $arrayElemAt: ['$messageStats.lastMessageAt', 0] },
+      lastMessagePreview: { $arrayElemAt: ['$messageStats.lastMessagePreview', 0] },
+      unreadCount: 0
     }
     if (viewerId) {
       addFields.viewerMembership = { $arrayElemAt: ['$viewerMembership', 0] }
@@ -257,7 +291,9 @@ class CommunityService {
 
     if (filters?.includePrivate && isAdmin) {
       if (filters.visibility) query.visibility = filters.visibility
-      return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId, filters?.sort)).toArray()
+      return databaseService.communityRooms
+        .aggregate(this.roomMetricsPipeline(query, viewerId, filters?.sort))
+        .toArray()
     }
 
     if (filters?.includePrivate && viewerId) {
@@ -294,7 +330,13 @@ class CommunityService {
     return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId, filters?.sort)).toArray()
   }
 
-  async listAdminRooms(filters?: { visibility?: RoomVisibility; status?: RoomStatus; diseaseKey?: string; search?: string; sort?: RoomSort }) {
+  async listAdminRooms(filters?: {
+    visibility?: RoomVisibility
+    status?: RoomStatus
+    diseaseKey?: string
+    search?: string
+    sort?: RoomSort
+  }) {
     const query: any = {}
     if (filters?.visibility) query.visibility = filters.visibility
     if (filters?.status) query.status = filters.status
@@ -302,18 +344,26 @@ class CommunityService {
     const search = filters?.search?.trim()
     if (search) {
       const regex = new RegExp(escapeRegex(search), 'i')
-      query.$or = [{ name: regex }, { slug: regex }, { diseaseKey: regex }, { topicLabel: regex }, { description: regex }]
+      query.$or = [
+        { name: regex },
+        { slug: regex },
+        { diseaseKey: regex },
+        { topicLabel: regex },
+        { description: regex }
+      ]
     }
     return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, undefined, filters?.sort)).toArray()
   }
 
-  async createRoom(params: {
-    name: string
-    slug?: string
-    visibility: RoomVisibility
-    diseaseKey?: string
-    createdBy: ObjectId
-  } & RoomMetadataParams) {
+  async createRoom(
+    params: {
+      name: string
+      slug?: string
+      visibility: RoomVisibility
+      diseaseKey?: string
+      createdBy: ObjectId
+    } & RoomMetadataParams
+  ) {
     const now = new Date()
     const doc = {
       name: params.name.trim(),
@@ -468,7 +518,8 @@ class CommunityService {
     let userId = params.userId
     if (!userId && params.email) {
       const user = await databaseService.users.findOne({ email: params.email })
-      if (!user?._id) throw new ErrorWithStatus({ message: 'Không tìm thấy người dùng.', status: HTTP_STATUS.NOT_FOUND })
+      if (!user?._id)
+        throw new ErrorWithStatus({ message: 'Không tìm thấy người dùng.', status: HTTP_STATUS.NOT_FOUND })
       userId = user._id
     }
     if (!userId) {
@@ -612,16 +663,17 @@ class CommunityService {
     return member as any
   }
 
-  async listMessages(params: { roomId: ObjectId; userId: ObjectId; page: number; limit: number }) {
+  async listMessages(params: { roomId: ObjectId; userId: ObjectId; page: number; limit: number; q?: string }) {
     await this.requireActiveMember(params.roomId, params.userId)
 
     const skip = (params.page - 1) * params.limit
+    const search = params.q?.trim()
     const query: any = {
       roomId: params.roomId,
-      $or: [
-        { status: 'visible' as MessageStatus },
-        { status: 'hidden' as MessageStatus, senderId: params.userId }
-      ]
+      $or: [{ status: 'visible' as MessageStatus }, { status: 'hidden' as MessageStatus, senderId: params.userId }]
+    }
+    if (search) {
+      query.content = new RegExp(escapeRegex(search), 'i')
     }
 
     const [items, total] = await Promise.all([
@@ -641,16 +693,58 @@ class CommunityService {
           },
           { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
           {
+            $lookup: {
+              from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+              localField: 'replyToMessageId',
+              foreignField: '_id',
+              as: 'replyTo'
+            }
+          },
+          { $unwind: { path: '$replyTo', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: process.env.USERS_COLLECTION || 'users',
+              localField: 'replyTo.senderId',
+              foreignField: '_id',
+              as: 'replyToSender'
+            }
+          },
+          { $unwind: { path: '$replyToSender', preserveNullAndEmptyArrays: true } },
+          {
             $project: {
               roomId: 1,
               senderId: 1,
               content: 1,
               imageUrl: 1,
+              replyToMessageId: 1,
               status: 1,
               createdAt: 1,
               updatedAt: 1,
               moderated: 1,
-              sender: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 }
+              sender: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 },
+              replyTo: {
+                $cond: [
+                  { $ifNull: ['$replyTo._id', false] },
+                  {
+                    _id: '$replyTo._id',
+                    roomId: '$replyTo.roomId',
+                    senderId: '$replyTo.senderId',
+                    content: '$replyTo.content',
+                    imageUrl: '$replyTo.imageUrl',
+                    status: '$replyTo.status',
+                    createdAt: '$replyTo.createdAt',
+                    sender: {
+                      _id: '$replyToSender._id',
+                      firstName: '$replyToSender.firstName',
+                      lastName: '$replyToSender.lastName',
+                      email: '$replyToSender.email',
+                      avatar: '$replyToSender.avatar',
+                      role: '$replyToSender.role'
+                    }
+                  },
+                  null
+                ]
+              }
             }
           }
         ])
@@ -665,7 +759,13 @@ class CommunityService {
     return databaseService.communityMessages.findOne({ _id: messageId })
   }
 
-  async sendMessage(params: { roomId: ObjectId; userId: ObjectId; content?: string; imageUrl?: string }) {
+  async sendMessage(params: {
+    roomId: ObjectId
+    userId: ObjectId
+    content?: string
+    imageUrl?: string
+    replyToMessageId?: ObjectId
+  }) {
     const member = await this.requireCanChat(params.roomId, params.userId)
     const now = new Date()
     const content = params.content?.trim() || ''
@@ -674,11 +774,25 @@ class CommunityService {
       throw new ErrorWithStatus({ message: 'Tin nhắn phải có nội dung hoặc ảnh.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
+    let replyToMessageId: ObjectId | undefined
+    if (params.replyToMessageId) {
+      const replyTo = await databaseService.communityMessages.findOne({
+        _id: params.replyToMessageId,
+        roomId: params.roomId,
+        status: 'visible' as MessageStatus
+      })
+      if (!replyTo) {
+        throw new ErrorWithStatus({ message: 'Không tìm thấy tin nhắn cần reply.', status: HTTP_STATUS.NOT_FOUND })
+      }
+      replyToMessageId = params.replyToMessageId
+    }
+
     const baseMessage: any = {
       roomId: params.roomId,
       senderId: params.userId,
       content,
       ...(imageUrl ? { imageUrl } : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {}),
       status: 'visible' as MessageStatus,
       createdAt: now,
       updatedAt: now
@@ -778,7 +892,11 @@ class CommunityService {
           $addToSet: { categories: 'user_report' }
         }
       )
-      emitToAdmins('community:moderation:queued', { findingId: existing._id, roomId: message.roomId, messageId: params.messageId })
+      emitToAdmins('community:moderation:queued', {
+        findingId: existing._id,
+        roomId: message.roomId,
+        messageId: params.messageId
+      })
       return { findingId: existing._id }
     }
 
