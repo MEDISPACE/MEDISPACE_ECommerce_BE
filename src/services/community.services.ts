@@ -9,6 +9,18 @@ import { moderateTextRuleBased } from '~/utils/moderation/moderationEngine'
 
 type RoomVisibility = 'public' | 'private'
 type RoomStatus = 'active' | 'archived'
+type RoomSort = 'activity' | 'newest' | 'members' | 'messages' | 'featured'
+
+type RoomMetadataParams = {
+  description?: string
+  topicLabel?: string
+  iconKey?: string
+  coverImage?: string
+  guidelines?: string[]
+  pinnedMessage?: string
+  featured?: boolean
+  sortOrder?: number
+}
 
 type MemberRole = 'member' | 'moderator' | 'admin'
 type MemberStatus = 'pending' | 'invited' | 'active' | 'left' | 'banned'
@@ -75,10 +87,26 @@ class CommunityService {
     return sender ? { ...message, sender } : message
   }
 
-  private roomMetricsPipeline(match: Record<string, unknown>, viewerId?: ObjectId) {
+  private normalizeRoomMetadata(params: RoomMetadataParams) {
+    const update: any = {}
+    if (params.description !== undefined) update.description = params.description.trim() || undefined
+    if (params.topicLabel !== undefined) update.topicLabel = params.topicLabel.trim() || undefined
+    if (params.iconKey !== undefined) update.iconKey = params.iconKey.trim() || undefined
+    if (params.coverImage !== undefined) update.coverImage = params.coverImage.trim() || undefined
+    if (params.guidelines !== undefined) {
+      update.guidelines = Array.isArray(params.guidelines)
+        ? params.guidelines.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 8)
+        : undefined
+    }
+    if (params.pinnedMessage !== undefined) update.pinnedMessage = params.pinnedMessage.trim() || undefined
+    if (params.featured !== undefined) update.featured = Boolean(params.featured)
+    if (params.sortOrder !== undefined && Number.isFinite(Number(params.sortOrder))) update.sortOrder = Number(params.sortOrder)
+    return update
+  }
+
+  private roomMetricsPipeline(match: Record<string, unknown>, viewerId?: ObjectId, sort: RoomSort = 'activity') {
     const pipeline: any[] = [
       { $match: match },
-      { $sort: { createdAt: -1 } },
       {
         $lookup: {
           from: process.env.DB_COMMUNITY_ROOM_MEMBERS_COLLECTION || 'communityRoomMembers',
@@ -182,6 +210,14 @@ class CommunityService {
       addFields.unreadCount = { $ifNull: [{ $arrayElemAt: ['$unreadStats.count', 0] }, 0] }
     }
     pipeline.push({ $addFields: addFields })
+    const sortMap: Record<RoomSort, Record<string, 1 | -1>> = {
+      activity: { lastMessageAt: -1, featured: -1, sortOrder: 1, createdAt: -1 },
+      newest: { createdAt: -1 },
+      members: { memberCount: -1, lastMessageAt: -1, createdAt: -1 },
+      messages: { messageCount: -1, lastMessageAt: -1, createdAt: -1 },
+      featured: { featured: -1, sortOrder: 1, lastMessageAt: -1, createdAt: -1 }
+    }
+    pipeline.push({ $sort: sortMap[sort] || sortMap.activity })
     pipeline.push({
       $project: {
         memberStats: 0,
@@ -193,16 +229,35 @@ class CommunityService {
     return pipeline
   }
 
-  async listRooms(filters?: { visibility?: RoomVisibility; diseaseKey?: string; viewer?: AuthContext; includePrivate?: boolean }) {
+  async listRooms(filters?: {
+    visibility?: RoomVisibility
+    diseaseKey?: string
+    search?: string
+    sort?: RoomSort
+    viewer?: AuthContext
+    includePrivate?: boolean
+  }) {
     const query: any = { status: 'active' as RoomStatus }
     if (filters?.diseaseKey) query.diseaseKey = filters.diseaseKey
+    const search = filters?.search?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      query.$or = [
+        { name: regex },
+        { slug: regex },
+        { diseaseKey: regex },
+        { topicLabel: regex },
+        { description: regex },
+        { tags: regex }
+      ]
+    }
 
     const viewerId = filters?.viewer?.userId
     const isAdmin = filters?.viewer?.role === UserRole.Admin
 
     if (filters?.includePrivate && isAdmin) {
       if (filters.visibility) query.visibility = filters.visibility
-      return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId)).toArray()
+      return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId, filters?.sort)).toArray()
     }
 
     if (filters?.includePrivate && viewerId) {
@@ -212,13 +267,22 @@ class CommunityService {
         .toArray()
       const allowedPrivateRoomIds = memberships.map((member: any) => member.roomId).filter(Boolean)
 
-      query.$or = [{ visibility: 'public' }]
+      const visibilityOr = [{ visibility: 'public' }]
       if (allowedPrivateRoomIds.length > 0) {
-        query.$or.push({ _id: { $in: allowedPrivateRoomIds }, visibility: 'private' })
+        visibilityOr.push({ _id: { $in: allowedPrivateRoomIds }, visibility: 'private' } as any)
+      }
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: visibilityOr }]
+        delete query.$or
+      } else {
+        query.$or = visibilityOr
       }
       if (filters.visibility) {
+        const searchOr = query.$and?.[0]
         query.visibility = filters.visibility
         delete query.$or
+        delete query.$and
+        if (searchOr) query.$and = [searchOr]
         if (filters.visibility === 'private') {
           query._id = { $in: allowedPrivateRoomIds }
         }
@@ -227,10 +291,10 @@ class CommunityService {
       query.visibility = 'public'
     }
 
-    return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId)).toArray()
+    return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, viewerId, filters?.sort)).toArray()
   }
 
-  async listAdminRooms(filters?: { visibility?: RoomVisibility; status?: RoomStatus; diseaseKey?: string; search?: string }) {
+  async listAdminRooms(filters?: { visibility?: RoomVisibility; status?: RoomStatus; diseaseKey?: string; search?: string; sort?: RoomSort }) {
     const query: any = {}
     if (filters?.visibility) query.visibility = filters.visibility
     if (filters?.status) query.status = filters.status
@@ -238,9 +302,9 @@ class CommunityService {
     const search = filters?.search?.trim()
     if (search) {
       const regex = new RegExp(escapeRegex(search), 'i')
-      query.$or = [{ name: regex }, { slug: regex }, { diseaseKey: regex }]
+      query.$or = [{ name: regex }, { slug: regex }, { diseaseKey: regex }, { topicLabel: regex }, { description: regex }]
     }
-    return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query)).toArray()
+    return databaseService.communityRooms.aggregate(this.roomMetricsPipeline(query, undefined, filters?.sort)).toArray()
   }
 
   async createRoom(params: {
@@ -249,13 +313,14 @@ class CommunityService {
     visibility: RoomVisibility
     diseaseKey?: string
     createdBy: ObjectId
-  }) {
+  } & RoomMetadataParams) {
     const now = new Date()
     const doc = {
       name: params.name.trim(),
       slug: (params.slug || slugify(params.name)).trim(),
       visibility: params.visibility,
       diseaseKey: params.diseaseKey?.trim() || undefined,
+      ...this.normalizeRoomMetadata(params),
       status: 'active' as RoomStatus,
       createdBy: params.createdBy,
       createdAt: now,
@@ -276,12 +341,16 @@ class CommunityService {
     }
   }
 
-  async updateRoom(roomId: ObjectId, params: { name?: string; slug?: string; visibility?: RoomVisibility; diseaseKey?: string }) {
+  async updateRoom(
+    roomId: ObjectId,
+    params: { name?: string; slug?: string; visibility?: RoomVisibility; diseaseKey?: string } & RoomMetadataParams
+  ) {
     const update: any = { updatedAt: new Date() }
     if (params.name !== undefined) update.name = params.name.trim()
     if (params.slug !== undefined) update.slug = params.slug.trim()
     if (params.visibility !== undefined) update.visibility = params.visibility
     if (params.diseaseKey !== undefined) update.diseaseKey = params.diseaseKey.trim() || undefined
+    Object.assign(update, this.normalizeRoomMetadata(params))
 
     try {
       const result = await databaseService.communityRooms.findOneAndUpdate(
