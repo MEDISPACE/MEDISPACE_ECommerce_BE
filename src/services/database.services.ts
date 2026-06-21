@@ -185,6 +185,8 @@ class DatabaseService {
       // Community & Moderation indexes (MVP)
       await safeCreateIndex(this.communityRooms, { slug: 1 }, { unique: true })
       await safeCreateIndex(this.communityRooms, { visibility: 1, status: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityRooms, { status: 1, featured: -1, sortOrder: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityRooms, { diseaseKey: 1, status: 1, featured: -1 })
 
       await safeCreateIndex(this.communityRoomMembers, { roomId: 1, userId: 1 }, { unique: true })
       await safeCreateIndex(this.communityRoomMembers, { roomId: 1, status: 1, updatedAt: -1 })
