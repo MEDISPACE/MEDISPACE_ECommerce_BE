@@ -74,18 +74,22 @@ describe('shipping providers', () => {
     process.env.AHAMOVE_PICK_DISTRICT = 'Thanh pho Thu Duc'
     process.env.AHAMOVE_PICK_PROVINCE = 'TP HCM'
     process.env.AHAMOVE_PICK_MOBILE = '84946826098'
-    mockAxiosPost.mockResolvedValueOnce({
-      data: [{ service_id: 'SGN-BIKE', data: { total_fee: 16000 }, error: null }]
-    })
+    mockAxiosPost
+      .mockResolvedValueOnce({ data: { token: 'generated-ahamove-token', expires_in: 3600 } })
+      .mockResolvedValueOnce({ data: [{ service_id: 'SGN-BIKE', data: { total_fee: 16000 }, error: null }] })
 
     const { AhamoveShippingProvider } = await importProviders()
     const rate = await new AhamoveShippingProvider().calculateRate(hcmPayload, 'BIKE')
 
     expect(rate).toMatchObject({ id: 'ahamove:BIKE', provider: 'ahamove', serviceCode: 'BIKE', price: 16000 })
-    expect(mockAxiosPost).toHaveBeenCalledWith('/v3/orders/estimates', expect.objectContaining({
+    expect(mockAxiosPost).toHaveBeenNthCalledWith(1, '/v3/accounts/token', {
+      mobile: '84946826098',
+      api_key: 'ahamove-token-1'
+    })
+    expect(mockAxiosPost).toHaveBeenNthCalledWith(2, '/v3/orders/estimates', expect.objectContaining({
       group_services: [{ _id: 'BIKE', group_requests: [] }],
       payment_method: 'CASH'
-    }), expect.any(Object))
+    }), expect.objectContaining({ headers: { Authorization: 'Bearer generated-ahamove-token' } }))
   })
 
   it('Ahamove same-province filter accepts common Ho Chi Minh aliases', async () => {
@@ -95,13 +99,15 @@ describe('shipping providers', () => {
     process.env.AHAMOVE_PICK_DISTRICT = 'Thanh pho Thu Duc'
     process.env.AHAMOVE_PICK_PROVINCE = 'TP HCM'
     process.env.AHAMOVE_PICK_MOBILE = '84946826098'
-    mockAxiosPost.mockResolvedValueOnce({ data: [{ service_id: 'SGN-BIKE', data: { total_fee: 16000 } }] })
+    mockAxiosPost
+      .mockResolvedValueOnce({ data: { token: 'generated-ahamove-token', expires_in: 3600 } })
+      .mockResolvedValueOnce({ data: [{ service_id: 'SGN-BIKE', data: { total_fee: 16000 } }] })
 
     const { AhamoveShippingProvider } = await importProviders()
     const rate = await new AhamoveShippingProvider().calculateRate({ ...hcmPayload, toProvince: 'TP. Ho Chi Minh' }, 'BIKE')
 
     expect(rate?.price).toBe(16000)
-    expect(mockAxiosPost).toHaveBeenCalledOnce()
+    expect(mockAxiosPost).toHaveBeenCalledTimes(2)
   })
 
   it('Ahamove same-province filter hides cross-province options before calling Ahamove', async () => {
