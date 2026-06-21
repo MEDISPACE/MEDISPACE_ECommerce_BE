@@ -1102,7 +1102,7 @@ Nếu `GHTK_TOKEN` hoặc địa chỉ lấy hàng chưa cấu hình, provider G
 
 ```env
 AHAMOVE_API_URL=https://partner-apistg.ahamove.com
-AHAMOVE_TOKEN=your_ahamove_token
+AHAMOVE_TOKEN=your_ahamove_api_key
 AHAMOVE_SERVICES=BIKE,ECO
 AHAMOVE_SAME_PROVINCE_ONLY=true
 AHAMOVE_PICK_NAME=MediSpace
@@ -1113,6 +1113,7 @@ AHAMOVE_PICK_DISTRICT=...
 AHAMOVE_PICK_PROVINCE=...
 ```
 
+`AHAMOVE_TOKEN`/`AHAMOVE_TOKENS` là API key/server key từ AhaMove. Provider tự gọi `/v3/accounts/token` bằng API key và số điện thoại lấy hàng để lấy bearer token trước khi gọi estimate.
 Nếu `AHAMOVE_TOKEN` hoặc địa chỉ lấy hàng chưa cấu hình, provider Ahamove tự bỏ qua và không hiển thị option.
 Mặc định Ahamove chỉ hiển thị khi địa chỉ giao cùng tỉnh/thành với kho, để tránh hiện các quote liên tỉnh quá cao trong checkout.
 
