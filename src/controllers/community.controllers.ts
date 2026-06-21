@@ -6,7 +6,12 @@ import moderationService from '~/services/moderation.services'
 
 export const listRoomsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { visibility, diseaseKey, search, sort } = req.query as { visibility?: any; diseaseKey?: any; search?: any; sort?: any }
+    const { visibility, diseaseKey, search, sort } = req.query as {
+      visibility?: any
+      diseaseKey?: any
+      search?: any
+      sort?: any
+    }
     const rooms = await communityService.listRooms({
       visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
       diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined,
@@ -22,7 +27,12 @@ export const listRoomsController = async (req: Request, res: Response, next: Nex
 export const listMyRoomsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, role } = req.decoded_authorization as TokenPayload
-    const { visibility, diseaseKey, search, sort } = req.query as { visibility?: any; diseaseKey?: any; search?: any; sort?: any }
+    const { visibility, diseaseKey, search, sort } = req.query as {
+      visibility?: any
+      diseaseKey?: any
+      search?: any
+      sort?: any
+    }
     const rooms = await communityService.listRooms({
       visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
       diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined,
@@ -40,7 +50,20 @@ export const listMyRoomsController = async (req: Request, res: Response, next: N
 export const createRoomController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.decoded_authorization as TokenPayload
-    const { name, slug, visibility, diseaseKey, description, topicLabel, iconKey, coverImage, guidelines, pinnedMessage, featured, sortOrder } = req.body
+    const {
+      name,
+      slug,
+      visibility,
+      diseaseKey,
+      description,
+      topicLabel,
+      iconKey,
+      coverImage,
+      guidelines,
+      pinnedMessage,
+      featured,
+      sortOrder
+    } = req.body
 
     const room = await communityService.createRoom({
       name,
@@ -122,12 +145,14 @@ export const listMessagesController = async (req: Request, res: Response, next: 
     const roomId = req.params.roomId as unknown as string
     const page = Number((req.query as any).page || 1)
     const limit = Number((req.query as any).limit || 20)
+    const q = typeof (req.query as any).q === 'string' ? String((req.query as any).q).trim() : undefined
 
     const result = await communityService.listMessages({
       roomId: new ObjectId(roomId),
       userId: new ObjectId(userId),
       page,
-      limit
+      limit,
+      q
     })
 
     return res.status(200).json({ message: 'OK', data: result })
@@ -140,13 +165,14 @@ export const sendMessageController = async (req: Request, res: Response, next: N
   try {
     const { userId } = req.decoded_authorization as TokenPayload
     const roomId = req.params.roomId as unknown as string
-    const { content, imageUrl } = req.body
+    const { content, imageUrl, replyToMessageId } = req.body
 
     const result = await communityService.sendMessage({
       roomId: new ObjectId(roomId),
       userId: new ObjectId(userId),
       content,
-      imageUrl
+      imageUrl,
+      replyToMessageId: replyToMessageId ? new ObjectId(replyToMessageId) : undefined
     })
 
     return res.status(201).json({ message: 'Gửi tin nhắn thành công', data: result })
