@@ -138,6 +138,66 @@ export const createRoomValidator = validate(
         isString: { errorMessage: 'diseaseKey phải là chuỗi' },
         trim: true,
         isLength: { options: { min: 1, max: 80 }, errorMessage: 'diseaseKey tối đa 80 ký tự' }
+      },
+      topicLabel: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'topicLabel phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 100 }, errorMessage: 'topicLabel tối đa 100 ký tự' }
+      },
+      description: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'description phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 500 }, errorMessage: 'description tối đa 500 ký tự' }
+      },
+      iconKey: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'iconKey phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 60 }, errorMessage: 'iconKey tối đa 60 ký tự' }
+      },
+      coverImage: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'coverImage phải là chuỗi' },
+        trim: true,
+        isURL: { options: { require_protocol: true }, errorMessage: 'coverImage không hợp lệ' },
+        isLength: { options: { max: 1000 }, errorMessage: 'coverImage tối đa 1000 ký tự' }
+      },
+      guidelines: {
+        in: ['body'],
+        optional: true,
+        isArray: { options: { max: 8 }, errorMessage: 'guidelines tối đa 8 dòng' }
+      },
+      'guidelines.*': {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'guideline phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 180 }, errorMessage: 'mỗi guideline tối đa 180 ký tự' }
+      },
+      pinnedMessage: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'pinnedMessage phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 300 }, errorMessage: 'pinnedMessage tối đa 300 ký tự' }
+      },
+      featured: {
+        in: ['body'],
+        optional: true,
+        isBoolean: { errorMessage: 'featured phải là boolean' },
+        toBoolean: true
+      },
+      sortOrder: {
+        in: ['body'],
+        optional: true,
+        isInt: { options: { min: 0, max: 100000 }, errorMessage: 'sortOrder không hợp lệ' },
+        toInt: true
       }
     },
     ['body']
@@ -172,6 +232,66 @@ export const updateRoomValidator = validate(
         isString: { errorMessage: 'diseaseKey phải là chuỗi' },
         trim: true,
         isLength: { options: { min: 1, max: 80 }, errorMessage: 'diseaseKey tối đa 80 ký tự' }
+      },
+      topicLabel: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'topicLabel phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 100 }, errorMessage: 'topicLabel tối đa 100 ký tự' }
+      },
+      description: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'description phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 500 }, errorMessage: 'description tối đa 500 ký tự' }
+      },
+      iconKey: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'iconKey phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 60 }, errorMessage: 'iconKey tối đa 60 ký tự' }
+      },
+      coverImage: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'coverImage phải là chuỗi' },
+        trim: true,
+        isURL: { options: { require_protocol: true }, errorMessage: 'coverImage không hợp lệ' },
+        isLength: { options: { max: 1000 }, errorMessage: 'coverImage tối đa 1000 ký tự' }
+      },
+      guidelines: {
+        in: ['body'],
+        optional: true,
+        isArray: { options: { max: 8 }, errorMessage: 'guidelines tối đa 8 dòng' }
+      },
+      'guidelines.*': {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'guideline phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 180 }, errorMessage: 'mỗi guideline tối đa 180 ký tự' }
+      },
+      pinnedMessage: {
+        in: ['body'],
+        optional: true,
+        isString: { errorMessage: 'pinnedMessage phải là chuỗi' },
+        trim: true,
+        isLength: { options: { min: 1, max: 300 }, errorMessage: 'pinnedMessage tối đa 300 ký tự' }
+      },
+      featured: {
+        in: ['body'],
+        optional: true,
+        isBoolean: { errorMessage: 'featured phải là boolean' },
+        toBoolean: true
+      },
+      sortOrder: {
+        in: ['body'],
+        optional: true,
+        isInt: { options: { min: 0, max: 100000 }, errorMessage: 'sortOrder không hợp lệ' },
+        toInt: true
       }
     },
     ['body']
