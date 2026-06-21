@@ -6,11 +6,11 @@ config()
 
 const AHAMOVE_API_URL = process.env.AHAMOVE_API_URL || 'https://partner-apistg.ahamove.com'
 
-const getAhamoveTokens = () => {
-  const tokenPool = process.env.AHAMOVE_TOKENS || process.env.AHAMOVE_TOKEN || ''
-  return tokenPool
+const getAhamoveApiKeys = () => {
+  const apiKeyPool = process.env.AHAMOVE_TOKENS || process.env.AHAMOVE_TOKEN || ''
+  return apiKeyPool
     .split(',')
-    .map((token) => token.trim())
+    .map((apiKey) => apiKey.trim())
     .filter(Boolean)
 }
 
@@ -71,6 +71,7 @@ const createPoint = (address: string, name: string, mobile: string, lat?: string
 export class AhamoveShippingProvider implements ShippingProvider {
   readonly provider = 'ahamove' as const
   private client: AxiosInstance
+  private accessTokenCache = new Map<string, { token: string; expiresAt: number }>()
 
   constructor() {
     this.client = axios.create({
@@ -83,7 +84,29 @@ export class AhamoveShippingProvider implements ShippingProvider {
   }
 
   private isEnabled() {
-    return getAhamoveTokens().length > 0
+    return getAhamoveApiKeys().length > 0
+  }
+
+  private getAccountMobile() {
+    return process.env.AHAMOVE_PICK_MOBILE || process.env.SHOP_PHONE || ''
+  }
+
+  private async getAccessToken(apiKey: string) {
+    const cached = this.accessTokenCache.get(apiKey)
+    if (cached && cached.expiresAt > Date.now()) return cached.token
+
+    const mobile = this.getAccountMobile()
+    if (!mobile) return null
+
+    const response = await this.client.post('/v3/accounts/token', { mobile, api_key: apiKey })
+    const token = response.data?.token
+    if (!token) return null
+
+    const ttlSeconds = Number(response.data?.expires_in || response.data?.expiresIn || 3600)
+    const ttlMs = Number.isFinite(ttlSeconds) ? Math.max(60, ttlSeconds - 60) * 1000 : 55 * 60 * 1000
+    this.accessTokenCache.set(apiKey, { token, expiresAt: Date.now() + ttlMs })
+
+    return token
   }
 
   private getPickupAddress() {
@@ -109,7 +132,7 @@ export class AhamoveShippingProvider implements ShippingProvider {
 
     const pickupAddress = this.getPickupAddress()
     const dropoffAddress = normalizeAddress([payload.toAddress, payload.toWard, payload.toDistrict, payload.toProvince])
-    const pickupMobile = process.env.AHAMOVE_PICK_MOBILE || process.env.SHOP_PHONE || '0900000000'
+    const pickupMobile = this.getAccountMobile() || '0900000000'
 
     if (!pickupAddress || !dropoffAddress || !pickupMobile) return null
 
@@ -161,8 +184,11 @@ export class AhamoveShippingProvider implements ShippingProvider {
       ]
     }
 
-    for (const [index, token] of getAhamoveTokens().entries()) {
+    for (const [index, apiKey] of getAhamoveApiKeys().entries()) {
       try {
+        const token = await this.getAccessToken(apiKey)
+        if (!token) continue
+
         const response = await this.client.post('/v3/orders/estimates', requestBody, {
           headers: { Authorization: `Bearer ${token}` }
         })
