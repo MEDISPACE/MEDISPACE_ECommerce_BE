@@ -33,12 +33,13 @@ type VideoEventAccessDoc = CommunityVideoEventAccessShape & {
   status?: VideoEventStatus
 }
 
-type CommunityVideoEventDoc = WithId<Document> & VideoEventAccessDoc & {
-  status: VideoEventStatus
-  activeRegistrationCount?: number
-  registrationRequired?: boolean
-  capacity?: number | null
-}
+type CommunityVideoEventDoc = WithId<Document> &
+  VideoEventAccessDoc & {
+    status: VideoEventStatus
+    activeRegistrationCount?: number
+    registrationRequired?: boolean
+    capacity?: number | null
+  }
 
 type CreateEventParams = {
   roomId: ObjectId
@@ -169,6 +170,47 @@ class CommunityVideoEventsService {
     return databaseService.communityRoomMembers.findOne({ roomId, userId })
   }
 
+  private async ensureRoomChatAccess(
+    event: VideoEventAccessDoc,
+    userId: ObjectId,
+    role?: UserRole,
+    session?: ClientSession
+  ) {
+    const room = await this.getActiveRoom(event.roomId)
+    const member = await databaseService.communityRoomMembers.findOne({ roomId: event.roomId, userId }, { session })
+    if (member?.status === 'banned') {
+      throw new ErrorWithStatus({ message: 'Bạn đã bị cấm trong phòng liên quan.', status: HTTP_STATUS.FORBIDDEN })
+    }
+
+    const privileged = role === UserRole.Admin || this.isHost(event, userId)
+    if (room.visibility === 'private' && !privileged && member?.status !== 'active' && member?.status !== 'invited') {
+      throw new ErrorWithStatus({
+        message: 'Hội thảo riêng tư yêu cầu quyền truy cập phòng.',
+        status: HTTP_STATUS.FORBIDDEN
+      })
+    }
+
+    if (member?.status === 'active') return
+
+    const now = new Date()
+    await databaseService.communityRoomMembers.updateOne(
+      { roomId: event.roomId, userId },
+      {
+        $setOnInsert: {
+          roomId: event.roomId,
+          userId,
+          role: 'member',
+          joinedAt: now
+        },
+        $set: {
+          status: 'active',
+          updatedAt: now
+        }
+      },
+      { upsert: true, session }
+    )
+  }
+
   private async assertCanViewEvent(event: VideoEventAccessDoc, context?: AuthContext) {
     if (this.isAdmin(context) || this.isHost(event, context?.userId)) return
     if (event.visibility === 'public') return
@@ -187,7 +229,10 @@ class CommunityVideoEventsService {
       throw new ErrorWithStatus({ message: 'Bạn đã bị cấm trong phòng liên quan.', status: HTTP_STATUS.FORBIDDEN })
     }
     if (event.visibility === 'private' && (!member || !['active', 'invited'].includes(member.status))) {
-      throw new ErrorWithStatus({ message: 'Hội thảo riêng tư yêu cầu quyền truy cập phòng.', status: HTTP_STATUS.FORBIDDEN })
+      throw new ErrorWithStatus({
+        message: 'Hội thảo riêng tư yêu cầu quyền truy cập phòng.',
+        status: HTTP_STATUS.FORBIDDEN
+      })
     }
   }
 
@@ -230,7 +275,11 @@ class CommunityVideoEventsService {
       return true
     } catch (error) {
       if (!(error instanceof ErrorWithStatus)) {
-        console.error('[CommunityVideoEvents] canAccessVideoEvent failed', { eventId: eventId.toString(), userId: context.userId?.toString(), error })
+        console.error('[CommunityVideoEvents] canAccessVideoEvent failed', {
+          eventId: eventId.toString(),
+          userId: context.userId?.toString(),
+          error
+        })
       }
       return false
     }
@@ -241,7 +290,10 @@ class CommunityVideoEventsService {
     const scheduledStartAt = toDate(params.scheduledStartAt, 'scheduledStartAt')
     const scheduledEndAt = toDate(params.scheduledEndAt, 'scheduledEndAt')
     if (scheduledEndAt <= scheduledStartAt) {
-      throw new ErrorWithStatus({ message: 'scheduledEndAt phải sau scheduledStartAt.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'scheduledEndAt phải sau scheduledStartAt.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
 
     const now = new Date()
@@ -298,7 +350,8 @@ class CommunityVideoEventsService {
     if (params.agenda !== undefined) update.agenda = params.agenda ? String(params.agenda).trim() : null
     if (params.visibility !== undefined) update.visibility = params.visibility
     if (params.status !== undefined) update.status = params.status
-    if (params.scheduledStartAt !== undefined) update.scheduledStartAt = toDate(params.scheduledStartAt, 'scheduledStartAt')
+    if (params.scheduledStartAt !== undefined)
+      update.scheduledStartAt = toDate(params.scheduledStartAt, 'scheduledStartAt')
     if (params.scheduledEndAt !== undefined) update.scheduledEndAt = toDate(params.scheduledEndAt, 'scheduledEndAt')
     if (params.hostIds !== undefined) {
       if (!Array.isArray(params.hostIds) || params.hostIds.some((id) => !ObjectId.isValid(id))) {
@@ -306,11 +359,13 @@ class CommunityVideoEventsService {
       }
       update.hostIds = params.hostIds.map((id) => new ObjectId(id))
     }
-    if (params.speakerProfiles !== undefined) update.speakerProfiles = Array.isArray(params.speakerProfiles) ? params.speakerProfiles : []
+    if (params.speakerProfiles !== undefined)
+      update.speakerProfiles = Array.isArray(params.speakerProfiles) ? params.speakerProfiles : []
     if (params.registrationRequired !== undefined) update.registrationRequired = Boolean(params.registrationRequired)
     if (params.capacity !== undefined) update.capacity = params.capacity === null ? null : Number(params.capacity)
     if (params.provider !== undefined) update.provider = String(params.provider).trim() || 'livekit'
-    if (params.providerMeetingId !== undefined) update.providerMeetingId = params.providerMeetingId ? String(params.providerMeetingId).trim() : null
+    if (params.providerMeetingId !== undefined)
+      update.providerMeetingId = params.providerMeetingId ? String(params.providerMeetingId).trim() : null
     if (params.meetingUrl !== undefined) update.meetingUrl = params.meetingUrl ? String(params.meetingUrl).trim() : null
     if (params.materials !== undefined) update.materials = Array.isArray(params.materials) ? params.materials : []
     if (params.tags !== undefined) update.tags = normalizeStringArray(params.tags)
@@ -318,7 +373,10 @@ class CommunityVideoEventsService {
     const nextStart = (update.scheduledStartAt as Date | undefined) || event.scheduledStartAt
     const nextEnd = (update.scheduledEndAt as Date | undefined) || event.scheduledEndAt
     if (nextEnd <= nextStart) {
-      throw new ErrorWithStatus({ message: 'scheduledEndAt phải sau scheduledStartAt.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'scheduledEndAt phải sau scheduledStartAt.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
 
     const updated = await databaseService.communityVideoEvents.findOneAndUpdate(
@@ -383,7 +441,14 @@ class CommunityVideoEventsService {
           { $sort: { scheduledStartAt: 1, createdAt: -1 } },
           { $skip: skip },
           { $limit: limit },
-          { $lookup: { from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms', localField: 'roomId', foreignField: '_id', as: 'room' } },
+          {
+            $lookup: {
+              from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
+              localField: 'roomId',
+              foreignField: '_id',
+              as: 'room'
+            }
+          },
           { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } },
           {
             $lookup: {
@@ -416,7 +481,11 @@ class CommunityVideoEventsService {
     return { items, page, limit, total }
   }
 
-  async listMyEvents(userId: ObjectId, role?: UserRole, params?: { page?: number; limit?: number; status?: VideoEventStatus }) {
+  async listMyEvents(
+    userId: ObjectId,
+    role?: UserRole,
+    params?: { page?: number; limit?: number; status?: VideoEventStatus }
+  ) {
     const registrations = await databaseService.communityVideoEventRegistrations
       .find({ userId, status: { $in: ['registered', 'attended'] } })
       .project({ eventId: 1 })
@@ -442,9 +511,17 @@ class CommunityVideoEventsService {
     const event = await this.getEvent(eventId)
     await this.assertCanViewEvent(event, context)
     const [room, registrationCount, viewerRegistration] = await Promise.all([
-      databaseService.communityRooms.findOne({ _id: event.roomId }, { projection: { name: 1, slug: 1, diseaseKey: 1, visibility: 1 } }),
-      databaseService.communityVideoEventRegistrations.countDocuments({ eventId, status: { $in: ['registered', 'attended'] } }),
-      context?.userId ? databaseService.communityVideoEventRegistrations.findOne({ eventId, userId: context.userId }) : null
+      databaseService.communityRooms.findOne(
+        { _id: event.roomId },
+        { projection: { name: 1, slug: 1, diseaseKey: 1, visibility: 1 } }
+      ),
+      databaseService.communityVideoEventRegistrations.countDocuments({
+        eventId,
+        status: { $in: ['registered', 'attended'] }
+      }),
+      context?.userId
+        ? databaseService.communityVideoEventRegistrations.findOne({ eventId, userId: context.userId })
+        : null
     ])
     return { ...event, room, registrationCount, viewerRegistration }
   }
@@ -479,7 +556,10 @@ class CommunityVideoEventsService {
     const event = await this.getEvent(eventId)
     await this.assertCanManageEvent(event, context)
     if (!['scheduled', 'draft'].includes(event.status)) {
-      throw new ErrorWithStatus({ message: 'Chỉ có thể bắt đầu hội thảo đang được lên lịch.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'Chỉ có thể bắt đầu hội thảo đang được lên lịch.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
     const now = new Date()
     const updated = await databaseService.communityVideoEvents.findOneAndUpdate(
@@ -570,7 +650,10 @@ class CommunityVideoEventsService {
   async cancelRegistration(eventId: ObjectId, userId: ObjectId) {
     const event = await this.getEvent(eventId)
     if (event.status === 'ended') {
-      throw new ErrorWithStatus({ message: 'Không thể hủy đăng ký hội thảo đã kết thúc.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'Không thể hủy đăng ký hội thảo đã kết thúc.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
     const now = new Date()
     const registration = await databaseService.withTransaction(async (session) => {
@@ -588,20 +671,23 @@ class CommunityVideoEventsService {
       }
       return cancelled
     })
-    if (!registration) throw new ErrorWithStatus({ message: 'Không tìm thấy đăng ký hợp lệ.', status: HTTP_STATUS.NOT_FOUND })
+    if (!registration)
+      throw new ErrorWithStatus({ message: 'Không tìm thấy đăng ký hợp lệ.', status: HTTP_STATUS.NOT_FOUND })
     return registration
   }
 
   async joinEvent(eventId: ObjectId, userId: ObjectId, role?: UserRole) {
     const event = await this.getEvent(eventId)
     await this.assertCanJoinOrRegister(event, userId, role)
-    if (event.status !== 'live') throw new ErrorWithStatus({ message: 'Hội thảo chưa bắt đầu.', status: HTTP_STATUS.BAD_REQUEST })
+    if (event.status !== 'live')
+      throw new ErrorWithStatus({ message: 'Hội thảo chưa bắt đầu.', status: HTTP_STATUS.BAD_REQUEST })
     const isHost = role === UserRole.Admin || this.isHost(event, userId)
     const user = await databaseService.users.findOne(
       { _id: userId },
       { projection: { firstName: 1, lastName: 1, email: 1, avatar: 1 } }
     )
-    const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.email || userId.toString()
+    const displayName =
+      [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.email || userId.toString()
 
     const token = await liveKitService.createJoinToken({
       eventId: eventId.toString(),
@@ -612,6 +698,7 @@ class CommunityVideoEventsService {
     })
     const now = new Date()
     await databaseService.withTransaction(async (session) => {
+      await this.ensureRoomChatAccess(event, userId, role, session)
       const current = await databaseService.communityVideoEventRegistrations.findOne({ eventId, userId }, { session })
       if (!isActiveRegistrationStatus(current?.status)) {
         if (isHost) {
@@ -644,17 +731,34 @@ class CommunityVideoEventsService {
         { eventId, userId },
         {
           $setOnInsert: { eventId, roomId: event.roomId, userId, registeredAt: now },
-          $set: { status: 'attended' as RegistrationStatus, role: isHost ? 'host' : 'attendee', joinedAt: now, lastSeenAt: now, updatedAt: now }
+          $set: {
+            status: 'attended' as RegistrationStatus,
+            role: isHost ? 'host' : 'attendee',
+            joinedAt: now,
+            lastSeenAt: now,
+            updatedAt: now
+          }
         },
         { upsert: true, session }
       )
     })
-    const payload = { eventId, provider: 'livekit', wsUrl: liveKitService.getWsUrl(), token, role: isHost ? 'host' : 'attendee', expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000) }
+    const payload = {
+      eventId,
+      provider: 'livekit',
+      wsUrl: liveKitService.getWsUrl(),
+      token,
+      role: isHost ? 'host' : 'attendee',
+      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000)
+    }
     emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.ATTENDEE_JOINED, eventId, { eventId, userId, joinedAt: now })
     return payload
   }
 
-  async listRegistrations(eventId: ObjectId, context: AuthContext, params?: { page?: number; limit?: number; status?: RegistrationStatus }) {
+  async listRegistrations(
+    eventId: ObjectId,
+    context: AuthContext,
+    params?: { page?: number; limit?: number; status?: RegistrationStatus }
+  ) {
     const event = await this.getEvent(eventId)
     await this.assertCanManageEvent(event, context)
     const page = params?.page || 1
@@ -669,9 +773,30 @@ class CommunityVideoEventsService {
           { $sort: { registeredAt: -1 } },
           { $skip: skip },
           { $limit: limit },
-          { $lookup: { from: process.env.USERS_COLLECTION || 'users', localField: 'userId', foreignField: '_id', as: 'user' } },
+          {
+            $lookup: {
+              from: process.env.USERS_COLLECTION || 'users',
+              localField: 'userId',
+              foreignField: '_id',
+              as: 'user'
+            }
+          },
           { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-          { $project: { user: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 }, eventId: 1, roomId: 1, userId: 1, status: 1, role: 1, registeredAt: 1, joinedAt: 1, lastSeenAt: 1, cancelledAt: 1, reminder15mSentAt: 1 } }
+          {
+            $project: {
+              user: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 },
+              eventId: 1,
+              roomId: 1,
+              userId: 1,
+              status: 1,
+              role: 1,
+              registeredAt: 1,
+              joinedAt: 1,
+              lastSeenAt: 1,
+              cancelledAt: 1,
+              reminder15mSentAt: 1
+            }
+          }
         ])
         .toArray(),
       databaseService.communityVideoEventRegistrations.countDocuments(query)
@@ -679,7 +804,12 @@ class CommunityVideoEventsService {
     return { items, page, limit, total }
   }
 
-  async updateRegistration(eventId: ObjectId, userId: ObjectId, context: AuthContext, params: { status?: RegistrationStatus; removeReason?: string }) {
+  async updateRegistration(
+    eventId: ObjectId,
+    userId: ObjectId,
+    context: AuthContext,
+    params: { status?: RegistrationStatus; removeReason?: string }
+  ) {
     const event = await this.getEvent(eventId)
     await this.assertCanManageEvent(event, context)
     const update: any = { updatedAt: new Date() }
@@ -695,10 +825,20 @@ class CommunityVideoEventsService {
         { $set: update },
         { returnDocument: 'after', session }
       )
-      if (before && updated && isActiveRegistrationStatus(before.status) !== isActiveRegistrationStatus(updated.status)) {
+      if (
+        before &&
+        updated &&
+        isActiveRegistrationStatus(before.status) !== isActiveRegistrationStatus(updated.status)
+      ) {
         await databaseService.communityVideoEvents.updateOne(
-          { _id: eventId, ...(isActiveRegistrationStatus(updated.status) ? {} : { activeRegistrationCount: { $gt: 0 } }) },
-          { $inc: { activeRegistrationCount: isActiveRegistrationStatus(updated.status) ? 1 : -1 }, $set: { updatedAt: new Date() } },
+          {
+            _id: eventId,
+            ...(isActiveRegistrationStatus(updated.status) ? {} : { activeRegistrationCount: { $gt: 0 } })
+          },
+          {
+            $inc: { activeRegistrationCount: isActiveRegistrationStatus(updated.status) ? 1 : -1 },
+            $set: { updatedAt: new Date() }
+          },
           { session }
         )
       }
@@ -733,7 +873,11 @@ class CommunityVideoEventsService {
     const event = await this.getEvent(eventId)
     await this.assertCanManageEvent(event, context)
     const result = await liveKitService.removeParticipant(eventId.toString(), userId.toString())
-    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, { eventId, userId, action: 'participant-kicked' })
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-kicked'
+    })
     return result
   }
 
@@ -742,7 +886,11 @@ class CommunityVideoEventsService {
     const windowStart = new Date(now.getTime() + 14 * 60 * 1000)
     const windowEnd = new Date(now.getTime() + 16 * 60 * 1000)
     const events = await databaseService.communityVideoEvents
-      .find({ status: 'scheduled', scheduledStartAt: { $gte: windowStart, $lte: windowEnd }, 'reminders.fifteenMinutesSentAt': null })
+      .find({
+        status: 'scheduled',
+        scheduledStartAt: { $gte: windowStart, $lte: windowEnd },
+        'reminders.fifteenMinutesSentAt': null
+      })
       .sort({ scheduledStartAt: 1 })
       .limit(REMINDER_EVENT_BATCH_SIZE)
       .toArray()
@@ -764,7 +912,12 @@ class CommunityVideoEventsService {
 
         const results = await Promise.allSettled(
           registrations.map(async (registration: any) => {
-            await notificationService.notifyVideoEventReminder(registration.userId, event.title, event._id.toString(), getIO())
+            await notificationService.notifyVideoEventReminder(
+              registration.userId,
+              event.title,
+              event._id.toString(),
+              getIO()
+            )
             return registration._id
           })
         )
@@ -785,13 +938,20 @@ class CommunityVideoEventsService {
           )
         }
 
-        hasMoreRegistrations = registrations.length === REMINDER_REGISTRATION_BATCH_SIZE && successfulRegistrationIds.length > 0
+        hasMoreRegistrations =
+          registrations.length === REMINDER_REGISTRATION_BATCH_SIZE && successfulRegistrationIds.length > 0
       }
 
       if (eventFailedCount > 0) {
-        console.error('[CommunityVideoEvents] reminder delivery had failures', { eventId: event._id.toString(), failedCount: eventFailedCount })
+        console.error('[CommunityVideoEvents] reminder delivery had failures', {
+          eventId: event._id.toString(),
+          failedCount: eventFailedCount
+        })
       } else {
-        await databaseService.communityVideoEvents.updateOne({ _id: event._id }, { $set: { 'reminders.fifteenMinutesSentAt': now, updatedAt: now } })
+        await databaseService.communityVideoEvents.updateOne(
+          { _id: event._id },
+          { $set: { 'reminders.fifteenMinutesSentAt': now, updatedAt: now } }
+        )
       }
     }
     return { processedEvents: events.length, sentCount, failedCount }
