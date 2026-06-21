@@ -6,9 +6,12 @@ import moderationService from '~/services/moderation.services'
 
 export const listRoomsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { diseaseKey } = req.query as { diseaseKey?: any }
+    const { visibility, diseaseKey, search, sort } = req.query as { visibility?: any; diseaseKey?: any; search?: any; sort?: any }
     const rooms = await communityService.listRooms({
-      diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined
+      visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
+      diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined,
+      search: typeof search === 'string' ? search : undefined,
+      sort: ['activity', 'newest', 'members', 'messages', 'featured'].includes(sort) ? sort : undefined
     })
     return res.status(200).json({ message: 'OK', data: rooms })
   } catch (error) {
@@ -19,10 +22,12 @@ export const listRoomsController = async (req: Request, res: Response, next: Nex
 export const listMyRoomsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, role } = req.decoded_authorization as TokenPayload
-    const { visibility, diseaseKey } = req.query as { visibility?: any; diseaseKey?: any }
+    const { visibility, diseaseKey, search, sort } = req.query as { visibility?: any; diseaseKey?: any; search?: any; sort?: any }
     const rooms = await communityService.listRooms({
       visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
       diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined,
+      search: typeof search === 'string' ? search : undefined,
+      sort: ['activity', 'newest', 'members', 'messages', 'featured'].includes(sort) ? sort : undefined,
       includePrivate: true,
       viewer: { userId: new ObjectId(userId), role }
     })
@@ -35,13 +40,21 @@ export const listMyRoomsController = async (req: Request, res: Response, next: N
 export const createRoomController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.decoded_authorization as TokenPayload
-    const { name, slug, visibility, diseaseKey } = req.body
+    const { name, slug, visibility, diseaseKey, description, topicLabel, iconKey, coverImage, guidelines, pinnedMessage, featured, sortOrder } = req.body
 
     const room = await communityService.createRoom({
       name,
       slug,
       visibility,
       diseaseKey,
+      description,
+      topicLabel,
+      iconKey,
+      coverImage,
+      guidelines,
+      pinnedMessage,
+      featured,
+      sortOrder,
       createdBy: new ObjectId(userId)
     })
 

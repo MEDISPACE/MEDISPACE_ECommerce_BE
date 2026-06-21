@@ -5,17 +5,19 @@ import communityService from '~/services/community.services'
 
 export const listAdminRoomsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { visibility, status, diseaseKey, search } = req.query as {
+    const { visibility, status, diseaseKey, search, sort } = req.query as {
       visibility?: any
       status?: any
       diseaseKey?: any
       search?: any
+      sort?: any
     }
     const rooms = await communityService.listAdminRooms({
       visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
       status: status === 'active' || status === 'archived' ? status : undefined,
       diseaseKey: typeof diseaseKey === 'string' ? diseaseKey : undefined,
-      search: typeof search === 'string' ? search : undefined
+      search: typeof search === 'string' ? search : undefined,
+      sort: ['activity', 'newest', 'members', 'messages', 'featured'].includes(sort) ? sort : undefined
     })
     return res.status(200).json({ message: 'OK', data: rooms })
   } catch (error) {
@@ -26,12 +28,20 @@ export const listAdminRoomsController = async (req: Request, res: Response, next
 export const createAdminRoomController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.decoded_authorization as TokenPayload
-    const { name, slug, visibility, diseaseKey } = req.body
+    const { name, slug, visibility, diseaseKey, description, topicLabel, iconKey, coverImage, guidelines, pinnedMessage, featured, sortOrder } = req.body
     const room = await communityService.createRoom({
       name,
       slug,
       visibility,
       diseaseKey,
+      description,
+      topicLabel,
+      iconKey,
+      coverImage,
+      guidelines,
+      pinnedMessage,
+      featured,
+      sortOrder,
       createdBy: new ObjectId(userId)
     })
     return res.status(201).json({ message: 'Tạo phòng thành công', data: room })
