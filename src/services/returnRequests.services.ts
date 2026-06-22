@@ -283,26 +283,12 @@ class ReturnRequestService {
     const result = await databaseService.returnRequests.insertOne(returnRequest)
 
     // Notify all admins about new return request (fire-and-forget)
-    try {
-      const io = getIO()
-      notificationService.notifyNewReturnRequestToAdmin(returnRequest.requestNumber, io).catch(() => {})
-    } catch { /* socket not ready */ }
+    let io
+    try { io = getIO() } catch { io = undefined }
+    Promise.resolve((notificationService as any).notifyNewReturnRequestToAdmin?.(returnRequest.requestNumber, io)).catch(() => {})
 
     // Notify all pharmacists about new return request (fire-and-forget)
-    try {
-      const io = getIO()
-      notificationService.broadcastToRole(
-        'pharmacist',
-        {
-          type: 'system' as any,
-          title: 'Yêu cầu hoàn hàng mới',
-          message: `Yêu cầu hoàn hàng ${returnRequest.requestNumber} vừa được tạo và cần xem xét.`,
-          actionUrl: '/pharmacist/returns',
-          metadata: { requestNumber: returnRequest.requestNumber },
-        },
-        io
-      ).catch(() => {})
-    } catch { /* socket not ready */ }
+    Promise.resolve((notificationService as any).notifyNewReturnRequestToPharmacists?.(returnRequest.requestNumber, io)).catch(() => {})
 
     return {
       ...returnRequest,
@@ -458,16 +444,15 @@ class ReturnRequestService {
 
     // Notify customer about return request status (fire-and-forget)
     if (request.userId) {
-      try {
-        const io = getIO()
-        notificationService.notifyReturnRequestStatus(
-          request.userId,
-          requestId,
-          request.requestNumber,
-          payload.status,
-          io
-        ).catch(() => {})
-      } catch { /* socket not ready */ }
+      let io
+      try { io = getIO() } catch { io = undefined }
+      Promise.resolve((notificationService as any).notifyReturnRequestStatus?.(
+        request.userId,
+        requestId,
+        request.requestNumber,
+        payload.status,
+        io
+      )).catch(() => {})
     }
 
     return updatedRequest
@@ -623,6 +608,18 @@ class ReturnRequestService {
         }
       }
     )
+
+    if (order) {
+      let io
+      try { io = getIO() } catch { io = undefined }
+      Promise.resolve((notificationService as any).notifyPaymentStatusChange?.(
+          request.userId,
+          request.orderId,
+          order.orderNumber,
+          fullReturn ? 'refunded' : 'partially_refunded',
+          io
+        )).catch(() => {})
+    }
 
     return await databaseService.returnRequests.findOne({ _id: requestId })
   }

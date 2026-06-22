@@ -49,7 +49,21 @@ export const getNotificationsValidator = validate(
         in: ['query'],
         optional: true,
         isIn: {
-          options: [['all', 'unread', 'order', 'prescription', 'promotion', 'system', 'reminder', 'review']],
+          options: [[
+            'all',
+            'unread',
+            'order',
+            'payment',
+            'shipping',
+            'prescription',
+            'promotion',
+            'system',
+            'reminder',
+            'review',
+            'return',
+            'security',
+            'community'
+          ]],
           errorMessage: 'Invalid filter value'
         }
       }

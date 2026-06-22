@@ -12,6 +12,8 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import axios from 'axios'
 import emailService from './email.services'
 import recommendationsService from './recommendations.services'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 class UsersService {
   private getRefreshTokenExpiresAt(expiresIn: '30d' | '90d' = '30d') {
@@ -300,6 +302,15 @@ class UsersService {
       }
     )
     void recommendationsService.recordRealtimeEvent(userId)
+    let io
+    try { io = getIO() } catch { io = undefined }
+    Promise.resolve((notificationService as any).notifySecurityAlert?.(
+        new ObjectId(userId),
+        'Chào mừng bạn đến với MediSpace',
+        'Tài khoản của bạn đã được xác thực. Bạn có thể bắt đầu theo dõi đơn hàng, đơn thuốc và các thông báo quan trọng tại đây.',
+        `user:${userId}:verified`,
+        io
+      )).catch(() => {})
     return {
       status: UserStatus.Verified
     }
@@ -433,6 +444,15 @@ class UsersService {
       ),
       databaseService.refreshTokens.deleteMany({ userId: new ObjectId(userId) })
     ])
+    let io
+    try { io = getIO() } catch { io = undefined }
+    Promise.resolve((notificationService as any).notifySecurityAlert?.(
+        new ObjectId(userId),
+        'Mật khẩu đã được thay đổi',
+        'Mật khẩu tài khoản MediSpace của bạn vừa được cập nhật. Nếu không phải bạn thực hiện, vui lòng liên hệ hỗ trợ ngay.',
+        `user:${userId}:password-changed:${Date.now()}`,
+        io
+      )).catch(() => {})
     return {
       message: USERS_MESSAGES.CHANGE_PASSWORD_SUCCESS
     }
