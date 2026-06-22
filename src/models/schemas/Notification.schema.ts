@@ -1,6 +1,17 @@
 import { ObjectId } from 'mongodb'
 
-export type NotificationTypeEnum = 'order' | 'prescription' | 'promotion' | 'reminder' | 'system' | 'review'
+export type NotificationTypeEnum =
+  | 'order'
+  | 'payment'
+  | 'shipping'
+  | 'prescription'
+  | 'promotion'
+  | 'reminder'
+  | 'system'
+  | 'review'
+  | 'return'
+  | 'security'
+  | 'community'
 export type NotificationTargetRole = 'customer' | 'admin' | 'pharmacist'
 
 interface NotificationConstructor {
@@ -14,6 +25,7 @@ interface NotificationConstructor {
   actionUrl?: string
   metadata?: Record<string, unknown>  // orderId, prescriptionId, etc. for deep-linking
   targetRole?: NotificationTargetRole // who this notification is for
+  eventKey?: string // idempotency key for one notification per business event/user
   createdAt?: Date
 }
 
@@ -28,6 +40,7 @@ export default class Notification {
   actionUrl?: string
   metadata?: Record<string, unknown>
   targetRole: NotificationTargetRole
+  eventKey?: string
   createdAt: Date
 
   constructor(notification: NotificationConstructor) {
@@ -42,6 +55,7 @@ export default class Notification {
     this.actionUrl = notification.actionUrl
     this.metadata = notification.metadata
     this.targetRole = notification.targetRole || 'customer'
+    this.eventKey = notification.eventKey
     this.createdAt = notification.createdAt || date
   }
 }

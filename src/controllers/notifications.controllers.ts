@@ -37,6 +37,34 @@ export const getUnreadCountController = async (req: Request<ParamsDictionary, un
   })
 }
 
+// GET /notifications/preferences
+export const getNotificationPreferencesController = async (
+  req: Request<ParamsDictionary, unknown, unknown>,
+  res: Response
+) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const preferences = await notificationService.getPreferences(new ObjectId(userId))
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get notification preferences successfully',
+    result: preferences,
+  })
+}
+
+// PATCH /notifications/preferences
+export const updateNotificationPreferencesController = async (
+  req: Request<ParamsDictionary, unknown, unknown>,
+  res: Response
+) => {
+  const { userId } = req.decoded_authorization as TokenPayload
+  const preferences = await notificationService.updatePreferences(new ObjectId(userId), req.body as Parameters<typeof notificationService.updatePreferences>[1])
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Notification preferences updated',
+    result: preferences,
+  })
+}
+
 // PATCH /notifications/read-all
 export const markAllAsReadController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
@@ -50,7 +78,7 @@ export const markAllAsReadController = async (req: Request<ParamsDictionary, unk
 // PATCH /notifications/:id/read
 export const markAsReadController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const notificationId = new ObjectId(req.params.id)
+  const notificationId = new ObjectId(String(req.params.id))
 
   await notificationService.markAsRead(notificationId, new ObjectId(userId))
 
@@ -62,7 +90,7 @@ export const markAsReadController = async (req: Request<ParamsDictionary, unknow
 // DELETE /notifications/:id
 export const deleteNotificationController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const notificationId = new ObjectId(req.params.id)
+  const notificationId = new ObjectId(String(req.params.id))
 
   await notificationService.deleteNotification(notificationId, new ObjectId(userId))
 
