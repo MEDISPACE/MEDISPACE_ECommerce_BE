@@ -259,6 +259,31 @@ class CommunityVideoEventsService {
     )
   }
 
+  private async getActiveRegistrationUserIds(eventId: ObjectId): Promise<ObjectId[]> {
+    const registrations = await databaseService.communityVideoEventRegistrations
+      .find({ eventId, status: { $in: ACTIVE_REGISTRATION_STATUSES } }, { projection: { userId: 1 } })
+      .toArray()
+    return registrations.map((registration: any) => registration.userId).filter(Boolean)
+  }
+
+  private async notifyVideoEventUsers(
+    event: CommunityVideoEventDoc,
+    status: 'registered' | 'live' | 'cancelled' | 'time_changed',
+    userIds?: ObjectId[]
+  ) {
+    const recipients = userIds || await this.getActiveRegistrationUserIds(event._id)
+    if (recipients.length === 0) return
+
+    let io
+    try { io = getIO() } catch { io = undefined }
+    await Promise.all(
+      recipients.map((userId) =>
+        Promise.resolve((notificationService as any).notifyVideoEventLifecycle?.(userId, event.title, event._id.toString(), status, io))
+          .catch((error) => console.error('[CommunityVideoEvents] lifecycle notification failed', { eventId: event._id.toString(), userId: userId.toString(), status, error }))
+      )
+    )
+  }
+
   async assertCanSubscribeRealtime(eventId: ObjectId, context: AuthContext) {
     const event = await this.getEvent(eventId)
     if (event.status === 'cancelled' || event.status === 'draft') {
@@ -387,6 +412,12 @@ class CommunityVideoEventsService {
     if (!updated) throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
     emitRoom(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, updated.roomId, updated)
     emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, updated)
+    if (
+      (params.scheduledStartAt !== undefined || params.scheduledEndAt !== undefined) &&
+      (event.scheduledStartAt.getTime() !== nextStart.getTime() || event.scheduledEndAt.getTime() !== nextEnd.getTime())
+    ) {
+      this.notifyVideoEventUsers(updated as CommunityVideoEventDoc, 'time_changed').catch(() => {})
+    }
     return updated
   }
 
@@ -532,6 +563,7 @@ class CommunityVideoEventsService {
     if (event.status === 'ended') {
       throw new ErrorWithStatus({ message: 'Không thể hủy hội thảo đã kết thúc.', status: HTTP_STATUS.BAD_REQUEST })
     }
+    const activeUserIds = await this.getActiveRegistrationUserIds(eventId)
     const now = new Date()
     const updated = await databaseService.withTransaction(async (session) => {
       const cancelled = await databaseService.communityVideoEvents.findOneAndUpdate(
@@ -549,6 +581,7 @@ class CommunityVideoEventsService {
     if (!updated) throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
     emitRoom(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.CANCELLED, updated.roomId, updated)
     emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.CANCELLED, eventId, updated)
+    this.notifyVideoEventUsers(updated as CommunityVideoEventDoc, 'cancelled', activeUserIds).catch(() => {})
     return updated
   }
 
@@ -570,6 +603,7 @@ class CommunityVideoEventsService {
     if (!updated) throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
     emitRoom(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.LIVE, updated.roomId, updated)
     emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.LIVE, eventId, updated)
+    this.notifyVideoEventUsers(updated as CommunityVideoEventDoc, 'live').catch(() => {})
     return updated
   }
 
@@ -644,6 +678,9 @@ class CommunityVideoEventsService {
     emitUser(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.REGISTERED, userId, registration)
     emitRoom(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, updatedEvent.roomId, updatedEvent)
     emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, updatedEvent)
+    let io
+    try { io = getIO() } catch { io = undefined }
+    Promise.resolve((notificationService as any).notifyVideoEventLifecycle?.(userId, updatedEvent.title, eventId.toString(), 'registered', io)).catch(() => {})
     return registration
   }
 
@@ -912,11 +949,13 @@ class CommunityVideoEventsService {
 
         const results = await Promise.allSettled(
           registrations.map(async (registration: any) => {
+            let io
+            try { io = getIO() } catch { io = undefined }
             await notificationService.notifyVideoEventReminder(
               registration.userId,
               event.title,
               event._id.toString(),
-              getIO()
+              io
             )
             return registration._id
           })

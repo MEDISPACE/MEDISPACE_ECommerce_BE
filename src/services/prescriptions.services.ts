@@ -56,20 +56,20 @@ class PrescriptionsService {
     const result = await databaseService.prescriptions.insertOne(prescriptionData as any)
 
     // Notify all pharmacists: new prescription needs review (fire-and-forget)
-    try {
-      const io = getIO()
-      notificationService.broadcastToRole(
-        'pharmacist',
-        {
-          type: 'prescription' as any,
-          title: 'Đơn thuốc mới cần duyệt',
-          message: `Đơn thuốc ${prescriptionNumber} vừa được tải lên, cần dược sĩ xem xét và xác nhận.`,
-          actionUrl: '/pharmacist/prescriptions',
-          metadata: { prescriptionNumber },
-        },
-        io
-      ).catch(() => {})
-    } catch { /* socket not ready */ }
+    let io
+    try { io = getIO() } catch { io = undefined }
+    Promise.resolve((notificationService as any).broadcastToRole?.(
+      'pharmacist',
+      {
+        type: 'prescription',
+        title: 'Đơn thuốc mới cần duyệt',
+        message: `Đơn thuốc ${prescriptionNumber} vừa được tải lên, cần dược sĩ xem xét và xác nhận.`,
+        actionUrl: '/pharmacist/prescriptions',
+        metadata: { prescriptionNumber },
+        eventKey: `prescription:${prescriptionData._id.toString()}:pharmacist:new`
+      },
+      io
+    )).catch(() => {})
 
     return {
       _id: result.insertedId,
@@ -235,15 +235,14 @@ class PrescriptionsService {
     // Notify customer about prescription status (fire-and-forget)
     const customerId = prescription.customerId
     if (customerId) {
-      try {
-        const io = getIO()
-        notificationService.notifyPrescriptionStatus(
-          customerId,
-          new ObjectId(prescriptionId),
-          status as 'verified' | 'rejected',
-          io
-        ).catch(() => {})
-      } catch { /* socket not ready */ }
+      let io
+      try { io = getIO() } catch { io = undefined }
+      Promise.resolve((notificationService as any).notifyPrescriptionStatus?.(
+        customerId,
+        new ObjectId(prescriptionId),
+        status as 'verified' | 'rejected',
+        io
+      )).catch(() => {})
     }
 
     return updatedPrescription
