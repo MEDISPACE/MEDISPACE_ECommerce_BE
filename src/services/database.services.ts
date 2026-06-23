@@ -181,6 +181,11 @@ class DatabaseService {
       await safeCreateIndex(this.notifications, { userId: 1, isRead: 1, createdAt: -1 })
       await safeCreateIndex(this.notifications, { userId: 1, targetRole: 1, createdAt: -1 })
       await safeCreateIndex(this.notifications, { targetRole: 1, createdAt: -1 })
+      await safeCreateIndex(
+        this.notifications,
+        { userId: 1, eventKey: 1 },
+        { unique: true, partialFilterExpression: { eventKey: { $exists: true, $type: 'string' } } }
+      )
 
       // Community & Moderation indexes (MVP)
       await safeCreateIndex(this.communityRooms, { slug: 1 }, { unique: true })

@@ -36,7 +36,8 @@ class EmailService {
       })
       return info
     } catch (error) {
-      // Log error but don't throw to prevent blocking the main flow
+      console.error('[EmailService] sendEmail failed', { to, subject, error })
+      // Do not throw to prevent blocking the main flow.
     }
   }
 

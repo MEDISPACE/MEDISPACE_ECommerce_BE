@@ -11,13 +11,74 @@ interface CreateNotificationPayload {
   actionUrl?: string
   metadata?: Record<string, unknown>
   targetRole?: NotificationTargetRole
+  eventKey?: string
 }
+
+type NotificationFilter = 'all' | 'unread' | NotificationTypeEnum
+
+const DEFAULT_NOTIFICATION_PREFERENCES = {
+  channels: {
+    inApp: true,
+    email: true,
+    push: false,
+    sms: false
+  },
+  types: {
+    order: true,
+    payment: true,
+    shipping: true,
+    prescription: true,
+    promotion: true,
+    reminder: true,
+    system: true,
+    review: true,
+    return: true,
+    security: true,
+    community: true
+  }
+}
+
+type NotificationPreferences = typeof DEFAULT_NOTIFICATION_PREFERENCES
+const ALWAYS_ON_TYPES: NotificationTypeEnum[] = ['order', 'payment', 'shipping', 'prescription', 'return', 'security']
 
 class NotificationService {
   /**
    * Create and persist a single notification to DB
    */
-  async createNotification(payload: CreateNotificationPayload): Promise<Notification> {
+  private normalizePreferences(raw?: Partial<NotificationPreferences>): NotificationPreferences {
+    return {
+      channels: { ...DEFAULT_NOTIFICATION_PREFERENCES.channels, ...(raw?.channels || {}) },
+      types: { ...DEFAULT_NOTIFICATION_PREFERENCES.types, ...(raw?.types || {}) }
+    }
+  }
+
+  async getPreferences(userId: ObjectId): Promise<NotificationPreferences> {
+    const user = await databaseService.users.findOne(
+      { _id: userId },
+      { projection: { notificationPreferences: 1 } }
+    )
+    return this.normalizePreferences((user as any)?.notificationPreferences as Partial<NotificationPreferences> | undefined)
+  }
+
+  async updatePreferences(userId: ObjectId, preferences: Partial<NotificationPreferences>): Promise<NotificationPreferences> {
+    const normalized = this.normalizePreferences(preferences)
+    await databaseService.users.updateOne(
+      { _id: userId },
+      { $set: { notificationPreferences: normalized, updatedAt: new Date() } }
+    )
+    return normalized
+  }
+
+  private async shouldCreateInAppNotification(payload: CreateNotificationPayload): Promise<boolean> {
+    if (ALWAYS_ON_TYPES.includes(payload.type)) return true
+    const preferences = await this.getPreferences(payload.userId)
+    if (!preferences.channels.inApp) return false
+    return preferences.types[payload.type] !== false
+  }
+
+  async createNotification(payload: CreateNotificationPayload): Promise<Notification | null> {
+    if (!(await this.shouldCreateInAppNotification(payload))) return null
+
     const notification = new Notification({
       userId: payload.userId,
       type: payload.type,
@@ -26,7 +87,17 @@ class NotificationService {
       actionUrl: payload.actionUrl,
       metadata: payload.metadata,
       targetRole: payload.targetRole || 'customer',
+      eventKey: payload.eventKey,
     })
+
+    if (payload.eventKey) {
+      const result = await databaseService.notifications.findOneAndUpdate(
+        { userId: payload.userId, eventKey: payload.eventKey },
+        { $setOnInsert: notification },
+        { upsert: true, returnDocument: 'after' }
+      )
+      if (result) return result
+    }
 
     const result = await databaseService.notifications.insertOne(notification)
     return { ...notification, _id: result.insertedId }
@@ -38,8 +109,9 @@ class NotificationService {
    * - For admin: push to room `admins`
    * - For pharmacist: push to room `pharmacists`
    */
-  async createAndPush(payload: CreateNotificationPayload, io?: SocketIOServer): Promise<Notification> {
+  async createAndPush(payload: CreateNotificationPayload, io?: SocketIOServer): Promise<Notification | null> {
     const notification = await this.createNotification(payload)
+    if (!notification) return null
 
     if (io) {
       const targetRole = payload.targetRole || 'customer'
@@ -47,9 +119,9 @@ class NotificationService {
       if (targetRole === 'customer') {
         io.to(`user:${payload.userId.toString()}`).emit('notification:new', notification)
       } else if (targetRole === 'admin') {
-        io.to('admins').emit('notification:new', notification)
+        io.to('admins').emit('notification:new', { ...notification, userId: undefined, _id: undefined })
       } else if (targetRole === 'pharmacist') {
-        io.to('pharmacists').emit('notification:new', notification)
+        io.to('pharmacists').emit('notification:new', { ...notification, userId: undefined, _id: undefined })
       }
     }
 
@@ -70,29 +142,36 @@ class NotificationService {
       .find({ role: dbRole }, { projection: { _id: 1 } })
       .toArray()
 
-    const notifications = users.map(
-      (u) =>
-        new Notification({
-          userId: u._id!,
+    if (users.length > 0) {
+      await Promise.all(
+        users.map((u) =>
+          this.createNotification({
+            userId: u._id!,
+            type: payload.type,
+            title: payload.title,
+            message: payload.message,
+            actionUrl: payload.actionUrl,
+            metadata: payload.metadata,
+            targetRole: role,
+            eventKey: payload.eventKey
+          })
+        )
+      )
+
+      // Push via socket to all online admins/pharmacists
+      if (io) {
+        const room = role === 'admin' ? 'admins' : 'pharmacists'
+        // Role subscribers refetch their own documents after receiving this generic payload.
+        io.to(room).emit('notification:new', {
           type: payload.type,
           title: payload.title,
           message: payload.message,
           actionUrl: payload.actionUrl,
           metadata: payload.metadata,
           targetRole: role,
+          eventKey: payload.eventKey,
+          createdAt: new Date()
         })
-    )
-
-    if (notifications.length > 0) {
-      await databaseService.notifications.insertMany(notifications)
-
-      // Push via socket to all online admins/pharmacists
-      if (io) {
-        const room = role === 'admin' ? 'admins' : 'pharmacists'
-        // Emit a representative notification (the first one) – FE will refresh count
-        if (notifications[0]) {
-          io.to(room).emit('notification:new', notifications[0])
-        }
       }
     }
   }
@@ -104,7 +183,7 @@ class NotificationService {
     userId: ObjectId,
     page = 1,
     limit = 20,
-    filter?: 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder' | 'review'
+    filter?: NotificationFilter
   ) {
     const skip = (page - 1) * limit
     const query: Record<string, unknown> = { userId }
@@ -202,6 +281,102 @@ class NotificationService {
         actionUrl: `/account/orders`,
         metadata: { orderId: orderId.toString(), orderNumber, status: newStatus },
         targetRole: 'customer',
+        eventKey: `order:${orderId.toString()}:status:${newStatus}`
+      },
+      io
+    )
+  }
+
+  async notifyPaymentStatusChange(
+    userId: ObjectId,
+    orderId: ObjectId,
+    orderNumber: string,
+    paymentStatus: 'paid' | 'failed' | 'refunded' | 'partially_refunded',
+    io?: SocketIOServer
+  ) {
+    const statusMap: Record<string, { title: string; message: string }> = {
+      paid: {
+        title: 'Thanh toán thành công',
+        message: `Thanh toán cho đơn hàng ${orderNumber} đã được ghi nhận.`
+      },
+      failed: {
+        title: 'Thanh toán thất bại',
+        message: `Thanh toán cho đơn hàng ${orderNumber} không thành công. Đơn hàng đã được hủy.`
+      },
+      refunded: {
+        title: 'Hoàn tiền hoàn tất',
+        message: `Đơn hàng ${orderNumber} đã được hoàn tiền.`
+      },
+      partially_refunded: {
+        title: 'Hoàn tiền một phần',
+        message: `Đơn hàng ${orderNumber} đã được hoàn tiền một phần.`
+      }
+    }
+
+    const content = statusMap[paymentStatus]
+    if (!content) return
+
+    await this.createAndPush(
+      {
+        userId,
+        type: 'payment',
+        title: content.title,
+        message: content.message,
+        actionUrl: '/account/orders',
+        metadata: { orderId: orderId.toString(), orderNumber, paymentStatus },
+        targetRole: 'customer',
+        eventKey: `order:${orderId.toString()}:payment:${paymentStatus}`
+      },
+      io
+    )
+  }
+
+  async notifyShippingStatusChange(
+    userId: ObjectId,
+    orderId: ObjectId,
+    orderNumber: string,
+    status: 'pickup_confirmed' | 'in_transit' | 'delivery_failed' | 'delivery_rescheduled' | 'shipped',
+    trackingNumber?: string,
+    io?: SocketIOServer
+  ) {
+    const statusMap: Record<string, { title: string; message: string }> = {
+      pickup_confirmed: {
+        title: 'Đơn vị vận chuyển đã nhận đơn',
+        message: `Đơn hàng ${orderNumber} đã được xác nhận lấy hàng.`
+      },
+      in_transit: {
+        title: 'Đơn hàng đang vận chuyển',
+        message: `Đơn hàng ${orderNumber} đang trên đường giao đến bạn.`
+      },
+      delivery_failed: {
+        title: 'Giao hàng chưa thành công',
+        message: `Đơn hàng ${orderNumber} giao chưa thành công. MediSpace sẽ tiếp tục hỗ trợ bạn.`
+      },
+      delivery_rescheduled: {
+        title: 'Lịch giao hàng được cập nhật',
+        message: `Đơn hàng ${orderNumber} đã được cập nhật lịch giao hàng.`
+      },
+      shipped: {
+        title: 'Đơn hàng đang giao',
+        message: trackingNumber
+          ? `Đơn hàng ${orderNumber} đang được giao. Mã vận đơn: ${trackingNumber}.`
+          : `Đơn hàng ${orderNumber} đang được giao.`
+      }
+    }
+
+    const content = statusMap[status]
+    if (!content) return
+
+    await this.createAndPush(
+      {
+        userId,
+        type: 'shipping',
+        title: content.title,
+        message: content.message,
+        actionUrl: '/account/orders',
+        metadata: { orderId: orderId.toString(), orderNumber, status, trackingNumber: trackingNumber || null },
+        targetRole: 'customer',
+        eventKey: `order:${orderId.toString()}:shipping:${status}:${trackingNumber || 'none'}`
       },
       io
     )
@@ -220,6 +395,7 @@ class NotificationService {
         message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt.`,
         actionUrl: '/admin/orders',
         metadata: { orderNumber, totalAmount },
+        eventKey: `order:${orderNumber}:admin:new`,
       },
       io
     )
@@ -246,6 +422,7 @@ class NotificationService {
         actionUrl: `/account/prescriptions`,
         metadata: { prescriptionId: prescriptionId.toString() },
         targetRole: 'customer',
+        eventKey: `prescription:${prescriptionId.toString()}:status:${status}`
       },
       io
     )
@@ -282,12 +459,13 @@ class NotificationService {
     await this.createAndPush(
       {
         userId,
-        type: 'system',
+        type: 'return',
         title: content.title,
         message: content.message,
         actionUrl: `/account/returns`,
         metadata: { returnRequestId: returnRequestId.toString(), requestNumber, status },
         targetRole: 'customer',
+        eventKey: `return:${returnRequestId.toString()}:status:${status}`
       },
       io
     )
@@ -302,17 +480,17 @@ class NotificationService {
     stockQuantity: number,
     io?: SocketIOServer
   ) {
-    await this.broadcastToRole(
-      'admin',
-      {
-        type: 'system',
-        title: 'Cảnh báo tồn kho thấp',
-        message: `Sản phẩm "${productName}" chỉ còn ${stockQuantity} đơn vị trong kho.`,
-        actionUrl: '/admin/inventory',
-        metadata: { productId: productId.toString(), productName, stockQuantity },
-      },
-      io
-    )
+    const payload = {
+      type: 'system' as NotificationTypeEnum,
+      title: 'Cảnh báo tồn kho thấp',
+      message: `Sản phẩm "${productName}" chỉ còn ${stockQuantity} đơn vị trong kho.`,
+      metadata: { productId: productId.toString(), productName, stockQuantity },
+      eventKey: `product:${productId.toString()}:low-stock:${stockQuantity}`
+    }
+    await Promise.all([
+      this.broadcastToRole('admin', { ...payload, actionUrl: '/admin/inventory' }, io),
+      this.broadcastToRole('pharmacist', { ...payload, actionUrl: '/pharmacist/inventory' }, io)
+    ])
   }
 
   /**
@@ -327,6 +505,22 @@ class NotificationService {
         message: `Yêu cầu hoàn hàng ${requestNumber} cần được xử lý.`,
         actionUrl: '/admin/returns',
         metadata: { requestNumber },
+        eventKey: `return:${requestNumber}:admin:new`,
+      },
+      io
+    )
+  }
+
+  async notifyNewReturnRequestToPharmacists(requestNumber: string, io?: SocketIOServer) {
+    await this.broadcastToRole(
+      'pharmacist',
+      {
+        type: 'return',
+        title: 'Yêu cầu hoàn hàng mới',
+        message: `Yêu cầu hoàn hàng ${requestNumber} vừa được tạo và cần xem xét.`,
+        actionUrl: '/pharmacist/returns',
+        metadata: { requestNumber },
+        eventKey: `return:${requestNumber}:pharmacist:new`
       },
       io
     )
@@ -380,6 +574,7 @@ class NotificationService {
           moderationNotes: moderationNotes || null,
         },
         targetRole: 'customer',
+        eventKey: `review:${reviewId.toString()}:moderation:${newStatus}`
       },
       io
     )
@@ -394,7 +589,72 @@ class NotificationService {
         message: `"${eventTitle}" sẽ bắt đầu trong 15 phút.`,
         actionUrl: `/community/video-events/${eventId}`,
         metadata: { eventId },
-        targetRole: 'customer'
+        targetRole: 'customer',
+        eventKey: `community-video-event:${eventId}:reminder15m`
+      },
+      io
+    )
+  }
+
+  async notifyVideoEventLifecycle(
+    userId: ObjectId,
+    eventTitle: string,
+    eventId: string,
+    status: 'registered' | 'live' | 'cancelled' | 'time_changed',
+    io?: SocketIOServer
+  ): Promise<void> {
+    const contentMap: Record<typeof status, { title: string; message: string }> = {
+      registered: {
+        title: 'Đăng ký hội thảo thành công',
+        message: `Bạn đã đăng ký hội thảo "${eventTitle}".`
+      },
+      live: {
+        title: 'Hội thảo đang live',
+        message: `"${eventTitle}" đang diễn ra. Bạn có thể tham gia ngay.`
+      },
+      cancelled: {
+        title: 'Hội thảo đã hủy',
+        message: `"${eventTitle}" đã bị hủy. MediSpace sẽ cập nhật lịch mới khi có.`
+      },
+      time_changed: {
+        title: 'Lịch hội thảo được cập nhật',
+        message: `"${eventTitle}" vừa được cập nhật thời gian tổ chức.`
+      }
+    }
+    const content = contentMap[status]
+
+    await this.createAndPush(
+      {
+        userId,
+        type: 'community',
+        title: content.title,
+        message: content.message,
+        actionUrl: `/community/video-events/${eventId}`,
+        metadata: { eventId, status },
+        targetRole: 'customer',
+        eventKey: `community-video-event:${eventId}:${status}`
+      },
+      io
+    )
+  }
+
+  async notifySecurityAlert(
+    userId: ObjectId,
+    title: string,
+    message: string,
+    eventKey: string,
+    io?: SocketIOServer
+  ): Promise<void> {
+    await this.createAndPush(
+      {
+        userId,
+        type: 'security',
+        title,
+        message,
+        actionUrl: '/account/settings',
+        metadata: { eventKey },
+        targetRole: 'customer',
+        eventKey
       },
       io
     )
