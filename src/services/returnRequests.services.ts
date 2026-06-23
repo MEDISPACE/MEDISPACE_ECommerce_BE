@@ -125,34 +125,12 @@ class ReturnRequestService {
   async createReturnRequest(userId: ObjectId, payload: CreateReturnRequestPayload) {
     const { orderId, items, reason, reasonDetail, evidence, type, refundMethod, bankInfo } = payload
 
-    // DEBUG: Log the incoming data
-    console.log('=== DEBUG createReturnRequest ===')
-    console.log('orderId:', orderId)
-    console.log('userId:', userId, userId.toString())
-
-    // First, check if order exists at all (without userId filter)
-    const orderWithoutUserFilter = await databaseService.orders.findOne({
-      _id: new ObjectId(orderId)
-    })
-    console.log(
-      'Order without userId filter:',
-      orderWithoutUserFilter
-        ? {
-            _id: orderWithoutUserFilter._id,
-            userId: orderWithoutUserFilter.userId,
-            orderStatus: orderWithoutUserFilter.orderStatus
-          }
-        : 'NOT FOUND'
-    )
-
     // Validate order exists and belongs to user
     // Use $or to match userId as both ObjectId and string (for backwards compatibility)
     const order = await databaseService.orders.findOne({
       _id: new ObjectId(orderId),
       $or: [{ userId: userId }, { userId: userId.toString() as unknown as ObjectId }]
     })
-    console.log('Order with userId filter:', order ? 'FOUND' : 'NOT FOUND')
-    console.log('=================================')
 
     if (!order) {
       throw new ErrorWithStatus({
