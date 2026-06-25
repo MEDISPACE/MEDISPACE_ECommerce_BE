@@ -7,6 +7,17 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { CARTS_MESSAGES } from '~/constants/message'
 import recommendationsService from '~/services/recommendations.services'
 
+const setGuestCartSessionCookie = (res: Response, sessionId?: string) => {
+  if (!sessionId) return
+
+  res.cookie('sessionId', sessionId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  })
+}
+
 // Helper function to get userId and sessionId from request
 const getUserAndSession = (req: Request) => {
   let userId: ObjectId | undefined = undefined
@@ -30,12 +41,7 @@ export const getCartController = async (req: Request, res: Response) => {
 
   // Set session cookie for guest users
   if (!userId && result.sessionId) {
-    res.cookie('sessionId', result.sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    })
+    setGuestCartSessionCookie(res, result.sessionId)
   }
 
   return res.status(HTTP_STATUS.OK).json({
@@ -51,6 +57,10 @@ export const addToCartController = async (req: Request<ParamsDictionary, unknown
 
   const result = await cartService.addItemToCart(new ObjectId(productId), quantity, userId, sessionId, unit, price)
   void recommendationsService.recordRealtimeEvent(userId?.toString())
+
+  if (!userId) {
+    setGuestCartSessionCookie(res, result.sessionId)
+  }
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.ADD_TO_CART_SUCCESS,
@@ -69,6 +79,10 @@ export const updateCartItemController = async (
 
   const result = await cartService.updateItemQuantity(new ObjectId(productId), quantity, userId, sessionId, unit)
 
+  if (!userId) {
+    setGuestCartSessionCookie(res, result.sessionId)
+  }
+
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.UPDATE_CART_ITEM_SUCCESS,
     result
@@ -85,6 +99,10 @@ export const updateCartItemUnitController = async (
   const { unit, currentUnit } = req.body
 
   const result = await cartService.updateItemUnit(new ObjectId(productId), unit, userId, sessionId, currentUnit)
+
+  if (!userId) {
+    setGuestCartSessionCookie(res, result.sessionId)
+  }
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.UPDATE_CART_ITEM_SUCCESS,
@@ -103,6 +121,10 @@ export const removeCartItemController = async (
 
   const result = await cartService.removeItemFromCart(new ObjectId(productId), userId, sessionId, unit as string)
 
+  if (!userId) {
+    setGuestCartSessionCookie(res, result.sessionId)
+  }
+
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.REMOVE_CART_ITEM_SUCCESS,
     result
@@ -115,6 +137,10 @@ export const clearCartController = async (req: Request, res: Response) => {
 
   const result = await cartService.clearCart(userId, sessionId)
 
+  if (!userId) {
+    setGuestCartSessionCookie(res, result.sessionId)
+  }
+
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.CLEAR_CART_SUCCESS,
     result
@@ -126,6 +152,10 @@ export const getCheckoutDataController = async (req: Request, res: Response) => 
   const { userId, sessionId } = getUserAndSession(req)
 
   const result = await cartService.getCheckoutData(userId, sessionId)
+
+  if (!userId) {
+    setGuestCartSessionCookie(res, result.sessionId)
+  }
 
   return res.status(HTTP_STATUS.OK).json({
     message: CARTS_MESSAGES.GET_CHECKOUT_DATA_SUCCESS,

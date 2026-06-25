@@ -465,8 +465,7 @@ class TypesenseService {
         { $addFields: { category: { $arrayElemAt: ['$category', 0] }, brand: { $arrayElemAt: ['$brand', 0] }, details: { $arrayElemAt: ['$details', 0] } } }
       ])
       .toArray()
-    const { default: campaignService } = await import('./campaigns.services')
-    return campaignService.enrichProductsWithCampaigns(products)
+    return products.map((product) => ({ ...product, campaign: null }))
   }
 
   private async reconcileAll(): Promise<void> {
@@ -498,11 +497,10 @@ class TypesenseService {
         this.bulkIndexCategories(categories)
       ])
       if (this.retryQueue.length > 0) throw new Error(`${this.retryQueue.length} Typesense operations are still queued`)
-      const campaignFingerprint = await this.getCampaignFingerprint()
       this.retryQueue = []
       await databaseService.typesenseSyncState.updateOne(
         { key: 'global' },
-        { $set: { key: 'global', dirty: false, reconciledAt: new Date(), campaignFingerprint }, $unset: { reason: '' } },
+        { $set: { key: 'global', dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } },
         { upsert: true }
       )
       console.log('[Typesense] Full reconciliation completed.')
@@ -516,22 +514,7 @@ class TypesenseService {
 
   private async reconcileIfNeeded(force = false): Promise<void> {
     const state = await databaseService.typesenseSyncState.findOne({ key: 'global' })
-    const campaignFingerprint = await this.getCampaignFingerprint()
-    if (force || state?.dirty || state?.campaignFingerprint !== campaignFingerprint) await this.reconcileAll()
-  }
-
-  private async getCampaignFingerprint(): Promise<string> {
-    const now = new Date()
-    const campaigns = await databaseService.campaigns
-      .find(
-        { status: 'active', startDate: { $lte: now }, endDate: { $gte: now } },
-        { projection: { _id: 1, updatedAt: 1, startDate: 1, endDate: 1 } }
-      )
-      .sort({ _id: 1 })
-      .toArray()
-    return campaigns
-      .map((campaign) => `${campaign._id}:${campaign.updatedAt?.getTime?.() || ''}:${campaign.startDate}:${campaign.endDate}`)
-      .join('|')
+    if (force || state?.dirty) await this.reconcileAll()
   }
 
   private startHealthCheck(): void {
@@ -582,8 +565,7 @@ class TypesenseService {
 
   async indexProduct(product: any): Promise<void> {
     await this.runOrQueue(`indexProduct ${product?._id?.toString?.() || product?.mongoId || ''}`, async () => {
-      const { default: campaignService } = await import('./campaigns.services')
-      const enriched = await campaignService.enrichProductWithCampaign(product)
+      const enriched = { ...product, campaign: null }
       await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(enriched))
     })
   }
@@ -597,8 +579,7 @@ class TypesenseService {
   async bulkIndexProducts(products: any[]): Promise<void> {
     if (!products.length) return
     await this.runOrQueue(`bulkIndexProducts ${products.length}`, async () => {
-      const { default: campaignService } = await import('./campaigns.services')
-      const enriched = await campaignService.enrichProductsWithCampaigns(products)
+      const enriched = products.map((product) => ({ ...product, campaign: null }))
       const result = await client.collections(PRODUCTS_COLLECTION).documents().import(enriched.map(toProductDocument), { action: 'upsert' })
       const failed = result.filter((r: any) => !r.success).length
       console.log(`[Typesense] Bulk indexed ${products.length - failed}/${products.length} products.`)
