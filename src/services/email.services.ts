@@ -24,7 +24,7 @@ class EmailService {
     })
   }
 
-  private async sendEmail(to: string, subject: string, htmlContent: string) {
+  private async sendEmail(to: string, subject: string, htmlContent: string, options: { throwOnFailure?: boolean } = {}) {
     const fullHtml = getEmailTemplate(htmlContent)
 
     try {
@@ -37,7 +37,9 @@ class EmailService {
       return info
     } catch (error) {
       console.error('[EmailService] sendEmail failed', { to, subject, error })
-      // Do not throw to prevent blocking the main flow.
+      if (options.throwOnFailure) {
+        throw error
+      }
     }
   }
 
@@ -45,7 +47,7 @@ class EmailService {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
     const verifyUrl = `${clientUrl}/verify-email/${emailVerifyToken}`
     const content = getVerifyEmailContent(verifyUrl)
-    return this.sendEmail(to, 'Xác thực tài khoản MediSpace', content)
+    return this.sendEmail(to, 'Xác thực tài khoản MediSpace', content, { throwOnFailure: true })
   }
 
   async sendOrderConfirmationEmail(to: string, order: any) {
@@ -57,7 +59,7 @@ class EmailService {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
     const resetUrl = `${clientUrl}/reset-password/${forgotPasswordToken}`
     const content = getForgotPasswordContent(resetUrl)
-    return this.sendEmail(to, 'Khôi phục mật khẩu MediSpace', content)
+    return this.sendEmail(to, 'Khôi phục mật khẩu MediSpace', content, { throwOnFailure: true })
   }
 }
 

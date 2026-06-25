@@ -29,7 +29,6 @@ import shippingRouter from './routes/shipping.routes'
 import returnRequestsRouter from './routes/returnRequests.routes'
 import searchRouter from './routes/search.routes'
 import couponsRouter from './routes/coupons.routes'
-import campaignsRouter from './routes/campaigns.routes'
 import loyaltyRouter from './routes/loyalty.routes'
 import recommendationsRouter from './routes/recommendations.routes'
 import communityRouter from './routes/community.routes'
@@ -98,7 +97,6 @@ app.use('/shipping', shippingRouter)
 app.use('/returns', returnRequestsRouter)
 app.use('/search', searchRouter)
 app.use('/coupons', couponsRouter)
-app.use('/campaigns', campaignsRouter)
 app.use('/loyalty', loyaltyRouter)
 app.use('/recommendations', recommendationsRouter)
 app.use('/community', communityRouter)

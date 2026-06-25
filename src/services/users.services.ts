@@ -101,8 +101,15 @@ class UsersService {
       })
     )
 
-    // Send verify email
-    await emailService.sendVerifyRegisterEmail(payload.email, emailVerifyToken)
+    try {
+      await emailService.sendVerifyRegisterEmail(payload.email, emailVerifyToken)
+    } catch {
+      await databaseService.users.deleteOne({ _id: userId })
+      throw new ErrorWithStatus({
+        message: 'Không thể gửi email xác thực. Vui lòng kiểm tra cấu hình email và thử lại.',
+        status: HTTP_STATUS.INTERNAL_SERVER_ERROR
+      })
+    }
 
     return userId.toString()
   }
