@@ -3,10 +3,12 @@ import {
   archiveRoomController,
   createAdminRoomController,
   inviteRoomMemberController,
+  listAdminThreadsController,
   listAdminRoomsController,
   listRoomMembersController,
   unarchiveRoomController,
   updateAdminRoomController,
+  updateAdminThreadController,
   updateRoomMemberController
 } from '~/controllers/adminCommunity.controllers'
 import {
@@ -32,6 +34,8 @@ import {
   memberActionValidator,
   paginationValidator,
   roomIdValidator,
+  threadIdValidator,
+  updateThreadValidator,
   updateVideoEventValidator,
   updateVideoRegistrationValidator,
   updateRoomValidator,
@@ -62,6 +66,14 @@ adminCommunityRouter.post(
   roomIdValidator,
   inviteMemberValidator,
   wrapRequestHandler(inviteRoomMemberController)
+)
+
+adminCommunityRouter.get('/rooms/:roomId/threads', roomIdValidator, paginationValidator, wrapRequestHandler(listAdminThreadsController))
+adminCommunityRouter.patch(
+  '/threads/:threadId',
+  threadIdValidator,
+  updateThreadValidator,
+  wrapRequestHandler(updateAdminThreadController)
 )
 
 adminCommunityRouter.get('/video-events', paginationValidator, wrapRequestHandler(listVideoEventsController))

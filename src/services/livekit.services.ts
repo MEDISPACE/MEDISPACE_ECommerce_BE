@@ -1,4 +1,6 @@
 import { AccessToken, RoomServiceClient, TrackSource, type ParticipantInfo, type TrackInfo } from 'livekit-server-sdk'
+import http from 'http'
+import https from 'https'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { ErrorWithStatus } from '~/models/Error'
 
@@ -60,6 +62,45 @@ class LiveKitService {
     const wsUrl = this.getWsUrl()
     if (!wsUrl) return ''
     return wsUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:')
+  }
+
+  async checkReachability(timeoutMs = 5000) {
+    const wsUrl = this.getWsUrl()
+    const httpUrl = this.getHttpUrl()
+    if (!this.isConfigured() || !httpUrl) {
+      return {
+        configured: false,
+        reachable: false,
+        wsUrl,
+        reason: 'LiveKit chưa được cấu hình đủ LIVEKIT_API_KEY, LIVEKIT_API_SECRET hoặc LIVEKIT_WS_URL.'
+      }
+    }
+
+    return new Promise<{ configured: boolean; reachable: boolean; wsUrl: string; httpUrl: string; reason?: string; statusCode?: number }>((resolve) => {
+      const url = new URL(httpUrl)
+      const client = url.protocol === 'https:' ? https : http
+      const request = client.request(
+        url,
+        {
+          method: 'HEAD',
+          timeout: timeoutMs,
+          headers: { Connection: 'close' }
+        },
+        (response) => {
+          response.resume()
+          resolve({ configured: true, reachable: true, wsUrl, httpUrl, statusCode: response.statusCode })
+        }
+      )
+
+      request.on('timeout', () => {
+        request.destroy()
+        resolve({ configured: true, reachable: false, wsUrl, httpUrl, reason: `Không kết nối được LiveKit trong ${timeoutMs}ms.` })
+      })
+      request.on('error', (error) => {
+        resolve({ configured: true, reachable: false, wsUrl, httpUrl, reason: error.message })
+      })
+      request.end()
+    })
   }
 
   private getRoomClient() {

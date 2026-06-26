@@ -193,13 +193,25 @@ class DatabaseService {
       await safeCreateIndex(this.communityRooms, { status: 1, featured: -1, sortOrder: 1, createdAt: -1 })
       await safeCreateIndex(this.communityRooms, { diseaseKey: 1, status: 1, featured: -1 })
 
+      await safeCreateIndex(this.communityThreads, { roomId: 1, status: 1, sticky: -1, lastReplyAt: -1 })
+      await safeCreateIndex(this.communityThreads, { status: 1, lastReplyAt: -1 })
+      await safeCreateIndex(this.communityThreads, { roomId: 1, prefix: 1, lastReplyAt: -1 })
+      await safeCreateIndex(this.communityThreads, { authorId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityThreads, { slug: 1 }, { unique: true })
+
       await safeCreateIndex(this.communityRoomMembers, { roomId: 1, userId: 1 }, { unique: true })
       await safeCreateIndex(this.communityRoomMembers, { roomId: 1, status: 1, updatedAt: -1 })
       await safeCreateIndex(this.communityRoomMembers, { userId: 1, status: 1, updatedAt: -1 })
 
       await safeCreateIndex(this.communityMessages, { roomId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityMessages, { threadId: 1, createdAt: 1 })
+      await safeCreateIndex(this.communityMessages, { threadId: 1, status: 1, createdAt: 1 })
       await safeCreateIndex(this.communityMessages, { senderId: 1, createdAt: -1 })
       await safeCreateIndex(this.communityMessages, { status: 1, createdAt: -1 })
+
+      await safeCreateIndex(this.communityReactions, { messageId: 1, userId: 1 }, { unique: true })
+      await safeCreateIndex(this.communityReactions, { messageId: 1, type: 1 })
+      await safeCreateIndex(this.communityReactions, { userId: 1, createdAt: -1 })
 
       await safeCreateIndex(this.moderationFindings, { status: 1, createdAt: -1 })
       await safeCreateIndex(this.moderationFindings, { roomId: 1, status: 1, createdAt: -1 })
@@ -315,12 +327,20 @@ class DatabaseService {
     return this.db.collection(process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms')
   }
 
+  get communityThreads(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_THREADS_COLLECTION || 'communityThreads')
+  }
+
   get communityRoomMembers(): Collection {
     return this.db.collection(process.env.DB_COMMUNITY_ROOM_MEMBERS_COLLECTION || 'communityRoomMembers')
   }
 
   get communityMessages(): Collection {
     return this.db.collection(process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages')
+  }
+
+  get communityReactions(): Collection {
+    return this.db.collection(process.env.DB_COMMUNITY_REACTIONS_COLLECTION || 'communityReactions')
   }
 
   get moderationFindings(): Collection {

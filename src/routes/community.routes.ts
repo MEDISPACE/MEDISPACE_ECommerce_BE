@@ -1,34 +1,49 @@
 import { Router } from 'express'
 import {
   createRoomController,
+  createThreadController,
   createAppealController,
+  createThreadReplyController,
+  deleteMessageController,
+  getThreadController,
   joinRequestController,
   joinRoomController,
   leaveRoomController,
+  listThreadRepliesController,
+  listThreadsController,
   listMessagesController,
   listMyRoomsController,
   listRoomsController,
   markRoomReadController,
+  reactToMessageController,
   reportMessageController,
-  sendMessageController
+  sendMessageController,
+  updateMessageController
 } from '~/controllers/community.controllers'
 import {
   cancelVideoEventRegistrationController,
   getVideoEventDetailController,
+  getLiveKitDiagnosticsController,
   joinVideoEventController,
   listMyVideoEventsController,
   listVideoEventsController,
   registerVideoEventController
 } from '~/controllers/communityVideoEvents.controllers'
 import {
+  communityActionRateLimit,
   createRoomValidator,
+  createThreadReplyValidator,
+  createThreadValidator,
   createAppealValidator,
   eventIdValidator,
   messageIdValidator,
   paginationValidator,
+  reactToMessageValidator,
   reportMessageValidator,
   roomIdValidator,
-  sendMessageValidator
+  sendMessageValidator,
+  threadIdValidator,
+  updateMessageValidator
 } from '~/middlewares/community.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
 import { accessTokenValidator, optionalAccessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
@@ -43,6 +58,12 @@ communityRouter.get(
   verifiedUserValidator,
   paginationValidator,
   wrapRequestHandler(listMyVideoEventsController)
+)
+communityRouter.get(
+  '/video-events/livekit/diagnostics',
+  accessTokenValidator,
+  verifiedUserValidator,
+  wrapRequestHandler(getLiveKitDiagnosticsController)
 )
 communityRouter.get(
   '/video-events/:eventId',
@@ -131,6 +152,49 @@ communityRouter.post(
   wrapRequestHandler(createAppealController)
 )
 
+communityRouter.get(
+  '/rooms/:roomId/threads',
+  optionalAccessTokenValidator,
+  roomIdValidator,
+  paginationValidator,
+  wrapRequestHandler(listThreadsController)
+)
+
+communityRouter.post(
+  '/rooms/:roomId/threads',
+  accessTokenValidator,
+  verifiedUserValidator,
+  roomIdValidator,
+  communityActionRateLimit('thread'),
+  createThreadValidator,
+  wrapRequestHandler(createThreadController)
+)
+
+communityRouter.get(
+  '/threads/:threadId',
+  optionalAccessTokenValidator,
+  threadIdValidator,
+  wrapRequestHandler(getThreadController)
+)
+
+communityRouter.get(
+  '/threads/:threadId/replies',
+  optionalAccessTokenValidator,
+  threadIdValidator,
+  paginationValidator,
+  wrapRequestHandler(listThreadRepliesController)
+)
+
+communityRouter.post(
+  '/threads/:threadId/replies',
+  accessTokenValidator,
+  verifiedUserValidator,
+  threadIdValidator,
+  communityActionRateLimit('reply'),
+  createThreadReplyValidator,
+  wrapRequestHandler(createThreadReplyController)
+)
+
 // List messages (only visible)
 communityRouter.get(
   '/rooms/:roomId/messages',
@@ -157,8 +221,36 @@ communityRouter.post(
   accessTokenValidator,
   verifiedUserValidator,
   messageIdValidator,
+  communityActionRateLimit('report'),
   reportMessageValidator,
   wrapRequestHandler(reportMessageController)
+)
+
+communityRouter.post(
+  '/messages/:messageId/reaction',
+  accessTokenValidator,
+  verifiedUserValidator,
+  messageIdValidator,
+  communityActionRateLimit('reaction'),
+  reactToMessageValidator,
+  wrapRequestHandler(reactToMessageController)
+)
+
+communityRouter.patch(
+  '/messages/:messageId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  messageIdValidator,
+  updateMessageValidator,
+  wrapRequestHandler(updateMessageController)
+)
+
+communityRouter.delete(
+  '/messages/:messageId',
+  accessTokenValidator,
+  verifiedUserValidator,
+  messageIdValidator,
+  wrapRequestHandler(deleteMessageController)
 )
 
 export default communityRouter
