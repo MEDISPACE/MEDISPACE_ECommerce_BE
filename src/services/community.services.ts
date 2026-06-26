@@ -10,6 +10,10 @@ import { moderateTextRuleBased } from '~/utils/moderation/moderationEngine'
 type RoomVisibility = 'public' | 'private'
 type RoomStatus = 'active' | 'archived'
 type RoomSort = 'activity' | 'newest' | 'members' | 'messages' | 'featured'
+type ThreadPrefix = 'question' | 'review' | 'warning' | 'story' | 'experience' | 'pharmacist'
+type ThreadStatus = 'open' | 'answered' | 'hidden' | 'deleted'
+type ThreadSort = 'latest' | 'newest' | 'hot' | 'unanswered'
+type ThreadVideoMeetingStatus = 'scheduled' | 'live' | 'ended'
 
 type RoomMetadataParams = {
   description?: string
@@ -26,6 +30,7 @@ type MemberRole = 'member' | 'moderator' | 'admin'
 type MemberStatus = 'pending' | 'invited' | 'active' | 'left' | 'banned'
 
 type MessageStatus = 'visible' | 'hidden' | 'deleted'
+type MessageReactionType = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry' | 'helpful' | 'thanks' | 'care' | 'dislike'
 
 type FindingStatus = 'open' | 'resolved'
 
@@ -35,6 +40,23 @@ type AuthContext = {
   userId?: ObjectId
   role?: UserRole
 }
+
+type ThreadVideoMeetingInput = {
+  url?: string
+  eventId?: string | ObjectId
+  provider?: string
+  status?: ThreadVideoMeetingStatus
+  startsAt?: string | Date | null
+  endsAt?: string | Date | null
+  title?: string
+  note?: string
+} | null
+
+const THREAD_CREATE_COOLDOWN_SECONDS = Number(process.env.COMMUNITY_THREAD_CREATE_COOLDOWN_SECONDS || 20)
+const REPLY_CREATE_COOLDOWN_SECONDS = Number(process.env.COMMUNITY_REPLY_CREATE_COOLDOWN_SECONDS || 8)
+const DUPLICATE_THREAD_WINDOW_DAYS = Number(process.env.COMMUNITY_DUPLICATE_THREAD_WINDOW_DAYS || 14)
+const MESSAGE_SELF_EDIT_WINDOW_MINUTES = Number(process.env.COMMUNITY_MESSAGE_SELF_EDIT_WINDOW_MINUTES || 30)
+const MESSAGE_SELF_DELETE_WINDOW_MINUTES = Number(process.env.COMMUNITY_MESSAGE_SELF_DELETE_WINDOW_MINUTES || 30)
 
 function slugify(input: string): string {
   const base = (input || '')
@@ -77,6 +99,23 @@ function emitToAdmins(event: string, payload: unknown) {
   }
 }
 
+const THREAD_PREFIXES: ThreadPrefix[] = ['question', 'review', 'warning', 'story', 'experience', 'pharmacist']
+const PUBLIC_THREAD_STATUSES: ThreadStatus[] = ['open', 'answered']
+const MESSAGE_REACTION_TYPES: MessageReactionType[] = ['like', 'love', 'haha', 'wow', 'sad', 'angry', 'helpful', 'thanks', 'care', 'dislike']
+const EMPTY_MESSAGE_REACTION_COUNTS: Record<MessageReactionType, number> = {
+  like: 0,
+  love: 0,
+  haha: 0,
+  wow: 0,
+  sad: 0,
+  angry: 0,
+  helpful: 0,
+  thanks: 0,
+  care: 0,
+  dislike: 0
+}
+const THREAD_VIDEO_MEETING_STATUSES: ThreadVideoMeetingStatus[] = ['scheduled', 'live', 'ended']
+
 class CommunityService {
   private async attachMessageSender(message: any) {
     if (!message?.senderId) return message
@@ -117,6 +156,109 @@ class CommunityService {
     return { ...message, ...(sender ? { sender } : {}), ...(replyTo ? { replyTo } : {}) }
   }
 
+  private async attachMessageReactions<T extends any>(messages: T[], viewer?: AuthContext): Promise<T[]> {
+    const messageIds = messages.map((message) => message?._id).filter(Boolean)
+    if (!messageIds.length) return messages
+
+    const [counts, viewerReactions] = await Promise.all([
+      databaseService.communityReactions
+        .aggregate([
+          { $match: { messageId: { $in: messageIds } } },
+          { $group: { _id: { messageId: '$messageId', type: '$type' }, count: { $sum: 1 } } }
+        ])
+        .toArray(),
+      viewer?.userId
+        ? databaseService.communityReactions
+            .find({ messageId: { $in: messageIds }, userId: viewer.userId }, { projection: { messageId: 1, type: 1 } })
+            .toArray()
+        : Promise.resolve([])
+    ])
+
+    const countsByMessage = new Map<string, Record<MessageReactionType, number>>()
+    counts.forEach((item) => {
+      const messageId = String(item._id.messageId)
+      const current = countsByMessage.get(messageId) || { ...EMPTY_MESSAGE_REACTION_COUNTS }
+      if (MESSAGE_REACTION_TYPES.includes(item._id.type)) current[item._id.type as MessageReactionType] = item.count
+      countsByMessage.set(messageId, current)
+    })
+
+    const viewerReactionByMessage = new Map<string, MessageReactionType>()
+    viewerReactions.forEach((item: any) => viewerReactionByMessage.set(String(item.messageId), item.type))
+
+    return messages.map((message) => {
+      const messageId = String(message._id)
+      return {
+        ...message,
+        reactionCounts: countsByMessage.get(messageId) || { ...EMPTY_MESSAGE_REACTION_COUNTS },
+        viewerReaction: viewerReactionByMessage.get(messageId) || null
+      }
+    })
+  }
+
+  private normalizeThreadTags(tags?: unknown) {
+    return Array.isArray(tags)
+      ? tags
+          .map((tag) => String(tag || '').trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : []
+  }
+
+  private async ensureRoomReadable(roomId: ObjectId, viewer?: AuthContext) {
+    const room = await databaseService.communityRooms.findOne({ _id: roomId, status: 'active' })
+    if (!room) throw new ErrorWithStatus({ message: 'Không tìm thấy chuyên mục.', status: HTTP_STATUS.NOT_FOUND })
+    if (room.visibility === 'public' || viewer?.role === UserRole.Admin) return room
+    if (!viewer?.userId) {
+      throw new ErrorWithStatus({ message: 'Vui lòng đăng nhập để xem chuyên mục riêng tư.', status: HTTP_STATUS.UNAUTHORIZED })
+    }
+    const member = await databaseService.communityRoomMembers.findOne({ roomId, userId: viewer.userId })
+    if (member?.status !== 'active') {
+      throw new ErrorWithStatus({ message: 'Bạn chưa tham gia chuyên mục này.', status: HTTP_STATUS.FORBIDDEN })
+    }
+    return room
+  }
+
+  private async getThreadForViewer(threadId: ObjectId, viewer?: AuthContext) {
+    const thread = await databaseService.communityThreads.findOne({ _id: threadId, status: { $ne: 'deleted' } })
+    if (!thread) throw new ErrorWithStatus({ message: 'Không tìm thấy thread.', status: HTTP_STATUS.NOT_FOUND })
+    await this.ensureRoomReadable(thread.roomId as ObjectId, viewer)
+    const canSeeHidden = viewer?.role === UserRole.Admin || String(thread.authorId || '') === String(viewer?.userId || '')
+    if (thread.status === 'hidden' && !canSeeHidden) {
+      throw new ErrorWithStatus({ message: 'Thread đang bị ẩn.', status: HTTP_STATUS.NOT_FOUND })
+    }
+    return thread
+  }
+
+  private async attachThreadRelations(thread: any, viewer?: AuthContext) {
+    if (!thread) return thread
+    const [author, room, starterMessage, acceptedReply] = await Promise.all([
+      thread.authorId
+        ? databaseService.users.findOne(
+            { _id: thread.authorId },
+            { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 } }
+          )
+        : Promise.resolve(null),
+      thread.roomId
+        ? databaseService.communityRooms.findOne(
+            { _id: thread.roomId },
+            { projection: { _id: 1, name: 1, slug: 1, diseaseKey: 1, topicLabel: 1, visibility: 1 } }
+          )
+        : Promise.resolve(null),
+      thread.starterMessageId ? this.attachMessageSender(await databaseService.communityMessages.findOne({ _id: thread.starterMessageId })) : Promise.resolve(null),
+      thread.acceptedReplyId ? this.attachMessageSender(await databaseService.communityMessages.findOne({ _id: thread.acceptedReplyId })) : Promise.resolve(null)
+    ])
+    const [starterMessageWithReactions] = starterMessage ? await this.attachMessageReactions([starterMessage], viewer) : [null]
+    const [acceptedReplyWithReactions] = acceptedReply ? await this.attachMessageReactions([acceptedReply], viewer) : [null]
+
+    return {
+      ...thread,
+      ...(author ? { author } : {}),
+      ...(room ? { room } : {}),
+      ...(starterMessageWithReactions ? { starterMessage: starterMessageWithReactions } : {}),
+      ...(acceptedReplyWithReactions ? { acceptedReply: acceptedReplyWithReactions } : {})
+    }
+  }
+
   private normalizeRoomMetadata(params: RoomMetadataParams) {
     const update: any = {}
     if (params.description !== undefined) update.description = params.description.trim() || undefined
@@ -136,6 +278,34 @@ class CommunityService {
     if (params.sortOrder !== undefined && Number.isFinite(Number(params.sortOrder)))
       update.sortOrder = Number(params.sortOrder)
     return update
+  }
+
+  private normalizeThreadVideoMeeting(input: ThreadVideoMeetingInput, updatedBy?: ObjectId) {
+    if (input === null) return null
+    if (!input || typeof input !== 'object') return undefined
+
+    const url = String(input.url || '').trim()
+    if (!url) return null
+
+    const now = new Date()
+    const status = THREAD_VIDEO_MEETING_STATUSES.includes(input.status as ThreadVideoMeetingStatus)
+      ? (input.status as ThreadVideoMeetingStatus)
+      : 'scheduled'
+    const startsAt = input.startsAt ? new Date(input.startsAt) : undefined
+    const endsAt = input.endsAt ? new Date(input.endsAt) : undefined
+
+    return {
+      url,
+      ...(input.eventId && ObjectId.isValid(String(input.eventId)) ? { eventId: new ObjectId(String(input.eventId)) } : {}),
+      provider: String(input.provider || 'livekit').trim() || 'livekit',
+      status,
+      ...(startsAt && !Number.isNaN(startsAt.getTime()) ? { startsAt } : {}),
+      ...(endsAt && !Number.isNaN(endsAt.getTime()) ? { endsAt } : {}),
+      title: String(input.title || '').trim().slice(0, 160),
+      note: String(input.note || '').trim().slice(0, 500),
+      ...(updatedBy ? { updatedBy } : {}),
+      updatedAt: now
+    }
   }
 
   private roomMetricsPipeline(match: Record<string, unknown>, viewerId?: ObjectId, sort: RoomSort = 'activity') {
@@ -630,6 +800,697 @@ class CommunityService {
     return payload
   }
 
+  async listThreads(params: {
+    roomId: ObjectId
+    viewer?: AuthContext
+    page: number
+    limit: number
+    q?: string
+    prefix?: string
+    sort?: string
+  }) {
+    await this.ensureRoomReadable(params.roomId, params.viewer)
+    const page = params.page || 1
+    const limit = params.limit || 20
+    const skip = (page - 1) * limit
+    const query: any = { roomId: params.roomId, status: { $in: PUBLIC_THREAD_STATUSES } }
+    if (params.prefix && THREAD_PREFIXES.includes(params.prefix as ThreadPrefix)) query.prefix = params.prefix
+    const search = params.q?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      query.$or = [{ title: regex }, { content: regex }, { tags: regex }]
+    }
+
+    const sortKey = (params.sort || 'latest') as ThreadSort
+    const sortMap: Record<ThreadSort, Record<string, 1 | -1>> = {
+      latest: { sticky: -1, lastReplyAt: -1, createdAt: -1 },
+      newest: { sticky: -1, createdAt: -1 },
+      hot: { sticky: -1, replyCount: -1, viewCount: -1, lastReplyAt: -1 },
+      unanswered: { sticky: -1, replyCount: 1, createdAt: -1 }
+    }
+
+    const [items, total] = await Promise.all([
+      databaseService.communityThreads
+        .aggregate([
+          { $match: query },
+          { $sort: sortMap[sortKey] || sortMap.latest },
+          { $skip: skip },
+          { $limit: limit },
+          {
+            $lookup: {
+              from: process.env.USERS_COLLECTION || 'users',
+              localField: 'authorId',
+              foreignField: '_id',
+              as: 'author'
+            }
+          },
+          { $unwind: { path: '$author', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+              localField: 'lastReplyId',
+              foreignField: '_id',
+              as: 'lastReply'
+            }
+          },
+          { $unwind: { path: '$lastReply', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              roomId: 1,
+              title: 1,
+              slug: 1,
+              prefix: 1,
+              authorId: 1,
+              isAnonymous: 1,
+              content: 1,
+              imageUrl: 1,
+              videoMeeting: 1,
+              tags: 1,
+              status: 1,
+              sticky: 1,
+              locked: 1,
+              starterMessageId: 1,
+              acceptedReplyId: 1,
+              viewCount: 1,
+              replyCount: 1,
+              lastReplyAt: 1,
+              lastReplyId: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              author: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 },
+              lastReplyPreview: '$lastReply.content'
+            }
+          }
+        ])
+        .toArray(),
+      databaseService.communityThreads.countDocuments(query)
+    ])
+
+    return { items, page, limit, total }
+  }
+
+  async createThread(params: {
+    roomId: ObjectId
+    userId: ObjectId
+    title: string
+    content: string
+    prefix?: ThreadPrefix
+    tags?: unknown
+    isAnonymous?: boolean
+    imageUrl?: string
+  }) {
+    const member = await this.requireCanChat(params.roomId, params.userId)
+    const now = new Date()
+    const title = params.title.trim()
+    const content = params.content.trim()
+    const imageUrl = params.imageUrl?.trim() || ''
+
+    const recentThread = await databaseService.communityThreads.findOne({
+      roomId: params.roomId,
+      authorId: params.userId,
+      status: { $ne: 'deleted' as ThreadStatus },
+      createdAt: { $gte: new Date(now.getTime() - THREAD_CREATE_COOLDOWN_SECONDS * 1000) }
+    })
+    if (recentThread) {
+      throw new ErrorWithStatus({
+        message: `Bạn tạo thread quá nhanh. Vui lòng thử lại sau ${THREAD_CREATE_COOLDOWN_SECONDS} giây.`,
+        status: HTTP_STATUS.TOO_MANY_REQUESTS
+      })
+    }
+
+    const duplicateThread = await databaseService.communityThreads.findOne({
+      roomId: params.roomId,
+      title: new RegExp(`^${escapeRegex(title)}$`, 'i'),
+      status: { $ne: 'deleted' as ThreadStatus },
+      createdAt: { $gte: new Date(now.getTime() - DUPLICATE_THREAD_WINDOW_DAYS * 24 * 60 * 60 * 1000) }
+    })
+    if (duplicateThread) {
+      throw new ErrorWithStatus({
+        message: 'Đã có thread cùng tiêu đề trong chuyên mục này. Vui lòng tìm và tiếp tục trao đổi trong thread cũ.',
+        status: HTTP_STATUS.CONFLICT
+      })
+    }
+
+    const threadId = new ObjectId()
+    const starterMessageId = new ObjectId()
+    const slug = `${slugify(title)}-${threadId.toString().slice(-6)}`
+    const moderation = moderateTextRuleBased(`${title}\n${content}`)
+    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
+    const threadStatus: ThreadStatus = shouldAutoHide ? 'hidden' : 'open'
+
+    const threadDoc: any = {
+      _id: threadId,
+      roomId: params.roomId,
+      title,
+      slug,
+      prefix: THREAD_PREFIXES.includes(params.prefix as ThreadPrefix) ? params.prefix : 'question',
+      authorId: params.userId,
+      isAnonymous: Boolean(params.isAnonymous),
+      content,
+      ...(imageUrl ? { imageUrl } : {}),
+      tags: this.normalizeThreadTags(params.tags),
+      status: threadStatus,
+      sticky: false,
+      locked: false,
+      starterMessageId,
+      viewCount: 0,
+      replyCount: 0,
+      lastReplyAt: now,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    const messageDoc: any = {
+      _id: starterMessageId,
+      roomId: params.roomId,
+      threadId,
+      senderId: params.userId,
+      content,
+      ...(imageUrl ? { imageUrl } : {}),
+      isThreadStarter: true,
+      status: shouldAutoHide ? ('hidden' as MessageStatus) : ('visible' as MessageStatus),
+      createdAt: now,
+      updatedAt: now,
+      moderated: {
+        autoHidden: shouldAutoHide,
+        at: now,
+        severity: moderation.severity,
+        categories: moderation.categories,
+        confidence: moderation.confidence,
+        reasons: moderation.reasons
+      }
+    }
+
+    await databaseService.communityThreads.insertOne(threadDoc)
+    await databaseService.communityMessages.insertOne(messageDoc)
+
+    let findingId: ObjectId | undefined
+    if (moderation.categories.length > 0 && moderation.severity !== 'low') {
+      const findingInsert = await databaseService.moderationFindings.insertOne({
+        roomId: params.roomId,
+        messageId: starterMessageId,
+        senderId: params.userId,
+        trigger: 'auto' as ModerationTrigger,
+        status: 'open' as FindingStatus,
+        severity: moderation.severity,
+        categories: moderation.categories,
+        confidence: moderation.confidence,
+        reasons: moderation.reasons,
+        reportCount: 0,
+        createdAt: now,
+        updatedAt: now
+      } as any)
+      findingId = findingInsert.insertedId
+      await databaseService.communityMessages.updateOne(
+        { _id: starterMessageId },
+        { $set: { 'moderated.findingId': findingId } }
+      )
+      emitToAdmins('community:moderation:queued', { findingId, roomId: params.roomId, messageId: starterMessageId })
+    }
+
+    const storedMessage = await databaseService.communityMessages.findOne({ _id: starterMessageId })
+    if (storedMessage) aiModerationService.enqueueMessageReview({ message: storedMessage, ruleResult: moderation }).catch(() => {})
+
+    const thread = await this.attachThreadRelations(await databaseService.communityThreads.findOne({ _id: threadId }), {
+      userId: params.userId
+    })
+    if (threadStatus === 'open') emitCommunity('community:thread:new', params.roomId, thread)
+    else emitToUser('community:thread:hidden', params.userId, thread)
+    return { thread, moderation, memberRole: member.role as MemberRole }
+  }
+
+  async getThread(threadId: ObjectId, params?: { viewer?: AuthContext; incrementView?: boolean }) {
+    const thread = await this.getThreadForViewer(threadId, params?.viewer)
+    if (params?.incrementView && thread.status !== 'hidden') {
+      await databaseService.communityThreads.updateOne({ _id: threadId }, { $inc: { viewCount: 1 } })
+      thread.viewCount = (thread.viewCount || 0) + 1
+    }
+    return this.attachThreadRelations(thread, params?.viewer)
+  }
+
+  async listThreadReplies(params: { threadId: ObjectId; viewer?: AuthContext; page: number; limit: number }) {
+    const thread = await this.getThreadForViewer(params.threadId, params.viewer)
+    await this.ensureRoomReadable(thread.roomId as ObjectId, params.viewer)
+    const page = params.page || 1
+    const limit = params.limit || 20
+    const skip = (page - 1) * limit
+    const visibilityOr: any[] = [{ status: 'visible' as MessageStatus }]
+    if (params.viewer?.userId) visibilityOr.push({ status: 'hidden' as MessageStatus, senderId: params.viewer.userId })
+    const query: any = {
+      threadId: params.threadId,
+      isThreadStarter: { $ne: true },
+      $or: visibilityOr
+    }
+
+    const [items, total] = await Promise.all([
+      databaseService.communityMessages
+        .aggregate([
+          { $match: query },
+          { $sort: { createdAt: 1 } },
+          { $skip: skip },
+          { $limit: limit },
+          {
+            $lookup: {
+              from: process.env.USERS_COLLECTION || 'users',
+              localField: 'senderId',
+              foreignField: '_id',
+              as: 'sender'
+            }
+          },
+          { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+              localField: 'replyToMessageId',
+              foreignField: '_id',
+              as: 'replyTo'
+            }
+          },
+          { $unwind: { path: '$replyTo', preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: process.env.USERS_COLLECTION || 'users',
+              localField: 'replyTo.senderId',
+              foreignField: '_id',
+              as: 'replyToSender'
+            }
+          },
+          { $unwind: { path: '$replyToSender', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              roomId: 1,
+              threadId: 1,
+              senderId: 1,
+              content: 1,
+              imageUrl: 1,
+              replyToMessageId: 1,
+              status: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              moderated: 1,
+              sender: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 },
+              replyTo: {
+                $cond: [
+                  { $ifNull: ['$replyTo._id', false] },
+                  {
+                    _id: '$replyTo._id',
+                    roomId: '$replyTo.roomId',
+                    threadId: '$replyTo.threadId',
+                    senderId: '$replyTo.senderId',
+                    content: '$replyTo.content',
+                    imageUrl: '$replyTo.imageUrl',
+                    status: '$replyTo.status',
+                    createdAt: '$replyTo.createdAt',
+                    sender: {
+                      _id: '$replyToSender._id',
+                      firstName: '$replyToSender.firstName',
+                      lastName: '$replyToSender.lastName',
+                      email: '$replyToSender.email',
+                      avatar: '$replyToSender.avatar',
+                      role: '$replyToSender.role'
+                    }
+                  },
+                  null
+                ]
+              }
+            }
+          }
+        ])
+        .toArray(),
+      databaseService.communityMessages.countDocuments(query)
+    ])
+
+    const itemsWithReactions = await this.attachMessageReactions(items, params.viewer)
+    return { items: itemsWithReactions, page, limit, total }
+  }
+
+  async createThreadReply(params: {
+    threadId: ObjectId
+    userId: ObjectId
+    content?: string
+    imageUrl?: string
+    replyToMessageId?: ObjectId
+  }) {
+    const thread = await this.getThreadForViewer(params.threadId, { userId: params.userId })
+    if (thread.locked) throw new ErrorWithStatus({ message: 'Thread đã bị khóa.', status: HTTP_STATUS.FORBIDDEN })
+    const member = await this.requireCanChat(thread.roomId as ObjectId, params.userId)
+    const now = new Date()
+    const content = params.content?.trim() || ''
+    const imageUrl = params.imageUrl?.trim() || ''
+    if (!content && !imageUrl) {
+      throw new ErrorWithStatus({ message: 'Reply phải có nội dung hoặc ảnh.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const recentReply = await databaseService.communityMessages.findOne({
+      threadId: params.threadId,
+      senderId: params.userId,
+      isThreadStarter: { $ne: true },
+      status: { $ne: 'deleted' as MessageStatus },
+      createdAt: { $gte: new Date(now.getTime() - REPLY_CREATE_COOLDOWN_SECONDS * 1000) }
+    })
+    if (recentReply) {
+      throw new ErrorWithStatus({
+        message: `Bạn gửi trả lời quá nhanh. Vui lòng thử lại sau ${REPLY_CREATE_COOLDOWN_SECONDS} giây.`,
+        status: HTTP_STATUS.TOO_MANY_REQUESTS
+      })
+    }
+
+    let replyToMessageId: ObjectId | undefined
+    if (params.replyToMessageId) {
+      const replyTo = await databaseService.communityMessages.findOne({
+        _id: params.replyToMessageId,
+        threadId: params.threadId,
+        status: 'visible' as MessageStatus
+      })
+      if (!replyTo) {
+        throw new ErrorWithStatus({ message: 'Không tìm thấy reply cần trích dẫn.', status: HTTP_STATUS.NOT_FOUND })
+      }
+      replyToMessageId = params.replyToMessageId
+    }
+
+    const messageId = new ObjectId()
+    const moderation = moderateTextRuleBased(content)
+    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
+    const messageDoc: any = {
+      _id: messageId,
+      roomId: thread.roomId as ObjectId,
+      threadId: params.threadId,
+      senderId: params.userId,
+      content,
+      ...(imageUrl ? { imageUrl } : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+      status: shouldAutoHide ? ('hidden' as MessageStatus) : ('visible' as MessageStatus),
+      createdAt: now,
+      updatedAt: now,
+      moderated: {
+        autoHidden: shouldAutoHide,
+        at: now,
+        severity: moderation.severity,
+        categories: moderation.categories,
+        confidence: moderation.confidence,
+        reasons: moderation.reasons
+      }
+    }
+
+    await databaseService.communityMessages.insertOne(messageDoc)
+
+    let findingId: ObjectId | undefined
+    if (moderation.categories.length > 0 && moderation.severity !== 'low') {
+      const findingInsert = await databaseService.moderationFindings.insertOne({
+        roomId: thread.roomId as ObjectId,
+        messageId,
+        senderId: params.userId,
+        trigger: 'auto' as ModerationTrigger,
+        status: 'open' as FindingStatus,
+        severity: moderation.severity,
+        categories: moderation.categories,
+        confidence: moderation.confidence,
+        reasons: moderation.reasons,
+        reportCount: 0,
+        createdAt: now,
+        updatedAt: now
+      } as any)
+      findingId = findingInsert.insertedId
+      await databaseService.communityMessages.updateOne({ _id: messageId }, { $set: { 'moderated.findingId': findingId } })
+      emitToAdmins('community:moderation:queued', { findingId, roomId: thread.roomId, messageId })
+    }
+
+    const stored = await databaseService.communityMessages.findOne({ _id: messageId })
+    const messageWithSender = stored ? await this.attachMessageSender(stored) : stored
+    if (messageWithSender) aiModerationService.enqueueMessageReview({ message: messageWithSender, ruleResult: moderation }).catch(() => {})
+
+    if (messageWithSender?.status === 'visible') {
+      await databaseService.communityThreads.updateOne(
+        { _id: params.threadId },
+        {
+          $set: { lastReplyAt: now, lastReplyId: messageId, updatedAt: now },
+          $inc: { replyCount: 1 }
+        }
+      )
+      emitCommunity('community:thread:reply', thread.roomId as ObjectId, { threadId: params.threadId, message: messageWithSender })
+    } else {
+      emitToUser('community:message:hidden', params.userId, messageWithSender)
+    }
+
+    return { message: messageWithSender, moderation, memberRole: member.role as MemberRole }
+  }
+
+  async updateThread(
+    threadId: ObjectId,
+    params: {
+      sticky?: boolean
+      locked?: boolean
+      status?: ThreadStatus
+      acceptedReplyId?: ObjectId | null
+      videoMeeting?: ThreadVideoMeetingInput
+      updatedBy?: ObjectId
+    }
+  ) {
+    const thread = await databaseService.communityThreads.findOne({ _id: threadId })
+    if (!thread) throw new ErrorWithStatus({ message: 'Không tìm thấy thread.', status: HTTP_STATUS.NOT_FOUND })
+
+    const update: any = { updatedAt: new Date() }
+    if (params.sticky !== undefined) update.sticky = Boolean(params.sticky)
+    if (params.locked !== undefined) update.locked = Boolean(params.locked)
+    if (params.status !== undefined) update.status = params.status
+    const videoMeeting = this.normalizeThreadVideoMeeting(params.videoMeeting, params.updatedBy)
+    if (videoMeeting !== undefined && videoMeeting !== null) update.videoMeeting = videoMeeting
+    if (params.acceptedReplyId !== undefined) {
+      if (params.acceptedReplyId === null) {
+        update.acceptedReplyId = null
+        if (params.status === undefined && thread.status === 'answered') update.status = 'open'
+      } else {
+        const reply = await databaseService.communityMessages.findOne({
+          _id: params.acceptedReplyId,
+          threadId,
+          status: 'visible' as MessageStatus
+        })
+        if (!reply) {
+          throw new ErrorWithStatus({ message: 'Không tìm thấy reply cần xác nhận.', status: HTTP_STATUS.NOT_FOUND })
+        }
+        update.acceptedReplyId = params.acceptedReplyId
+        if (params.status === undefined) update.status = 'answered' as ThreadStatus
+      }
+    }
+
+    const updated = await databaseService.communityThreads.findOneAndUpdate(
+      { _id: threadId },
+      { $set: update, ...(videoMeeting === null ? { $unset: { videoMeeting: '' } } : {}) },
+      { returnDocument: 'after' }
+    )
+    emitCommunity('community:thread:updated', thread.roomId as ObjectId, updated)
+    return this.attachThreadRelations(updated)
+  }
+
+  async reactToMessage(params: { messageId: ObjectId; userId: ObjectId; type?: MessageReactionType | null }) {
+    const message = await databaseService.communityMessages.findOne({ _id: params.messageId, status: { $ne: 'deleted' } })
+    if (!message) throw new ErrorWithStatus({ message: 'Không tìm thấy bài viết.', status: HTTP_STATUS.NOT_FOUND })
+
+    await this.requireActiveMember(message.roomId as ObjectId, params.userId)
+
+    if ((message.senderId as ObjectId).equals(params.userId)) {
+      throw new ErrorWithStatus({ message: 'Bạn không thể react bài viết của chính mình.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const now = new Date()
+    const current = await databaseService.communityReactions.findOne({ messageId: params.messageId, userId: params.userId })
+
+    if (!params.type) {
+      if (current) await databaseService.communityReactions.deleteOne({ _id: current._id })
+    } else {
+      if (!MESSAGE_REACTION_TYPES.includes(params.type)) {
+        throw new ErrorWithStatus({ message: 'Reaction không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+
+      await databaseService.communityReactions.updateOne(
+        { messageId: params.messageId, userId: params.userId },
+        {
+          $set: {
+            roomId: message.roomId as ObjectId,
+            threadId: message.threadId as ObjectId | undefined,
+            messageId: params.messageId,
+            userId: params.userId,
+            type: params.type,
+            updatedAt: now
+          },
+          $setOnInsert: { createdAt: now }
+        },
+        { upsert: true }
+      )
+    }
+
+    const [messageWithReactions] = await this.attachMessageReactions([message], { userId: params.userId })
+    emitCommunity('community:message:reaction', message.roomId as ObjectId, {
+      messageId: params.messageId,
+      threadId: message.threadId,
+      reactionCounts: messageWithReactions.reactionCounts,
+      viewerReaction: params.type || null
+    })
+
+    return {
+      messageId: params.messageId,
+      reactionCounts: messageWithReactions.reactionCounts,
+      viewerReaction: messageWithReactions.viewerReaction
+    }
+  }
+
+  async updateMessage(params: { messageId: ObjectId; userId: ObjectId; role?: UserRole; content?: string; imageUrl?: string }) {
+    const message = await databaseService.communityMessages.findOne({ _id: params.messageId, status: { $ne: 'deleted' } })
+    if (!message) throw new ErrorWithStatus({ message: 'Không tìm thấy bài viết.', status: HTTP_STATUS.NOT_FOUND })
+
+    await this.requireActiveMember(message.roomId as ObjectId, params.userId)
+
+    const isAdmin = params.role === UserRole.Admin
+    const isOwner = (message.senderId as ObjectId).equals(params.userId)
+    if (!isAdmin && !isOwner) {
+      throw new ErrorWithStatus({ message: 'Bạn không có quyền sửa bài viết này.', status: HTTP_STATUS.FORBIDDEN })
+    }
+
+    const now = new Date()
+    if (!isAdmin && now.getTime() - new Date(message.createdAt).getTime() > MESSAGE_SELF_EDIT_WINDOW_MINUTES * 60 * 1000) {
+      throw new ErrorWithStatus({
+        message: `Chỉ có thể sửa bài trong ${MESSAGE_SELF_EDIT_WINDOW_MINUTES} phút sau khi đăng.`,
+        status: HTTP_STATUS.FORBIDDEN
+      })
+    }
+
+    if (message.threadId) {
+      const thread = await databaseService.communityThreads.findOne({ _id: message.threadId, status: { $ne: 'deleted' } })
+      if (!thread) throw new ErrorWithStatus({ message: 'Không tìm thấy thread.', status: HTTP_STATUS.NOT_FOUND })
+      if (thread.locked && !isAdmin) {
+        throw new ErrorWithStatus({ message: 'Thread đã bị khóa.', status: HTTP_STATUS.FORBIDDEN })
+      }
+    }
+
+    const content = params.content?.trim() || ''
+    const imageUrl = params.imageUrl?.trim() || ''
+    if (!content && !imageUrl) {
+      throw new ErrorWithStatus({ message: 'Bài viết phải có nội dung hoặc ảnh.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const moderation = moderateTextRuleBased(content)
+    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
+    const update: any = {
+      content,
+      updatedAt: now,
+      editedAt: now,
+      editedBy: params.userId,
+      ...(imageUrl ? { imageUrl } : {}),
+      status: shouldAutoHide ? ('hidden' as MessageStatus) : message.status,
+      moderated: {
+        ...(message.moderated || {}),
+        autoHidden: shouldAutoHide,
+        at: now,
+        severity: moderation.severity,
+        categories: moderation.categories,
+        confidence: moderation.confidence,
+        reasons: moderation.reasons
+      }
+    }
+
+    const updated = await databaseService.communityMessages.findOneAndUpdate(
+      { _id: params.messageId },
+      { $set: update, ...(!imageUrl ? { $unset: { imageUrl: '' } } : {}) },
+      { returnDocument: 'after' }
+    )
+
+    if (message.isThreadStarter && message.threadId) {
+      await databaseService.communityThreads.updateOne(
+        { _id: message.threadId },
+        {
+          $set: {
+            content,
+            updatedAt: now,
+            ...(shouldAutoHide ? { status: 'hidden' as ThreadStatus } : {}),
+            ...(imageUrl ? { imageUrl } : {})
+          },
+          ...(!imageUrl ? { $unset: { imageUrl: '' } } : {})
+        }
+      )
+    }
+
+    if (moderation.categories.length > 0 && moderation.severity !== 'low') {
+      const finding = await databaseService.moderationFindings.findOne({ messageId: params.messageId })
+      if (finding) {
+        await databaseService.moderationFindings.updateOne(
+          { _id: finding._id },
+          {
+            $set: {
+              status: 'open' as FindingStatus,
+              severity: moderation.severity,
+              categories: moderation.categories,
+              confidence: moderation.confidence,
+              reasons: moderation.reasons,
+              updatedAt: now
+            }
+          }
+        )
+        emitToAdmins('community:moderation:queued', { findingId: finding._id, roomId: message.roomId, messageId: params.messageId })
+      }
+    }
+
+    const messageWithSender = updated ? await this.attachMessageSender(updated) : updated
+    emitCommunity('community:message:updated', message.roomId as ObjectId, messageWithSender)
+    return { message: messageWithSender, moderation }
+  }
+
+  async deleteMessage(params: { messageId: ObjectId; userId: ObjectId; role?: UserRole }) {
+    const message = await databaseService.communityMessages.findOne({ _id: params.messageId, status: { $ne: 'deleted' } })
+    if (!message) throw new ErrorWithStatus({ message: 'Không tìm thấy bài viết.', status: HTTP_STATUS.NOT_FOUND })
+
+    await this.requireActiveMember(message.roomId as ObjectId, params.userId)
+
+    const isAdmin = params.role === UserRole.Admin
+    const isOwner = (message.senderId as ObjectId).equals(params.userId)
+    if (!isAdmin && !isOwner) {
+      throw new ErrorWithStatus({ message: 'Bạn không có quyền xóa bài viết này.', status: HTTP_STATUS.FORBIDDEN })
+    }
+    if (message.isThreadStarter && !isAdmin) {
+      throw new ErrorWithStatus({ message: 'Không thể tự xóa bài mở đầu thread. Vui lòng liên hệ điều phối viên.', status: HTTP_STATUS.FORBIDDEN })
+    }
+
+    const now = new Date()
+    if (!isAdmin && now.getTime() - new Date(message.createdAt).getTime() > MESSAGE_SELF_DELETE_WINDOW_MINUTES * 60 * 1000) {
+      throw new ErrorWithStatus({
+        message: `Chỉ có thể xóa bài trong ${MESSAGE_SELF_DELETE_WINDOW_MINUTES} phút sau khi đăng.`,
+        status: HTTP_STATUS.FORBIDDEN
+      })
+    }
+
+    const updated = await databaseService.communityMessages.findOneAndUpdate(
+      { _id: params.messageId },
+      {
+        $set: {
+          status: 'deleted' as MessageStatus,
+          content: '',
+          deletedAt: now,
+          deletedBy: params.userId,
+          updatedAt: now
+        },
+        $unset: { imageUrl: '', replyToMessageId: '' }
+      },
+      { returnDocument: 'after' }
+    )
+    await databaseService.communityReactions.deleteMany({ messageId: params.messageId })
+
+    if (message.threadId && !message.isThreadStarter && message.status === 'visible') {
+      const latestReply = await databaseService.communityMessages.findOne(
+        { threadId: message.threadId, isThreadStarter: { $ne: true }, status: 'visible' as MessageStatus },
+        { sort: { createdAt: -1 } }
+      )
+      await databaseService.communityThreads.updateOne(
+        { _id: message.threadId },
+        {
+          $set: { updatedAt: now, lastReplyAt: latestReply?.createdAt || now, lastReplyId: latestReply?._id || null },
+          $inc: { replyCount: -1 }
+        }
+      )
+    }
+
+    emitCommunity('community:message:deleted', message.roomId as ObjectId, updated)
+    return { message: updated }
+  }
+
   async canAccessRoom(roomId: ObjectId, userId: ObjectId, role?: UserRole) {
     if (role === UserRole.Admin) return true
     const room = await databaseService.communityRooms.findOne({ _id: roomId, status: 'active' })
@@ -865,6 +1726,10 @@ class CommunityService {
     }
 
     await this.requireActiveMember(message.roomId as ObjectId, params.reporterId)
+
+    if ((message.senderId as ObjectId).equals(params.reporterId)) {
+      throw new ErrorWithStatus({ message: 'Bạn không thể báo cáo bài viết của chính mình.', status: HTTP_STATUS.BAD_REQUEST })
+    }
 
     const now = new Date()
     try {
