@@ -13,6 +13,7 @@
     "dev:seed": "ts-node src/seed.ts",
     "seed:blog": "tsx scripts/seed-blog.ts",
     "seed:community-demo": "tsx scripts/seed-community-demo.ts",
+    "seed:community:forum": "tsx scripts/seed-community-forum-demo.ts",
     "seed:e2e": "tsx scripts/seed-e2e-users.ts",
     "seed:e2e:coupon-loyalty": "tsx scripts/seed-e2e-coupon-loyalty.ts",
     "fetch:images": "ts-node src/scripts/fetch-product-images.ts",
