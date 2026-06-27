@@ -2,7 +2,6 @@ import { ObjectId } from 'mongodb'
 import Cart, { CartItem } from '~/models/schemas/Cart.schema'
 import databaseService from './database.services'
 import productsService from './products.services'
-import campaignsService from './campaigns.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { generateSessionId } from '~/utils/crypto'
@@ -97,17 +96,11 @@ class CartService {
       return { cart: newCart, sessionId: newCart.sessionId }
     }
 
-    // Refresh campaign prices mỗi lần getCart — đảm bảo giá hiển thị luôn khớp campaign hiện tại
-    const refreshed = await this.refreshCampaignPrices(cart)
+    const refreshed = await this.refreshCartPrices(cart)
     return { cart: refreshed, sessionId: cart.sessionId }
   }
 
-  /**
-   * Refresh campaign prices cho tất cả items trong cart.
-   * Gọi mỗi khi getCart để đảm bảo giá items luôn phản ánh campaign đang active.
-   * Nếu price thay đổi thì persist lại vào DB.
-   */
-  private async refreshCampaignPrices(cart: any) {
+  private async refreshCartPrices(cart: any) {
     if (!cart.items || cart.items.length === 0) return cart
 
     let hasChanges = false
@@ -120,15 +113,7 @@ class CartService {
         const selectedVariant = product.priceVariants?.find((v: any) => v.unit === item.unit)
         const originalPrice = selectedVariant?.price || product.price || 0
 
-        const campaign = await campaignsService.getActiveCampaignForProduct(
-          product._id,
-          product.categoryId,
-          product.brandId,
-          product.requiresPrescription
-        )
-
-        const newUnitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
-        const newCampaignId = campaign?._id
+        const newUnitPrice = originalPrice
 
         const prescriptionRequired = product.requiresPrescription || false
         if (
@@ -139,7 +124,7 @@ class CartService {
           item.unitPrice = newUnitPrice
           item.originalUnitPrice = originalPrice
           item.totalPrice = newUnitPrice * item.quantity
-          item.campaignId = newCampaignId
+          delete item.campaignId
           item.prescriptionRequired = prescriptionRequired
           hasChanges = true
         }
@@ -237,17 +222,7 @@ class CartService {
     const selectedVariant = product.priceVariants?.find((v: any) => v.unit === unit)
     const originalUnitPrice = selectedVariant?.price || product.priceVariants?.[0]?.price || product.price || 0
 
-    // Fetch active campaign for the product
-    const campaign = await campaignsService.getActiveCampaignForProduct(
-      product._id,
-      product.categoryId,
-      product.brandId,
-      product.requiresPrescription
-    )
-
-    // Calculate actual sale price using shared helper
-    const unitPrice = campaignsService.applyDiscountToPrice(originalUnitPrice, campaign)
-    const campaignId = campaign?._id
+    const unitPrice = originalUnitPrice
 
     // Add item — ignoring requestedPrice from FE (price is authoritative from backend)
     cartInstance.addItem(
@@ -260,8 +235,7 @@ class CartService {
       originalUnitPrice,
       product.requiresPrescription || false,
       product.featuredImage,
-      product.priceVariants,
-      campaignId
+      product.priceVariants
     )
 
     // Update cart in database using _id
@@ -402,20 +376,11 @@ class CartService {
     // Calculate original price
     const originalUnitPrice = variant.price || product.price || 0
 
-    // Fetch campaign and apply with shared helper
-    const campaign = await campaignsService.getActiveCampaignForProduct(
-      product._id,
-      product.categoryId,
-      product.brandId,
-      product.requiresPrescription
-    )
-
-    const unitPrice = campaignsService.applyDiscountToPrice(originalUnitPrice, campaign)
-    const campaignId = campaign?._id
+    const unitPrice = originalUnitPrice
 
     // Convert to Cart instance and update
     const cartInstance = new Cart(cart)
-    cartInstance.updateItemUnit(productId, unit, unitPrice, originalUnitPrice, currentUnit, campaignId)
+    cartInstance.updateItemUnit(productId, unit, unitPrice, originalUnitPrice, currentUnit)
 
     // Update in database
     await databaseService.carts.updateOne(

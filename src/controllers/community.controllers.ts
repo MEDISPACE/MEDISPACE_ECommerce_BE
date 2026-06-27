@@ -139,6 +139,109 @@ export const markRoomReadController = async (req: Request, res: Response, next: 
   }
 }
 
+export const listThreadsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const auth = req.decoded_authorization as TokenPayload | undefined
+    const roomId = req.params.roomId as unknown as string
+    const page = Number((req.query as any).page || 1)
+    const limit = Number((req.query as any).limit || 20)
+    const q = typeof (req.query as any).q === 'string' ? String((req.query as any).q).trim() : undefined
+    const prefix = typeof (req.query as any).prefix === 'string' ? String((req.query as any).prefix).trim() : undefined
+    const sort = typeof (req.query as any).sort === 'string' ? String((req.query as any).sort).trim() : undefined
+
+    const result = await communityService.listThreads({
+      roomId: new ObjectId(roomId),
+      viewer: auth?.userId ? { userId: new ObjectId(auth.userId), role: auth.role } : undefined,
+      page,
+      limit,
+      q,
+      prefix,
+      sort
+    })
+
+    return res.status(200).json({ message: 'OK', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const createThreadController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.decoded_authorization as TokenPayload
+    const roomId = req.params.roomId as unknown as string
+    const { title, content, prefix, tags, isAnonymous, imageUrl } = req.body
+
+    const result = await communityService.createThread({
+      roomId: new ObjectId(roomId),
+      userId: new ObjectId(userId),
+      title,
+      content,
+      prefix,
+      tags,
+      isAnonymous,
+      imageUrl
+    })
+
+    return res.status(201).json({ message: 'Tạo thread thành công', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getThreadController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const auth = req.decoded_authorization as TokenPayload | undefined
+    const threadId = req.params.threadId as unknown as string
+    const thread = await communityService.getThread(new ObjectId(threadId), {
+      viewer: auth?.userId ? { userId: new ObjectId(auth.userId), role: auth.role } : undefined,
+      incrementView: true
+    })
+    return res.status(200).json({ message: 'OK', data: thread })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const listThreadRepliesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const auth = req.decoded_authorization as TokenPayload | undefined
+    const threadId = req.params.threadId as unknown as string
+    const page = Number((req.query as any).page || 1)
+    const limit = Number((req.query as any).limit || 20)
+
+    const result = await communityService.listThreadReplies({
+      threadId: new ObjectId(threadId),
+      viewer: auth?.userId ? { userId: new ObjectId(auth.userId), role: auth.role } : undefined,
+      page,
+      limit
+    })
+
+    return res.status(200).json({ message: 'OK', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const createThreadReplyController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.decoded_authorization as TokenPayload
+    const threadId = req.params.threadId as unknown as string
+    const { content, imageUrl, replyToMessageId } = req.body
+
+    const result = await communityService.createThreadReply({
+      threadId: new ObjectId(threadId),
+      userId: new ObjectId(userId),
+      content,
+      imageUrl,
+      replyToMessageId: replyToMessageId ? new ObjectId(replyToMessageId) : undefined
+    })
+
+    return res.status(201).json({ message: 'Gửi reply thành công', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
 export const listMessagesController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.decoded_authorization as TokenPayload
@@ -194,6 +297,61 @@ export const reportMessageController = async (req: Request, res: Response, next:
     })
 
     return res.status(201).json({ message: 'Đã báo cáo tin nhắn', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const reactToMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.decoded_authorization as TokenPayload
+    const messageId = req.params.messageId as unknown as string
+    const { type } = req.body
+
+    const result = await communityService.reactToMessage({
+      messageId: new ObjectId(messageId),
+      userId: new ObjectId(userId),
+      type: type || null
+    })
+
+    return res.status(200).json({ message: 'Đã cập nhật reaction', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const updateMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, role } = req.decoded_authorization as TokenPayload
+    const messageId = req.params.messageId as unknown as string
+    const { content, imageUrl } = req.body
+
+    const result = await communityService.updateMessage({
+      messageId: new ObjectId(messageId),
+      userId: new ObjectId(userId),
+      role,
+      content,
+      imageUrl
+    })
+
+    return res.status(200).json({ message: 'Đã cập nhật bài viết', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const deleteMessageController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, role } = req.decoded_authorization as TokenPayload
+    const messageId = req.params.messageId as unknown as string
+
+    const result = await communityService.deleteMessage({
+      messageId: new ObjectId(messageId),
+      userId: new ObjectId(userId),
+      role
+    })
+
+    return res.status(200).json({ message: 'Đã xóa bài viết', data: result })
   } catch (error) {
     next(error)
   }

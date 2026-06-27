@@ -13,7 +13,6 @@ import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/
 import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 import couponService from './coupons.services'
 import loyaltyService from './loyalty.services'
-import campaignsService from './campaigns.services'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import recommendationsService from './recommendations.services'
@@ -318,15 +317,7 @@ class OrderService {
           if (v) originalPrice = v.price
         }
 
-        // Fetch campaign and compute sale price using shared helper
-        const campaign = await campaignsService.getActiveCampaignForProduct(
-          product._id,
-          product.categoryId,
-          product.brandId,
-          product.requiresPrescription
-        )
-
-        const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        const unitPrice = originalPrice
 
         orderItems.push({
           productId: product._id,
@@ -338,7 +329,6 @@ class OrderService {
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * item.quantity,
-          campaignId: campaign?._id,
           prescriptionRequired: product.requiresPrescription,
           image:
             product.featuredImage ||
@@ -381,7 +371,6 @@ class OrderService {
         }
       }
 
-      // Re-verify campaign price at checkout time (campaign may have changed since added to cart)
       for (const cartItem of filteredCartItems) {
         const product = await productsService.getProductById(cartItem.productId.toString())
         if (!product) {
@@ -392,14 +381,7 @@ class OrderService {
         const selectedVariant = product.priceVariants?.find((v: any) => v.unit === cartItem.unit)
         const originalPrice = selectedVariant?.price || product.price || 0
 
-        const campaign = await campaignsService.getActiveCampaignForProduct(
-          product._id,
-          product.categoryId,
-          product.brandId,
-          product.requiresPrescription
-        )
-
-        const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        const unitPrice = originalPrice
         if (cartItem.quantity > (product.maxOrderQuantity || 10)) {
           throw new ErrorWithStatus({
             message: `Số lượng đặt mua vượt quá giới hạn cho sản phẩm "${product.name}".`,
@@ -413,7 +395,6 @@ class OrderService {
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * cartItem.quantity,
-          campaignId: campaign?._id,
           prescriptionRequired: product.requiresPrescription || false
         })
       }

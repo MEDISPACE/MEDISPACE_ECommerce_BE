@@ -117,3 +117,48 @@ export const inviteRoomMemberController = async (req: Request, res: Response, ne
     next(error)
   }
 }
+
+export const listAdminThreadsController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, role } = req.decoded_authorization as TokenPayload
+    const page = Number((req.query as any).page || 1)
+    const limit = Number((req.query as any).limit || 20)
+    const q = typeof (req.query as any).q === 'string' ? String((req.query as any).q).trim() : undefined
+    const prefix = typeof (req.query as any).prefix === 'string' ? String((req.query as any).prefix).trim() : undefined
+    const sort = typeof (req.query as any).sort === 'string' ? String((req.query as any).sort).trim() : undefined
+    const result = await communityService.listThreads({
+      roomId: new ObjectId(req.params.roomId),
+      viewer: { userId: new ObjectId(userId), role },
+      page,
+      limit,
+      q,
+      prefix,
+      sort
+    })
+    return res.status(200).json({ message: 'OK', data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const updateAdminThreadController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.decoded_authorization as TokenPayload
+    const thread = await communityService.updateThread(new ObjectId(req.params.threadId), {
+      sticky: req.body.sticky,
+      locked: req.body.locked,
+      status: req.body.status,
+      videoMeeting: req.body.videoMeeting,
+      updatedBy: new ObjectId(userId),
+      acceptedReplyId:
+        req.body.acceptedReplyId === null
+          ? null
+          : req.body.acceptedReplyId
+            ? new ObjectId(req.body.acceptedReplyId)
+            : undefined
+    })
+    return res.status(200).json({ message: 'Cập nhật thread thành công', data: thread })
+  } catch (error) {
+    next(error)
+  }
+}

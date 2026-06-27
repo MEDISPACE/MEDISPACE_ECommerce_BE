@@ -499,11 +499,10 @@ class TypesenseService {
         this.bulkIndexCategories(categories)
       ])
       if (this.retryQueue.length > 0) throw new Error(`${this.retryQueue.length} Typesense operations are still queued`)
-      const campaignFingerprint = await this.getCampaignFingerprint()
       this.retryQueue = []
       await databaseService.typesenseSyncState.updateOne(
         { key: 'global' },
-        { $set: { key: 'global', dirty: false, reconciledAt: new Date(), campaignFingerprint }, $unset: { reason: '' } },
+        { $set: { key: 'global', dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } },
         { upsert: true }
       )
       console.log('[Typesense] Full reconciliation completed.')
@@ -517,22 +516,7 @@ class TypesenseService {
 
   private async reconcileIfNeeded(force = false): Promise<void> {
     const state = await databaseService.typesenseSyncState.findOne({ key: 'global' })
-    const campaignFingerprint = await this.getCampaignFingerprint()
-    if (force || state?.dirty || state?.campaignFingerprint !== campaignFingerprint) await this.reconcileAll()
-  }
-
-  private async getCampaignFingerprint(): Promise<string> {
-    const now = new Date()
-    const campaigns = await databaseService.campaigns
-      .find(
-        { status: 'active', startDate: { $lte: now }, endDate: { $gte: now } },
-        { projection: { _id: 1, updatedAt: 1, startDate: 1, endDate: 1 } }
-      )
-      .sort({ _id: 1 })
-      .toArray()
-    return campaigns
-      .map((campaign) => `${campaign._id}:${campaign.updatedAt?.getTime?.() || ''}:${campaign.startDate}:${campaign.endDate}`)
-      .join('|')
+    if (force || state?.dirty) await this.reconcileAll()
   }
 
   private startHealthCheck(): void {
