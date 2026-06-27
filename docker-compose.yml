@@ -9,7 +9,7 @@ services:
 
   # ── Backend (Node.js / Express / TypeScript) ──────────────────────────────
   backend:
-    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-be:latest
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-be:${BACKEND_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -34,16 +34,22 @@ services:
       typesense:
         condition: service_started
       ocr-service:
-        condition: service_started
+        condition: service_healthy
       ml-service:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - medispace-net
 
   # ── Frontend (React / Vite → Nginx) ──────────────────────────────────────
   frontend:
-    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-fe:latest
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-fe:${FRONTEND_TAG:-latest}
     build:
       context: ../MEDISPACE_ECommerce_FE
       dockerfile: Dockerfile
@@ -55,14 +61,21 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - medispace-net
 
   # ── OCR Service (Python / FastAPI / PaddleOCR + VietOCR) ─────────────────
   ocr-service:
-    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-ocr:latest
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-ocr:${OCR_SERVICE_TAG:-latest}
     build:
       context: ../MEDISPACE_Python_Services/MEDISPACE_OCR_Service
       dockerfile: Dockerfile
@@ -114,7 +127,7 @@ services:
 
   # ── ML Recommendation Service (Python / FastAPI / scikit-learn) ──────────
   ml-service:
-    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-ml:latest
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-ml:${ML_SERVICE_TAG:-latest}
     build:
       context: ../MEDISPACE_Python_Services/MEDISPACE_ML_Service
       dockerfile: Dockerfile

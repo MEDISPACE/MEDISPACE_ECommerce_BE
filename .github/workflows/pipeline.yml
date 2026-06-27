@@ -36,7 +36,7 @@ jobs:
   # ── Build & Push Docker Image ─────────────────────────────────────────────
   build-push:
     needs: ci
-    if: github.event_name == 'push'    # only on merge, not PR
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
