@@ -5,6 +5,7 @@ import { adminExportService, getTimeRangeLabel } from '~/services/admin.export.s
 import chatsService from '~/services/chats.services'
 import { ADMIN_MESSAGES } from '~/constants/message'
 import { getIO } from '~/sockets/chat.socket'
+import { TokenPayload } from '~/models/requests/User.request'
 
 /**
  * Get dashboard statistics
@@ -559,6 +560,8 @@ export const adminGetConversationMessagesController = async (req: Request, res: 
   try {
     const { conversationId } = req.params
     const { page, limit } = req.query
+    const { userId } = (req.decoded_authorization || {}) as TokenPayload
+    if (userId) await chatsService.logAdminConversationView(conversationId as string, userId)
     const result = await chatsService.getMessages(
       conversationId as string,
       page ? parseInt(page as string) : 1,
@@ -574,7 +577,10 @@ export const adminGetConversationMessagesController = async (req: Request, res: 
 export const adminCloseConversationController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { conversationId } = req.params
-    const result = await chatsService.adminCloseConversation(conversationId as string)
+    const { userId } = (req.decoded_authorization || {}) as TokenPayload
+    const result = userId
+      ? await chatsService.adminCloseConversation(conversationId as string, userId)
+      : await chatsService.adminCloseConversation(conversationId as string)
 
     // Emit realtime: notify customer & pharmacist that conversation was closed by admin
     try {
@@ -589,6 +595,9 @@ export const adminCloseConversationController = async (req: Request, res: Respon
       // Also notify customer via personal room (nếu không join room hội thoại)
       if (result.customerId) {
         io.to(`user:${result.customerId.toString()}`).emit('conversation:closed', payload)
+      }
+      if (result.pharmacistId) {
+        io.to(`user:${result.pharmacistId.toString()}`).emit('conversation:closed', payload)
       }
       // Notify pharmacists room to update inbox
       io.to('pharmacists').emit('conversation:closed', payload)
@@ -607,6 +616,7 @@ export const adminTransferConversationController = async (req: Request, res: Res
   try {
     const { conversationId } = req.params
     const { pharmacistId } = req.body
+    const { userId } = (req.decoded_authorization || {}) as TokenPayload
     if (!pharmacistId) {
       return res.status(400).json({ message: 'pharmacistId là bắt buộc' })
     }
@@ -615,7 +625,9 @@ export const adminTransferConversationController = async (req: Request, res: Res
     const before = await chatsService.getConversationById(conversationId as string)
     const oldPharmacistId = before?.pharmacistId?.toString()
 
-    const result = await chatsService.adminTransferConversation(conversationId as string, pharmacistId as string)
+    const result = userId
+      ? await chatsService.adminTransferConversation(conversationId as string, pharmacistId as string, userId)
+      : await chatsService.adminTransferConversation(conversationId as string, pharmacistId as string)
 
     // Emit realtime: notify old pharmacist, new pharmacist, and pharmacists room
     try {

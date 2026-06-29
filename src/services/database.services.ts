@@ -79,7 +79,7 @@ class DatabaseService {
       try {
         await collection.createIndex(indexSpec, { background: true, ...options })
       } catch (error: any) {
-        if (error.code === 11000 || error.code === 85) {
+        if (error.code === 11000 || error.code === 85 || error.code === 86) {
           console.warn('⚠️ Non-critical MongoDB index was not created:', {
             collection: collection.collectionName,
             indexSpec,
@@ -90,6 +90,33 @@ class DatabaseService {
           throw error
         }
       }
+    }
+
+    const ensureActiveConversationUniqueIndex = async () => {
+      const legacyIndexName = 'customerId_1_type_1_status_1'
+      const activeUniqueIndexName = 'customer_active_conversation_unique'
+
+      try {
+        const indexes = await this.conversations.indexes()
+        const legacyIndex = indexes.find((index: any) => index.name === legacyIndexName)
+        const activeUniqueIndex = indexes.find((index: any) => index.name === activeUniqueIndexName)
+
+        if (legacyIndex && !legacyIndex.unique && !legacyIndex.partialFilterExpression && !activeUniqueIndex) {
+          await this.conversations.dropIndex(legacyIndexName)
+        }
+      } catch (error: any) {
+        console.warn('⚠️ Could not inspect/drop legacy conversation index:', error?.message || error)
+      }
+
+      await safeCreateIndex(
+        this.conversations,
+        { customerId: 1, type: 1, status: 1 },
+        {
+          name: activeUniqueIndexName,
+          unique: true,
+          partialFilterExpression: { status: 'active' }
+        }
+      )
     }
 
     try {
@@ -186,6 +213,15 @@ class DatabaseService {
         { userId: 1, eventKey: 1 },
         { unique: true, partialFilterExpression: { eventKey: { $exists: true, $type: 'string' } } }
       )
+
+      // Pharmacist chat indexes
+      await safeCreateIndex(this.conversations, { type: 1, status: 1, pharmacistId: 1, lastMessageAt: 1 })
+      await safeCreateIndex(this.conversations, { pharmacistId: 1, status: 1, lastMessageAt: -1 })
+      await ensureActiveConversationUniqueIndex()
+      await safeCreateIndex(this.messages, { conversationId: 1, createdAt: -1 })
+      await safeCreateIndex(this.messages, { conversationId: 1, isRead: 1, senderId: 1 })
+      await safeCreateIndex(this.db.collection('chatAuditLogs'), { conversationId: 1, createdAt: -1 })
+      await safeCreateIndex(this.db.collection('chatAuditLogs'), { actorId: 1, action: 1, createdAt: -1 })
 
       // Community & Moderation indexes (MVP)
       await safeCreateIndex(this.communityRooms, { slug: 1 }, { unique: true })

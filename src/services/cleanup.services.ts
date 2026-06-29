@@ -1,6 +1,7 @@
 import * as cron from 'node-cron'
 import databaseService from './database.services'
 import orderService from './orders.services'
+import { getIO } from '~/sockets/chat.socket'
 
 // Time in hours after which unpaid online payment orders will be cancelled
 const ABANDONED_ORDER_TIMEOUT_HOURS = 24
@@ -228,7 +229,7 @@ class CleanupService {
    * - lastMessageAt > STALE_TIMEOUT_MINUTES phút trước mà chưa có reply từ dược sĩ
    */
   startStaleConversationReassign() {
-    const STALE_TIMEOUT_MINUTES = 5
+    const STALE_TIMEOUT_MINUTES = Math.max(1, Number(process.env.CHAT_STALE_REQUEUE_MINUTES || 5))
 
     console.log(`[CleanupService] Stale conversation reassign scheduled every ${STALE_TIMEOUT_MINUTES} minutes.`)
 
@@ -253,7 +254,8 @@ class CleanupService {
       .find({
         pharmacistId: { $exists: true },
         status: 'active',
-        lastMessageAt: { $lt: cutoffTime }
+        lastMessageAt: { $lt: cutoffTime },
+        'unreadCount.pharmacist': { $gt: 0 }
       })
       .toArray()
 
@@ -268,14 +270,36 @@ class CleanupService {
 
       // Chỉ re-queue nếu dược sĩ đang offline
       if (pharmacist && !pharmacist.isOnline) {
-        await databaseService.conversations.updateOne(
-          { _id: conv._id },
+        const result = await databaseService.conversations.updateOne(
+          {
+            _id: conv._id,
+            pharmacistId: conv.pharmacistId,
+            status: 'active',
+            'unreadCount.pharmacist': { $gt: 0 }
+          },
           {
             $unset: { pharmacistId: '' },
             $set: { updatedAt: new Date() }
           }
         )
-        reassignedCount++
+        if (result.modifiedCount > 0) {
+          reassignedCount++
+          try {
+            const io = getIO()
+            const payload = {
+              conversationId: conv._id?.toString(),
+              oldPharmacistId: conv.pharmacistId?.toString(),
+              requeuedAt: new Date().toISOString(),
+              reason: 'pharmacist_offline_timeout'
+            }
+            io.to(`conversation:${payload.conversationId}`).emit('conversation:requeued', payload)
+            io.to(`user:${conv.customerId.toString()}`).emit('conversation:requeued', payload)
+            io.to(`user:${conv.pharmacistId.toString()}`).emit('conversation:requeued', payload)
+            io.to('pharmacists').emit('conversation:requeued', payload)
+          } catch {
+            /* socket not critical */
+          }
+        }
       }
     }
 

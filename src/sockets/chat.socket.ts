@@ -1,11 +1,12 @@
 import { Server as SocketIOServer, Socket } from 'socket.io'
 import { Server as HTTPServer } from 'http'
+import { createAdapter } from '@socket.io/redis-adapter'
 import { verifyToken } from '~/utils/jwt'
 import { TokenPayload } from '~/models/requests/User.request'
 import chatsService from '~/services/chats.services'
 import databaseService from '~/services/database.services'
 import typesenseService from '~/services/typesense.services'
-import { checkAIRateLimit } from '~/services/ai-chat.services'
+import { redis } from '~/services/cache.services'
 import { ObjectId } from 'mongodb'
 import { config } from 'dotenv'
 import { USERS_MESSAGES, CHATS_MESSAGES } from '~/constants/message'
@@ -166,11 +167,10 @@ async function fetchUserContextData(
 }
 
 // ── Socket Rate Limiting ─────────────────────────────────────────────────────
-// Đã chuyển sang Redis-backed rate limit (checkAIRateLimit từ ai-chat.services)
-// In-memory fallback vẫn giữ cho non-AI messages (pharmacist)
 const SOCKET_RATE_LIMIT_MAX = 15
 const SOCKET_RATE_LIMIT_WINDOW_MS = 60_000
 const socketMessageCounts = new Map<string, { count: number; resetAt: number }>()
+const SOCKET_MESSAGE_TYPES = new Set(['text', 'image', 'product'])
 
 function checkSocketRateLimit(userId: string): boolean {
   const now = Date.now()
@@ -187,6 +187,26 @@ function checkSocketRateLimit(userId: string): boolean {
 
   record.count++
   return true
+}
+
+function validateSocketMessagePayload(
+  data: any,
+  role: 'customer' | 'pharmacist' | 'admin'
+): { ok: true } | { ok: false; message: string } {
+  if (!data || typeof data !== 'object') return { ok: false, message: 'Dữ liệu tin nhắn không hợp lệ' }
+  if (data.conversationId && !ObjectId.isValid(data.conversationId)) return { ok: false, message: 'Cuộc trò chuyện không hợp lệ' }
+  const type = data.type || 'text'
+  if (!SOCKET_MESSAGE_TYPES.has(type)) return { ok: false, message: 'Loại tin nhắn không hợp lệ' }
+  if (typeof data.content === 'string' && data.content.length > 2000) {
+    return { ok: false, message: 'Nội dung tin nhắn không được vượt quá 2000 ký tự' }
+  }
+  if (type === 'product' && role !== 'pharmacist') {
+    return { ok: false, message: 'Chỉ dược sĩ mới có thể gửi thẻ sản phẩm' }
+  }
+  if (type !== 'product' && !data.content && !data.imageUrl) {
+    return { ok: false, message: 'Nội dung tin nhắn không được để trống' }
+  }
+  return { ok: true }
 }
 
 interface AuthenticatedSocket extends Socket {
@@ -224,6 +244,19 @@ export const initChatSocket = (httpServer: HTTPServer) => {
     }
   })
   const io = _io
+
+  if (process.env.SOCKET_IO_REDIS_ADAPTER !== 'false') {
+    const pubClient = redis.duplicate()
+    const subClient = redis.duplicate()
+    Promise.all([pubClient.connect(), subClient.connect()])
+      .then(() => {
+        io.adapter(createAdapter(pubClient, subClient))
+        console.log('[Socket.IO] Redis adapter enabled')
+      })
+      .catch((error) => {
+        console.warn('[Socket.IO] Redis adapter unavailable; using local adapter:', error?.message || error)
+      })
+  }
 
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
@@ -395,22 +428,16 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           // Admin không gửi tin nhắn qua socket này
           if (socket.userRole === 'admin') return
 
+          const validation = validateSocketMessagePayload(data, socket.userRole)
+          if (!validation.ok) {
+            socket.emit('error', { message: validation.message })
+            return
+          }
+
           // ── Rate Limit Check (Redis-backed cho AI, in-memory cho non-AI) ────────
-          if (socket.userRole === 'customer') {
-            // Dùng Redis rate limit cho AI messages (persist qua restart)
-            const rateCheck = await checkAIRateLimit(socket.userId)
-            if (!rateCheck.allowed) {
-              socket.emit('error', {
-                message: `Bạn đã vượt giới hạn tin nhắn AI (30/giờ). Thử lại sau ${Math.ceil(rateCheck.resetIn / 60)} phút.`
-              })
-              return
-            }
-          } else {
-            // Pharmacist dùng in-memory rate limit (ít quan trọng hơn)
-            if (!checkSocketRateLimit(socket.userId)) {
-              socket.emit('error', { message: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng chờ một chút trước khi gửi tiếp.' })
-              return
-            }
+          if (!checkSocketRateLimit(socket.userId)) {
+            socket.emit('error', { message: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng chờ một chút trước khi gửi tiếp.' })
+            return
           }
 
           const message = await chatsService.sendMessage(socket.userId, socket.userRole, data as any)
@@ -421,12 +448,16 @@ export const initChatSocket = (httpServer: HTTPServer) => {
           io.to(`conversation:${convIdStr}`).emit('message:new', message)
 
           if (socket.userRole === 'customer') {
-            // Customer gửi → broadcast cho pharmacists để cập nhật list
-            io.to('pharmacists').emit('message:new', message)
-
             const conversation = await databaseService.conversations.findOne({
               _id: new ObjectId(convIdStr)
             })
+
+            if (conversation?.pharmacistId) {
+              io.to(`user:${conversation.pharmacistId.toString()}`).emit('message:new', message)
+            } else {
+              // Chỉ phát lên hàng chờ chung khi conversation chưa có dược sĩ phụ trách.
+              io.to('pharmacists').emit('message:new', message)
+            }
 
             // Detect tin nhắn đầu tiên → notify admin realtime
             const msgCount = await databaseService.messages.countDocuments({
@@ -698,8 +729,8 @@ export const initChatSocket = (httpServer: HTTPServer) => {
               io.to(`user:${customerIdStr}`).emit('message:new', message)
             }
           }
-        } catch (error) {
-          socket.emit('error', { message: CHATS_MESSAGES.SEND_MESSAGE_FAILED })
+        } catch (error: any) {
+          socket.emit('error', { message: error?.message || CHATS_MESSAGES.SEND_MESSAGE_FAILED })
         }
       }
     )
@@ -833,7 +864,4 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
   return io
 }
-
-
-
 
