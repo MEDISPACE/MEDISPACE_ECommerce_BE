@@ -25,6 +25,7 @@ import { TokenPayload } from '~/models/requests/User.request'
 import { CHATS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { UserRole } from '~/constants/enum'
+import { getIO } from '~/sockets/chat.socket'
 
 const chatRoleFromToken = (role?: number) =>
   role === UserRole.Pharmacist ? 'pharmacist' : role === UserRole.Admin ? 'admin' : 'customer'
@@ -202,6 +203,26 @@ export const sendMessageController = async (
 
   const message = await chatsService.sendMessage(userId, senderRole, req.body)
 
+  try {
+    const io = getIO()
+    const conversationId = message.conversationId.toString()
+    const conversation = await chatsService.getConversationById(conversationId)
+
+    io.to(`conversation:${conversationId}`).emit('message:new', message)
+
+    if (senderRole === 'customer') {
+      if (conversation?.pharmacistId) {
+        io.to(`user:${conversation.pharmacistId.toString()}`).emit('message:new', message)
+      } else {
+        io.to('pharmacists').emit('message:new', message)
+      }
+    } else if (conversation?.customerId) {
+      io.to(`user:${conversation.customerId.toString()}`).emit('message:new', message)
+    }
+  } catch {
+    // REST response must not fail if realtime delivery is unavailable.
+  }
+
   return res.json({
     message: CHATS_MESSAGES.SEND_MESSAGE_SUCCESS,
     result: message
@@ -312,6 +333,15 @@ export const assignConversationController = async (req: Request, res: Response) 
   // Manually assign this pharmacist to the conversation
   await chatsService.assignConversationToPharmacist(conversationId as string, userId as string)
 
+  try {
+    const io = getIO()
+    const payload = { conversationId, pharmacistId: userId }
+    io.to(`conversation:${conversationId}`).emit('conversation:assigned', payload)
+    io.to('pharmacists').emit('conversation:assigned', payload)
+  } catch {
+    /* socket not critical */
+  }
+
   return res.json({
     message: 'Đã nhận cuộc trò chuyện thành công',
     result: { conversationId, pharmacistId: userId }
@@ -322,8 +352,24 @@ export const assignConversationController = async (req: Request, res: Response) 
 export const deleteConversationController = async (req: Request, res: Response) => {
   const { conversationId } = req.params
   const { userId } = req.decoded_authorization as TokenPayload
+  const conversation = await chatsService.getConversationById(conversationId as string)
 
   await chatsService.deleteConversation(conversationId as string, userId)
+
+  try {
+    const io = getIO()
+    const payload = {
+      conversationId,
+      closedBy: userId,
+      closedAt: new Date().toISOString()
+    }
+    io.to(`conversation:${conversationId}`).emit('conversation:closed', payload)
+    if (conversation?.customerId) io.to(`user:${conversation.customerId.toString()}`).emit('conversation:closed', payload)
+    if (conversation?.pharmacistId) io.to(`user:${conversation.pharmacistId.toString()}`).emit('conversation:closed', payload)
+    io.to('pharmacists').emit('conversation:closed', payload)
+  } catch {
+    /* socket not critical */
+  }
 
   return res.json({
     message: CHATS_MESSAGES.DELETE_CONVERSATION_SUCCESS
@@ -541,4 +587,3 @@ export const aiStreamController = async (
   res.write('data: [DONE]\n\n')
   res.end()
 }
-
