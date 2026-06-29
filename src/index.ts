@@ -75,9 +75,6 @@ app.use(
 )
 
 app.use(express.json())
-app.get('/health', (_req, res) => {
-  res.json({ status: 'healthy', service: 'backend' })
-})
 app.use('/users', usersRouter)
 app.use('/categories', categoriesRouter)
 app.use('/brands', brandsRouter)

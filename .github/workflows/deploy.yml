@@ -97,18 +97,6 @@ jobs:
               esac
             }
 
-            container_for() {
-              case "$1" in
-                backend) echo "medispace-backend" ;;
-                frontend) echo "medispace-frontend" ;;
-                ocr-service) echo "medispace-ocr" ;;
-                ml-service) echo "medispace-ml" ;;
-                redis) echo "medispace-redis" ;;
-                typesense) echo "medispace-typesense" ;;
-                *) echo "$1" ;;
-              esac
-            }
-
             get_tag() {
               grep -E "^$1=" "$TAG_FILE" | tail -n 1 | cut -d= -f2- || true
             }
@@ -148,25 +136,6 @@ jobs:
               set +a
             }
 
-            wait_for_service() {
-              service="$1"
-              container="$(container_for "$service")"
-
-              for attempt in $(seq 1 30); do
-                status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
-                if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
-                  echo "$service is $status"
-                  return 0
-                fi
-                echo "Waiting for $service health... ($attempt/30, status=${status:-unknown})"
-                sleep 5
-              done
-
-              echo "$service did not become healthy/running in time."
-              docker logs --tail 80 "$container" || true
-              return 1
-            }
-
             echo "📥 Pulling latest code..."
             git pull origin main
 
@@ -181,16 +150,11 @@ jobs:
               compose pull ${SERVICE}
               echo "🚀 Restarting ${SERVICE}..."
               compose up -d ${SERVICE}
-              wait_for_service "${SERVICE}"
             else
               echo "🔄 Pulling all..."
               compose pull
               echo "🚀 Starting all..."
               compose up -d
-              wait_for_service backend
-              wait_for_service frontend
-              wait_for_service ocr-service
-              wait_for_service ml-service
             fi
 
             echo "🏥 Status:"
@@ -258,16 +222,6 @@ jobs:
               esac
             }
 
-            container_for() {
-              case "$1" in
-                backend) echo "medispace-backend" ;;
-                frontend) echo "medispace-frontend" ;;
-                ocr-service) echo "medispace-ocr" ;;
-                ml-service) echo "medispace-ml" ;;
-                *) echo "$1" ;;
-              esac
-            }
-
             get_tag() {
               grep -E "^$1=" "$TAG_FILE" | tail -n 1 | cut -d= -f2- || true
             }
@@ -311,32 +265,12 @@ jobs:
               set +a
             }
 
-            wait_for_service() {
-              service="$1"
-              container="$(container_for "$service")"
-
-              for attempt in $(seq 1 30); do
-                status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
-                if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
-                  echo "$service is $status"
-                  return 0
-                fi
-                echo "Waiting for $service health... ($attempt/30, status=${status:-unknown})"
-                sleep 5
-              done
-
-              echo "$service did not become healthy/running in time."
-              docker logs --tail 80 "$container" || true
-              return 1
-            }
-
             if [ -n "${SERVICE}" ]; then
               echo "⏪ Rollback ${SERVICE}..."
               rollback_service "$SERVICE" "${IMAGE_TAG:-}"
               export_tags
               compose pull ${SERVICE} || true
               compose up -d ${SERVICE}
-              wait_for_service "$SERVICE"
             else
               echo "⏪ Full rollback..."
               rollback_service backend ""
@@ -346,10 +280,6 @@ jobs:
               export_tags
               compose pull || true
               compose up -d
-              wait_for_service backend
-              wait_for_service frontend
-              wait_for_service ocr-service
-              wait_for_service ml-service
             fi
           REMOTE
 

@@ -29,21 +29,11 @@ services:
     volumes:
       - ./uploads:/app/uploads
     depends_on:
-      redis:
-        condition: service_healthy
-      typesense:
-        condition: service_started
-      ocr-service:
-        condition: service_healthy
-      ml-service:
-        condition: service_healthy
+      - redis
+      - typesense
+      - ocr-service
+      - ml-service
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:8000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     networks:
       - medispace-net
 
@@ -61,15 +51,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     networks:
       - medispace-net
 
@@ -91,12 +74,6 @@ services:
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
 
   # ── Chat AI Service (Python / FastAPI / Gemma) ──────────────────────────
   chat-ai-service:
@@ -118,12 +95,6 @@ services:
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   # ── ML Recommendation Service (Python / FastAPI / scikit-learn) ──────────
   ml-service:
@@ -140,12 +111,6 @@ services:
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   # ── Redis (Cache Layer) ──────────────────────────────────────────────────
   redis:
@@ -159,11 +124,6 @@ services:
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
 
   # ── Typesense (Search Engine) ─────────────────────────────────────────────
   typesense:
