@@ -14,7 +14,11 @@ import {
   aiStreamController
 } from '~/controllers/chats.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
-import { sendMessageValidator, rateLimitMessageValidator } from '~/middlewares/chats.middlewares'
+import {
+  sendMessageValidator,
+  rateLimitMessageValidator,
+  rateLimitConversationCreateValidator
+} from '~/middlewares/chats.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const chatsRouter = Router()
@@ -53,6 +57,7 @@ chatsRouter.post(
   '/conversations',
   accessTokenValidator,
   verifiedUserValidator,
+  rateLimitConversationCreateValidator,
   wrapRequestHandler(getOrCreateConversationController)
 )
 
