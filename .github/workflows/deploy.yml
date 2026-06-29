@@ -20,6 +20,14 @@ on:
         default: ''
         type: choice
         options: ['', backend, frontend, ocr-service, ml-service]
+      image_tag:
+        description: 'Image tag for manual deploy/rollback (empty = keep current tag, rollback uses previous tag)'
+        required: false
+        default: ''
+
+concurrency:
+  group: medispace-production-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -43,16 +51,90 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             echo "service=${{ github.event.client_payload.service }}" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
           else
             echo "service=${{ github.event.inputs.service }}" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy
         run: |
           SERVICE="${{ steps.svc.outputs.service }}"
-          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+          IMAGE_TAG="${{ steps.svc.outputs.image_tag }}"
+          COMPOSE_FILE_OVERRIDE="${{ secrets.DEPLOY_COMPOSE_FILE }}"
+
+          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "SERVICE=\"$SERVICE\" IMAGE_TAG=\"$IMAGE_TAG\" COMPOSE_FILE_OVERRIDE=\"$COMPOSE_FILE_OVERRIDE\" bash -s" << 'REMOTE'
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
+
+            TAG_FILE=.deploy-tags.env
+            touch "$TAG_FILE"
+            chmod 600 "$TAG_FILE"
+
+            if [ -n "${COMPOSE_FILE_OVERRIDE:-}" ]; then
+              COMPOSE_ARGS=(-f "$COMPOSE_FILE_OVERRIDE")
+            elif [ -f docker-compose.yml ]; then
+              COMPOSE_ARGS=()
+            elif [ -f infra/docker-compose.prod.yml ]; then
+              COMPOSE_ARGS=(-f infra/docker-compose.prod.yml)
+            else
+              echo "No Docker Compose file found in deploy path."
+              exit 1
+            fi
+
+            compose() {
+              docker compose "${COMPOSE_ARGS[@]}" "$@"
+            }
+
+            tag_var_for() {
+              case "$1" in
+                backend) echo "BACKEND_TAG" ;;
+                frontend) echo "FRONTEND_TAG" ;;
+                ocr-service) echo "OCR_SERVICE_TAG" ;;
+                ml-service) echo "ML_SERVICE_TAG" ;;
+                *) echo "Unknown service: $1" >&2; exit 1 ;;
+              esac
+            }
+
+            get_tag() {
+              grep -E "^$1=" "$TAG_FILE" | tail -n 1 | cut -d= -f2- || true
+            }
+
+            set_tag() {
+              key="$1"
+              value="$2"
+              tmp="$(mktemp)"
+              grep -v -E "^${key}=" "$TAG_FILE" > "$tmp" || true
+              printf '%s=%s\n' "$key" "$value" >> "$tmp"
+              mv "$tmp" "$TAG_FILE"
+              chmod 600 "$TAG_FILE"
+            }
+
+            pin_tag_if_requested() {
+              service="$1"
+              requested_tag="$2"
+
+              if [ -z "$service" ] || [ -z "$requested_tag" ]; then
+                return 0
+              fi
+
+              tag_var="$(tag_var_for "$service")"
+              current_tag="$(get_tag "$tag_var")"
+
+              if [ -n "$current_tag" ] && [ "$current_tag" != "$requested_tag" ]; then
+                set_tag "${tag_var}_PREVIOUS" "$current_tag"
+              fi
+
+              set_tag "$tag_var" "$requested_tag"
+              echo "Pinned $service to image tag $requested_tag"
+            }
+
+            export_tags() {
+              set -a
+              . "./$TAG_FILE"
+              set +a
+            }
 
             echo "📥 Pulling latest code..."
             git pull origin main
@@ -60,27 +142,27 @@ jobs:
             echo "🔑 Login Docker Hub..."
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
+            pin_tag_if_requested "${SERVICE:-}" "${IMAGE_TAG:-}"
+            export_tags
+
             if [ -n "${SERVICE}" ]; then
               echo "🔄 Pulling ${SERVICE}..."
-              docker compose pull ${SERVICE}
+              compose pull ${SERVICE}
               echo "🚀 Restarting ${SERVICE}..."
-              docker compose up -d ${SERVICE}
+              compose up -d ${SERVICE}
             else
               echo "🔄 Pulling all..."
-              docker compose pull
+              compose pull
               echo "🚀 Starting all..."
-              docker compose up -d
+              compose up -d
             fi
 
-            echo "⏳ Waiting 10s..."
-            sleep 10
-
             echo "🏥 Status:"
-            docker compose ps
+            compose ps
 
             echo "🧹 Cleaning up dangling images..."
             docker image prune -f || true
-          EOF
+          REMOTE
 
       - name: Cleanup SSH
         if: always()
@@ -103,19 +185,103 @@ jobs:
       - name: Rollback
         run: |
           SERVICE="${{ github.event.inputs.service }}"
-          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << EOF
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          COMPOSE_FILE_OVERRIDE="${{ secrets.DEPLOY_COMPOSE_FILE }}"
+
+          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "SERVICE=\"$SERVICE\" IMAGE_TAG=\"$IMAGE_TAG\" COMPOSE_FILE_OVERRIDE=\"$COMPOSE_FILE_OVERRIDE\" bash -s" << 'REMOTE'
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
 
+            TAG_FILE=.deploy-tags.env
+            touch "$TAG_FILE"
+            chmod 600 "$TAG_FILE"
+
+            if [ -n "${COMPOSE_FILE_OVERRIDE:-}" ]; then
+              COMPOSE_ARGS=(-f "$COMPOSE_FILE_OVERRIDE")
+            elif [ -f docker-compose.yml ]; then
+              COMPOSE_ARGS=()
+            elif [ -f infra/docker-compose.prod.yml ]; then
+              COMPOSE_ARGS=(-f infra/docker-compose.prod.yml)
+            else
+              echo "No Docker Compose file found in deploy path."
+              exit 1
+            fi
+
+            compose() {
+              docker compose "${COMPOSE_ARGS[@]}" "$@"
+            }
+
+            tag_var_for() {
+              case "$1" in
+                backend) echo "BACKEND_TAG" ;;
+                frontend) echo "FRONTEND_TAG" ;;
+                ocr-service) echo "OCR_SERVICE_TAG" ;;
+                ml-service) echo "ML_SERVICE_TAG" ;;
+                *) echo "Unknown service: $1" >&2; exit 1 ;;
+              esac
+            }
+
+            get_tag() {
+              grep -E "^$1=" "$TAG_FILE" | tail -n 1 | cut -d= -f2- || true
+            }
+
+            set_tag() {
+              key="$1"
+              value="$2"
+              tmp="$(mktemp)"
+              grep -v -E "^${key}=" "$TAG_FILE" > "$tmp" || true
+              printf '%s=%s\n' "$key" "$value" >> "$tmp"
+              mv "$tmp" "$TAG_FILE"
+              chmod 600 "$TAG_FILE"
+            }
+
+            rollback_service() {
+              service="$1"
+              requested_tag="$2"
+              tag_var="$(tag_var_for "$service")"
+              current_tag="$(get_tag "$tag_var")"
+              target_tag="$requested_tag"
+
+              if [ -z "$target_tag" ]; then
+                target_tag="$(get_tag "${tag_var}_PREVIOUS")"
+              fi
+
+              if [ -z "$target_tag" ]; then
+                echo "No rollback tag found for $service. Pass image_tag or deploy at least twice first."
+                exit 1
+              fi
+
+              if [ -n "$current_tag" ] && [ "$current_tag" != "$target_tag" ]; then
+                set_tag "${tag_var}_PREVIOUS" "$current_tag"
+              fi
+              set_tag "$tag_var" "$target_tag"
+              echo "Pinned $service rollback to image tag $target_tag"
+            }
+
+            export_tags() {
+              set -a
+              . "./$TAG_FILE"
+              set +a
+            }
+
             if [ -n "${SERVICE}" ]; then
               echo "⏪ Rollback ${SERVICE}..."
-              docker compose stop ${SERVICE}
-              docker compose up -d ${SERVICE}
+              rollback_service "$SERVICE" "${IMAGE_TAG:-}"
+              export_tags
+              compose pull ${SERVICE} || true
+              compose up -d ${SERVICE}
             else
               echo "⏪ Full rollback..."
-              docker compose down && docker compose up -d
+              rollback_service backend ""
+              rollback_service frontend ""
+              rollback_service ocr-service ""
+              rollback_service ml-service ""
+              export_tags
+              compose pull || true
+              compose up -d
             fi
-          EOF
+          REMOTE
 
       - name: Cleanup SSH
         if: always()
