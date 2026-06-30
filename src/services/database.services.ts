@@ -25,10 +25,7 @@ import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
 import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
 import LoyaltyProgramConfig from '~/models/schemas/LoyaltyProgramConfig.schema'
 import Notification from '~/models/schemas/Notification.schema'
-import {
-  ensureCriticalLoyaltyCouponIndexes,
-  verifyCriticalLoyaltyCouponIndexes
-} from './loyaltyCouponIndexes.services'
+import { ensureCriticalLoyaltyCouponIndexes, verifyCriticalLoyaltyCouponIndexes } from './loyaltyCouponIndexes.services'
 
 config()
 
@@ -57,13 +54,19 @@ class DatabaseService {
     }
   }
 
-  async withTransaction<T>(callback: (session?: ClientSession) => Promise<T>, options?: TransactionOptions): Promise<T> {
+  async withTransaction<T>(
+    callback: (session?: ClientSession) => Promise<T>,
+    options?: TransactionOptions
+  ): Promise<T> {
     const session = this.client.startSession()
     try {
       return await session.withTransaction(() => callback(session), options)
     } catch (error: any) {
       const message = String(error?.message || '')
-      if (message.includes('Transaction numbers are only allowed') || message.includes('replica set member or mongos')) {
+      if (
+        message.includes('Transaction numbers are only allowed') ||
+        message.includes('replica set member or mongos')
+      ) {
         console.warn('[Database] MongoDB transactions unavailable; running operation without transaction')
         return callback(undefined)
       }
@@ -119,6 +122,35 @@ class DatabaseService {
       )
     }
 
+    const ensurePrescriptionOrderUniqueIndex = async () => {
+      const legacyIndexName = 'prescriptionId_1'
+      const activeUniqueIndexName = 'order_prescription_unique_when_objectid'
+
+      try {
+        const indexes = await this.orders.indexes()
+        const legacyIndex = indexes.find((index: any) => index.name === legacyIndexName)
+        const activeUniqueIndex = indexes.find((index: any) => index.name === activeUniqueIndexName)
+        const legacyUsesObjectIdPartial =
+          legacyIndex?.unique === true && legacyIndex?.partialFilterExpression?.prescriptionId?.$type === 'objectId'
+
+        if (legacyIndex && !legacyUsesObjectIdPartial && !activeUniqueIndex) {
+          await this.orders.dropIndex(legacyIndexName)
+        }
+      } catch (error: any) {
+        console.warn('⚠️ Could not inspect/drop legacy prescription order index:', error?.message || error)
+      }
+
+      await safeCreateIndex(
+        this.orders,
+        { prescriptionId: 1 },
+        {
+          name: activeUniqueIndexName,
+          unique: true,
+          partialFilterExpression: { prescriptionId: { $type: 'objectId' } }
+        }
+      )
+    }
+
     try {
       // Auth collection indexes
       await safeCreateIndex(this.users, { email: 1 }, { unique: true })
@@ -131,19 +163,32 @@ class DatabaseService {
       await safeCreateIndex(this.products, { categoryId: 1 })
       await safeCreateIndex(this.products, { slug: 1 }, { unique: true })
       await safeCreateIndex(this.products, { sku: 1 }, { unique: true })
-      await safeCreateIndex(this.products, { name: 'text', shortDescription: 'text', sku: 'text' }, {
-        weights: { name: 3, shortDescription: 1, sku: 2 }
-      })
+      await safeCreateIndex(
+        this.products,
+        { name: 'text', shortDescription: 'text', sku: 'text' },
+        {
+          weights: { name: 3, shortDescription: 1, sku: 2 }
+        }
+      )
       await safeCreateIndex(this.articleJourneyEvents, { articleId: 1, eventType: 1, createdAt: -1 })
       await safeCreateIndex(this.articleJourneyEvents, { sessionId: 1, createdAt: -1 })
       const recommendationEvents = this.db.collection('recommendationEvents')
       await safeCreateIndex(recommendationEvents, { userId: 1, timestamp: -1 })
       await safeCreateIndex(recommendationEvents, { productId: 1, timestamp: -1 })
       await safeCreateIndex(recommendationEvents, { attributionToken: 1, eventType: 1 })
-      await safeCreateIndex(recommendationEvents, { experimentId: 1, experimentVariant: 1, eventType: 1, timestamp: -1 })
+      await safeCreateIndex(recommendationEvents, {
+        experimentId: 1,
+        experimentVariant: 1,
+        eventType: 1,
+        timestamp: -1
+      })
       await safeCreateIndex(this.db.collection('drugSafetyRules'), { productId: 1, status: 1 })
       await safeCreateIndex(this.db.collection('recommendationSafetyEvents'), { timestamp: -1, reason: 1 })
-      await safeCreateIndex(this.db.collection('recommendationQualityEvents'), { timestamp: -1, algorithm: 1, variant: 1 })
+      await safeCreateIndex(this.db.collection('recommendationQualityEvents'), {
+        timestamp: -1,
+        algorithm: 1,
+        variant: 1
+      })
       await safeCreateIndex(recommendationEvents, { timestamp: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 })
 
       // Categories collection indexes
@@ -159,13 +204,22 @@ class DatabaseService {
 
       // Orders collection indexes used by recommendation training and replenishment.
       await safeCreateIndex(this.orders, { orderStatus: 1, createdAt: -1 })
+      await safeCreateIndex(this.orders, { paymentStatus: 1, orderStatus: 1, createdAt: -1 })
+      await safeCreateIndex(this.orders, { 'shippingAddress.phone': 1 })
+      await safeCreateIndex(this.orders, { 'shippingAddress.firstName': 1, 'shippingAddress.lastName': 1 })
       await safeCreateIndex(this.orders, { userId: 1, orderStatus: 1, deliveredAt: -1 })
       await safeCreateIndex(this.orders, { orderNumber: 1 }, { unique: true })
+      await ensurePrescriptionOrderUniqueIndex()
       await safeCreateIndex(
         this.orders,
         { userId: 1, idempotencyKey: 1 },
         { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
       )
+
+      // Prescriptions collection indexes for pharmacist dashboard and verification queues.
+      await safeCreateIndex(this.prescriptions, { status: 1, createdAt: -1 })
+      await safeCreateIndex(this.prescriptions, { status: 1, verifiedAt: -1 })
+      await safeCreateIndex(this.prescriptions, { customerId: 1, createdAt: -1 })
 
       // Return Requests collection indexes
       await safeCreateIndex(this.returnRequests, { userId: 1, createdAt: -1 })
@@ -264,13 +318,16 @@ class DatabaseService {
       await safeCreateIndex(this.communityVideoEvents, { roomId: 1, status: 1, scheduledStartAt: 1 })
       await safeCreateIndex(this.communityVideoEvents, { visibility: 1, status: 1, scheduledStartAt: 1 })
       await safeCreateIndex(this.communityVideoEvents, { hostIds: 1, scheduledStartAt: -1 })
-      await safeCreateIndex(this.communityVideoEvents, { status: 1, scheduledStartAt: 1, 'reminders.fifteenMinutesSentAt': 1 })
+      await safeCreateIndex(this.communityVideoEvents, {
+        status: 1,
+        scheduledStartAt: 1,
+        'reminders.fifteenMinutesSentAt': 1
+      })
 
       await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, userId: 1 }, { unique: true })
       await safeCreateIndex(this.communityVideoEventRegistrations, { userId: 1, status: 1, registeredAt: -1 })
       await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, status: 1, joinedAt: -1 })
       await safeCreateIndex(this.communityVideoEventRegistrations, { eventId: 1, reminder15mSentAt: 1 })
-
     } catch (error) {
       console.error('❌ MongoDB index creation/verification failed:', error)
       throw error
@@ -408,7 +465,6 @@ class DatabaseService {
       process.env.DB_COMMUNITY_VIDEO_EVENT_REGISTRATIONS_COLLECTION || 'communityVideoEventRegistrations'
     )
   }
-
 }
 
 //Tao Object tu Class DatabaseService

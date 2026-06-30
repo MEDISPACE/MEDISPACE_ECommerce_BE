@@ -20,16 +20,11 @@ import {
   updateProfileController,
   updatePasswordController,
   getWorkingStatsController,
-  updateOnlineStatusController,
-  getReportsAnalyticsController,
-  getPrescriptionAnalyticsController,
-  getConsultationStatsController,
-  getCategoryAnalyticsController,
-  getPerformanceMetricsController
+  updateOnlineStatusController
 } from '~/controllers/pharmacist.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
-import { authenticatePharmacist, updatePasswordValidator } from '~/middlewares/pharmacists.middlewares'
+import { authenticatePharmacist, checkLicense, updatePasswordValidator } from '~/middlewares/pharmacists.middlewares'
 
 const pharmacistRouter = Router()
 
@@ -162,7 +157,7 @@ pharmacistRouter.post('/patients/:customerId/check-interactions', wrapRequestHan
  * Body: { customerId, prescriptionId?, items[], shippingAddress, deliveryMethod, paymentMethod, orderNotes?, pharmacistNotes? }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/orders', wrapRequestHandler(createPharmacistOrderController))
+pharmacistRouter.post('/orders', checkLicense, wrapRequestHandler(createPharmacistOrderController))
 
 /**
  * Description: Get orders list with filters
@@ -244,52 +239,5 @@ pharmacistRouter.get('/stats/working', wrapRequestHandler(getWorkingStatsControl
  * Headers: { Authorization: Bearer <access_token> }
  */
 pharmacistRouter.patch('/online-status', wrapRequestHandler(updateOnlineStatusController))
-
-// ==================== REPORTS & ANALYTICS ====================
-
-/**
- * Description: Get comprehensive reports analytics
- * Path: /pharmacist/reports/analytics
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/analytics', wrapRequestHandler(getReportsAnalyticsController))
-
-/**
- * Description: Get prescription analytics
- * Path: /pharmacist/reports/prescriptions
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/prescriptions', wrapRequestHandler(getPrescriptionAnalyticsController))
-
-/**
- * Description: Get consultation statistics
- * Path: /pharmacist/reports/consultations
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/consultations', wrapRequestHandler(getConsultationStatsController))
-
-/**
- * Description: Get category analytics
- * Path: /pharmacist/reports/categories
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/categories', wrapRequestHandler(getCategoryAnalyticsController))
-
-/**
- * Description: Get performance metrics
- * Path: /pharmacist/reports/performance
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/performance', wrapRequestHandler(getPerformanceMetricsController))
 
 export default pharmacistRouter
