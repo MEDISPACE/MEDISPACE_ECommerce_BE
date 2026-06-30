@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
+import { PrescriptionStatus } from '~/constants/enum'
 import {
   UploadPrescriptionReqBody,
   VerifyPrescriptionReqBody,
@@ -57,19 +58,25 @@ class PrescriptionsService {
 
     // Notify all pharmacists: new prescription needs review (fire-and-forget)
     let io
-    try { io = getIO() } catch { io = undefined }
-    Promise.resolve((notificationService as any).broadcastToRole?.(
-      'pharmacist',
-      {
-        type: 'prescription',
-        title: 'Đơn thuốc mới cần duyệt',
-        message: `Đơn thuốc ${prescriptionNumber} vừa được tải lên, cần dược sĩ xem xét và xác nhận.`,
-        actionUrl: '/pharmacist/prescriptions',
-        metadata: { prescriptionNumber },
-        eventKey: `prescription:${prescriptionData._id.toString()}:pharmacist:new`
-      },
-      io
-    )).catch(() => {})
+    try {
+      io = getIO()
+    } catch {
+      io = undefined
+    }
+    Promise.resolve(
+      (notificationService as any).broadcastToRole?.(
+        'pharmacist',
+        {
+          type: 'prescription',
+          title: 'Đơn thuốc mới cần duyệt',
+          message: `Đơn thuốc ${prescriptionNumber} vừa được tải lên, cần dược sĩ xem xét và xác nhận.`,
+          actionUrl: '/pharmacist/prescriptions',
+          metadata: { prescriptionNumber },
+          eventKey: `prescription:${prescriptionData._id.toString()}:pharmacist:new`
+        },
+        io
+      )
+    ).catch(() => {})
 
     return {
       _id: result.insertedId,
@@ -171,10 +178,13 @@ class PrescriptionsService {
       const limit = Number(query.limit) || 10
       const { status, sort = 'newest' } = query
 
-      // If status is provided, filter by it; otherwise show all prescriptions
+      // This endpoint is named /pending, so default to pending. Use status=all for the
+      // pharmacist management page that intentionally needs the full list.
       const filter: Record<string, string> = {}
-      if (status) {
+      if (status && status !== 'all') {
         filter.status = status
+      } else if (!status) {
+        filter.status = PrescriptionStatus.Pending
       }
 
       const sortOption: Record<string, 1 | -1> = sort === 'newest' ? { createdAt: -1 } : { createdAt: 1 }
@@ -204,45 +214,74 @@ class PrescriptionsService {
   async verifyPrescription(prescriptionId: string, pharmacistId: ObjectId, body: VerifyPrescriptionReqBody) {
     const { status, notes } = body
 
-    // Check if prescription exists
-    const prescription = await this.getPrescriptionById(prescriptionId)
-
-    // Check if already verified (case-insensitive check for backward compatibility)
-    const currentStatus = prescription.status.toLowerCase()
-    if (currentStatus !== 'pending') {
+    if (![PrescriptionStatus.Verified, PrescriptionStatus.Rejected].includes(status as PrescriptionStatus)) {
       throw new ErrorWithStatus({
-        message: PRESCRIPTIONS_MESSAGES.PRESCRIPTION_ALREADY_VERIFIED,
+        message: 'Invalid prescription verification status',
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
 
+    if (status === PrescriptionStatus.Rejected && !notes?.trim()) {
+      throw new ErrorWithStatus({
+        message: 'Rejection reason is required',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (!ObjectId.isValid(prescriptionId)) {
+      throw new ErrorWithStatus({
+        message: PRESCRIPTIONS_MESSAGES.PRESCRIPTION_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
     const updateData: Record<string, unknown> = {
-      status: status === 'verified' ? 'verified' : 'rejected',
+      status: status === PrescriptionStatus.Verified ? PrescriptionStatus.Verified : PrescriptionStatus.Rejected,
       verifiedBy: pharmacistId,
       verifiedAt: new Date(),
       updatedAt: new Date()
     }
 
     if (notes) {
-      updateData.pharmacistNotes = notes // Save notes to pharmacistNotes field
+      updateData.pharmacistNotes = notes.trim() // Save notes to pharmacistNotes field
     }
 
-    await databaseService.prescriptions.updateOne({ _id: new ObjectId(prescriptionId) }, { $set: updateData })
+    const updateResult = await databaseService.prescriptions.findOneAndUpdate(
+      { _id: new ObjectId(prescriptionId), status: PrescriptionStatus.Pending },
+      { $set: updateData },
+      { returnDocument: 'after' }
+    )
+
+    if (!updateResult) {
+      const existing = await databaseService.prescriptions.findOne({ _id: new ObjectId(prescriptionId) })
+      throw new ErrorWithStatus({
+        message: existing
+          ? PRESCRIPTIONS_MESSAGES.PRESCRIPTION_ALREADY_VERIFIED
+          : PRESCRIPTIONS_MESSAGES.PRESCRIPTION_NOT_FOUND,
+        status: existing ? HTTP_STATUS.BAD_REQUEST : HTTP_STATUS.NOT_FOUND
+      })
+    }
 
     // Return the updated prescription with all fields including pharmacistNotes
     const updatedPrescription = await this.getPrescriptionById(prescriptionId)
 
     // Notify customer about prescription status (fire-and-forget)
-    const customerId = prescription.customerId
+    const customerId = updateResult.customerId
     if (customerId) {
       let io
-      try { io = getIO() } catch { io = undefined }
-      Promise.resolve((notificationService as any).notifyPrescriptionStatus?.(
-        customerId,
-        new ObjectId(prescriptionId),
-        status as 'verified' | 'rejected',
-        io
-      )).catch(() => {})
+      try {
+        io = getIO()
+      } catch {
+        io = undefined
+      }
+      Promise.resolve(
+        (notificationService as any).notifyPrescriptionStatus?.(
+          customerId,
+          new ObjectId(prescriptionId),
+          status as 'verified' | 'rejected',
+          io
+        )
+      ).catch(() => {})
     }
 
     return updatedPrescription

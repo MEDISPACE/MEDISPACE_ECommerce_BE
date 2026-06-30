@@ -8,67 +8,101 @@ import PatientNote from '~/models/schemas/PatientNote.schema'
 import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
 import prescriptionsService from './prescriptions.services'
 import { hashPassword } from '~/utils/crypto'
-import { ShippingMethod } from '~/constants/enum'
+import { OrderStatus, PrescriptionStatus, ShippingMethod } from '~/constants/enum'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import orderService from './orders.services'
 
+const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
+const DEFAULT_VAT_RATE = 0.1
+const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
+const ORDER_STATUSES = new Set(Object.values(OrderStatus))
+const PAYMENT_STATUSES = new Set(['pending', 'paid', 'failed', 'refunded', 'partially_refunded'])
+
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const getVietnamDayRange = (date = new Date()) => {
+  const vietnamTime = new Date(date.getTime() + VIETNAM_TIMEZONE_OFFSET_MINUTES * 60 * 1000)
+  const startUtc = Date.UTC(vietnamTime.getUTCFullYear(), vietnamTime.getUTCMonth(), vietnamTime.getUTCDate())
+  const startDate = new Date(startUtc - VIETNAM_TIMEZONE_OFFSET_MINUTES * 60 * 1000)
+  const endDate = new Date(startDate.getTime() + 24 * 60 * 60 * 1000)
+  return { startDate, endDate }
+}
+
 class PharmacistService {
   // Get dashboard statistics
   async getDashboardStats() {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const { startDate, endDate } = getVietnamDayRange()
 
-    const [prescriptionStats, totalPrescriptionsToday, verifiedPrescriptionsToday, ordersToday, totalRevenue] =
-      await Promise.all([
-        // Get prescription stats from prescriptions service (using lowercase status)
-        prescriptionsService.getPrescriptionStats(),
+    const [
+      prescriptionStats,
+      totalPrescriptionsToday,
+      verifiedPrescriptionsToday,
+      rejectedPrescriptionsToday,
+      ordersToday,
+      totalRevenue,
+      activeChats
+    ] = await Promise.all([
+      // Get prescription stats from prescriptions service (using lowercase status)
+      prescriptionsService.getPrescriptionStats(),
 
-        // Count total prescriptions today
-        databaseService.prescriptions.countDocuments({
-          createdAt: { $gte: today }
-        }),
+      // Count total prescriptions today
+      databaseService.prescriptions.countDocuments({
+        createdAt: { $gte: startDate, $lt: endDate }
+      }),
 
-        // Count verified prescriptions today
-        databaseService.prescriptions.countDocuments({
-          status: 'verified',
-          verifiedAt: { $gte: today }
-        }),
+      // Count verified prescriptions today
+      databaseService.prescriptions.countDocuments({
+        status: PrescriptionStatus.Verified,
+        verifiedAt: { $gte: startDate, $lt: endDate }
+      }),
 
-        // Count orders today
-        databaseService.orders.countDocuments({
-          createdAt: { $gte: today }
-        }),
+      // Count rejected prescriptions today
+      databaseService.prescriptions.countDocuments({
+        status: PrescriptionStatus.Rejected,
+        verifiedAt: { $gte: startDate, $lt: endDate }
+      }),
 
-        // Calculate total revenue today
-        databaseService.orders
-          .aggregate([
-            {
-              $match: {
-                createdAt: { $gte: today },
-                status: { $in: ['confirmed', 'shipping', 'delivered'] }
-              }
-            },
-            {
-              $group: {
-                _id: null,
-                total: { $sum: '$totalAmount' }
-              }
+      // Count orders today
+      databaseService.orders.countDocuments({
+        createdAt: { $gte: startDate, $lt: endDate }
+      }),
+
+      // Calculate total revenue today
+      databaseService.orders
+        .aggregate([
+          {
+            $match: {
+              createdAt: { $gte: startDate, $lt: endDate },
+              orderStatus: { $in: [OrderStatus.Confirmed, OrderStatus.Shipped, OrderStatus.Delivered] },
+              paymentStatus: 'paid'
             }
-          ])
-          .toArray()
-      ])
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: '$totalAmount' }
+            }
+          }
+        ])
+        .toArray(),
+
+      databaseService.conversations.countDocuments({
+        type: 'pharmacist',
+        status: 'active'
+      })
+    ])
 
     return {
       pendingPrescriptions: prescriptionStats.pending,
       prescriptionsToday: {
         total: totalPrescriptionsToday,
         verified: verifiedPrescriptionsToday,
-        rejected: prescriptionStats.rejected // Using stats from prescriptions service
+        rejected: rejectedPrescriptionsToday
       },
       ordersToday,
       totalRevenue: totalRevenue[0]?.total || 0,
-      activeChats: 0 // TODO: Implement when chat system is ready
+      activeChats
     }
   }
 
@@ -334,9 +368,10 @@ class PharmacistService {
       has_interactions: allergyWarnings.length > 0,
       warnings: allergyWarnings,
       current_medications: currentDrugs,
-      recommendation: allergyWarnings.length > 0
-        ? 'DO NOT DISPENSE - Check with doctor'
-        : 'NOT_EVALUATED - No validated interaction database is configured',
+      recommendation:
+        allergyWarnings.length > 0
+          ? 'DO NOT DISPENSE - Check with doctor'
+          : 'NOT_EVALUATED - No validated interaction database is configured',
       evaluation_status: allergyWarnings.length > 0 ? 'blocked' : 'not_evaluated',
       requires_independent_review: true
     }
@@ -348,7 +383,7 @@ class PharmacistService {
   async createPharmacistOrder(
     pharmacistId: ObjectId,
     orderData: {
-      customerId: string
+      customerId?: string
       prescriptionId?: string
       items: Array<{
         productId: string
@@ -380,11 +415,21 @@ class PharmacistService {
       })
     }
 
+    const prescription = await this.validatePrescriptionForPharmacistOrder(orderData.prescriptionId, orderData.items)
+
     // Fetch product details and calculate prices
     const orderItems = []
     let subtotal = 0
+    const stockDeductions: Array<{ productId: ObjectId; quantity: number; productName: string }> = []
 
     for (const item of orderData.items) {
+      if (!ObjectId.isValid(item.productId)) {
+        throw new ErrorWithStatus({
+          message: `Invalid product ID: ${item.productId}`,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
       const product = await databaseService.products.findOne({ _id: new ObjectId(item.productId) })
 
       if (!product) {
@@ -409,6 +454,8 @@ class PharmacistService {
           status: HTTP_STATUS.BAD_REQUEST
         })
       }
+
+      stockDeductions.push({ productId: product._id!, quantity: requiredStock, productName: product.name })
 
       const totalPrice = unitPrice * item.quantity
       subtotal += totalPrice
@@ -447,18 +494,22 @@ class PharmacistService {
     }
 
     // Calculate tax and total
-    const taxAmount = Math.round(subtotal * 0.1) // 10% VAT
+    const taxAmount = Math.round(subtotal * DEFAULT_VAT_RATE)
     const discountAmount = 0 // No discount for now
     const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
 
     // Generate order number
-    const orderNumber = `DH${Date.now()}${Math.floor(Math.random() * 1000)}`
+    const orderNumber = await this.generateUniquePharmacistOrderNumber()
 
     // Find customer
     // customerId can be empty for anonymous guest in POS
-    const customer = orderData.customerId
-      ? await databaseService.users.findOne({ phoneNumber: orderData.customerId })
-      : null
+    const customer = orderData.customerId ? await this.findUniqueCustomerByPhone(orderData.customerId) : null
+    if (prescription && customer && prescription.customerId.toString() !== customer._id?.toString()) {
+      throw new ErrorWithStatus({
+        message: 'Prescription does not belong to the selected customer',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
     const userId = customer ? customer._id : new ObjectId() // If customer not found, create temp ID
 
     const isInstore = orderData.deliveryMethod === ShippingMethod.InStore
@@ -481,7 +532,7 @@ class PharmacistService {
       totalAmount,
       notes: orderData.orderNotes || '',
       pharmacistNotes: orderData.pharmacistNotes || '',
-      prescriptionId: orderData.prescriptionId ? new ObjectId(orderData.prescriptionId) : undefined,
+      prescriptionId: prescription?._id,
       createdBy: pharmacistId, // Track who created this order
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -489,32 +540,53 @@ class PharmacistService {
       deliveredAt: isInstore ? new Date() : undefined
     }
 
-    // Insert order
-    const result = await databaseService.orders.insertOne(order as any)
+    const result = await databaseService.withTransaction(async (session) => {
+      if (prescription?._id) {
+        const existingOrder = await databaseService.orders.findOne({ prescriptionId: prescription._id }, { session })
+        if (existingOrder) {
+          throw new ErrorWithStatus({
+            message: 'An order has already been created for this prescription',
+            status: HTTP_STATUS.CONFLICT
+          })
+        }
+      }
 
-    // Update product stock + low-stock alert
-    const LOW_STOCK_THRESHOLD = 30
-    for (const item of orderData.items) {
-      await databaseService.products.updateOne(
-        { _id: new ObjectId(item.productId) },
-        { $inc: { stockQuantity: -item.quantity } }
-      )
+      const insertResult = await databaseService.orders.insertOne(order as any, { session })
 
+      for (const deduction of stockDeductions) {
+        const stockResult = await databaseService.products.updateOne(
+          { _id: deduction.productId, stockQuantity: { $gte: deduction.quantity } },
+          { $inc: { stockQuantity: -deduction.quantity } },
+          { session }
+        )
+
+        if (stockResult.modifiedCount !== 1) {
+          throw new ErrorWithStatus({
+            message: `Insufficient stock for product: ${deduction.productName}`,
+            status: HTTP_STATUS.BAD_REQUEST
+          })
+        }
+      }
+
+      return insertResult
+    })
+
+    // Low-stock alerts after successful order creation.
+    for (const deduction of stockDeductions) {
       // Check tồn kho sau khi trừ, cảnh báo nếu ≤ 30 (fire-and-forget)
       const updatedProduct = await databaseService.products.findOne(
-        { _id: new ObjectId(item.productId) },
+        { _id: deduction.productId },
         { projection: { _id: 1, name: 1, stockQuantity: 1 } }
       )
       if (updatedProduct && updatedProduct.stockQuantity <= LOW_STOCK_THRESHOLD) {
         try {
           const io = getIO()
-          notificationService.notifyLowStock(
-            updatedProduct._id!,
-            updatedProduct.name,
-            updatedProduct.stockQuantity,
-            io
-          ).catch(() => {})
-        } catch { /* socket not ready */ }
+          notificationService
+            .notifyLowStock(updatedProduct._id!, updatedProduct.name, updatedProduct.stockQuantity, io)
+            .catch(() => {})
+        } catch {
+          /* socket not ready */
+        }
       }
     }
 
@@ -523,6 +595,83 @@ class PharmacistService {
       orderId: result.insertedId.toString(),
       orderNumber
     }
+  }
+
+  private async validatePrescriptionForPharmacistOrder(
+    prescriptionId: string | undefined,
+    items: Array<{ productId: string }>
+  ) {
+    if (!prescriptionId) return null
+
+    if (!ObjectId.isValid(prescriptionId)) {
+      throw new ErrorWithStatus({ message: 'Invalid prescription ID', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const prescription = await databaseService.prescriptions.findOne({ _id: new ObjectId(prescriptionId) })
+    if (!prescription) {
+      throw new ErrorWithStatus({ message: 'Prescription not found', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    if (prescription.status !== PrescriptionStatus.Verified) {
+      throw new ErrorWithStatus({
+        message: 'Only verified prescriptions can be used to create orders',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (prescription.validUntil && prescription.validUntil < new Date()) {
+      throw new ErrorWithStatus({ message: 'Prescription has expired', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const mappedProductIds = new Set(
+      (prescription.medications || []).map((medication: any) => medication.productId?.toString()).filter(Boolean)
+    )
+    const orderedProductIds = items.map((item) => item.productId)
+    const hasUnmappedPrescriptionItem = (prescription.medications || []).some(
+      (medication: any) => !medication.productId
+    )
+
+    if (mappedProductIds.size > 0 && orderedProductIds.some((productId) => !mappedProductIds.has(productId))) {
+      throw new ErrorWithStatus({
+        message: 'Order contains products that are not mapped from the verified prescription',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (hasUnmappedPrescriptionItem && orderedProductIds.length === 0) {
+      throw new ErrorWithStatus({
+        message: 'Prescription has unmapped medications. Please map products before creating an order.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    return prescription
+  }
+
+  private async findUniqueCustomerByPhone(phoneNumber: string) {
+    const customers = await databaseService.users.find({ phoneNumber }).limit(2).toArray()
+    if (customers.length > 1) {
+      throw new ErrorWithStatus({
+        message: 'Multiple customers found with this phone number. Please select a unique customer account.',
+        status: HTTP_STATUS.CONFLICT
+      })
+    }
+    return customers[0] || null
+  }
+
+  private async generateUniquePharmacistOrderNumber() {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const orderNumber = `DH${Date.now()}${Math.floor(Math.random() * 100000)
+        .toString()
+        .padStart(5, '0')}`
+      const existing = await databaseService.orders.findOne({ orderNumber }, { projection: { _id: 1 } })
+      if (!existing) return orderNumber
+    }
+
+    throw new ErrorWithStatus({
+      message: 'Could not generate a unique order number',
+      status: HTTP_STATUS.INTERNAL_SERVER_ERROR
+    })
   }
 
   // Get orders list for pharmacist with filters
@@ -541,21 +690,28 @@ class PharmacistService {
 
     // Filter by order status
     if (filters.status) {
+      if (!ORDER_STATUSES.has(filters.status as OrderStatus)) {
+        throw new ErrorWithStatus({ message: 'Invalid order status filter', status: HTTP_STATUS.BAD_REQUEST })
+      }
       query.orderStatus = filters.status
     }
 
     // Filter by payment status
     if (filters.paymentStatus) {
+      if (!PAYMENT_STATUSES.has(filters.paymentStatus)) {
+        throw new ErrorWithStatus({ message: 'Invalid payment status filter', status: HTTP_STATUS.BAD_REQUEST })
+      }
       query.paymentStatus = filters.paymentStatus
     }
 
     // Search by order number or customer info
     if (filters.search) {
+      const safeSearch = escapeRegex(filters.search.trim())
       query.$or = [
-        { orderNumber: { $regex: filters.search, $options: 'i' } },
-        { 'shippingAddress.firstName': { $regex: filters.search, $options: 'i' } },
-        { 'shippingAddress.lastName': { $regex: filters.search, $options: 'i' } },
-        { 'shippingAddress.phone': { $regex: filters.search, $options: 'i' } }
+        { orderNumber: { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.firstName': { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.lastName': { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.phone': { $regex: safeSearch, $options: 'i' } }
       ]
     }
 
@@ -577,6 +733,13 @@ class PharmacistService {
 
   // Get order details by ID
   async getOrderById(orderId: string) {
+    if (!ObjectId.isValid(orderId)) {
+      throw new ErrorWithStatus({
+        message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
     const orderObjectId = new ObjectId(orderId)
 
     const order = await databaseService.orders.findOne({ _id: orderObjectId })
@@ -848,283 +1011,6 @@ class PharmacistService {
     }
 
     return prescription
-  }
-
-  // ==================== REPORTS & ANALYTICS ====================
-
-  /**
-   * Get comprehensive reports analytics for pharmacist
-   */
-  async getReportsAnalytics(pharmacistId: ObjectId, timeRange: string = 'week') {
-    const dateRanges = this.getDateRanges(timeRange)
-
-    const [prescriptionData, orderData, consultationData, categoryData, performanceData] = await Promise.all([
-      this.getPrescriptionAnalytics(pharmacistId, timeRange),
-      this.getOrderStatistics(dateRanges),
-      this.getConsultationStats(pharmacistId, timeRange),
-      this.getCategoryAnalytics(pharmacistId, timeRange),
-      this.getPerformanceMetrics(pharmacistId, timeRange)
-    ])
-
-    return {
-      prescriptions: prescriptionData,
-      orders: orderData,
-      consultations: consultationData,
-      revenue: {
-        total: orderData.totalRevenue,
-        growth: 0, // Would need previous period comparison
-        daily: 0,
-        weekly: 0,
-        monthly: orderData.totalRevenue
-      },
-      satisfaction: {
-        rating: 4.8, // Placeholder
-        totalReviews: 0,
-        distribution: {}
-      },
-      categories: categoryData,
-      performance: performanceData
-    }
-  }
-
-  /**
-   * Get prescription analytics for pharmacist
-   */
-  async getPrescriptionAnalytics(pharmacistId: ObjectId, timeRange: string = 'week') {
-    const { startDate, endDate, previousStartDate, previousEndDate } = this.getDateRanges(timeRange)
-
-    // Current period prescriptions
-    const currentPrescriptions = await databaseService.prescriptions
-      .find({
-        verifiedBy: pharmacistId,
-        verifiedAt: { $gte: startDate, $lte: endDate }
-      })
-      .toArray()
-
-    // Previous period for growth
-    const previousPrescriptions = await databaseService.prescriptions
-      .find({
-        verifiedBy: pharmacistId,
-        verifiedAt: { $gte: previousStartDate, $lte: previousEndDate }
-      })
-      .toArray()
-
-    const growth =
-      previousPrescriptions.length > 0
-        ? ((currentPrescriptions.length - previousPrescriptions.length) / previousPrescriptions.length) * 100
-        : 0
-
-    // Count by status
-    const byStatus: Record<string, number> = {}
-    currentPrescriptions.forEach((p) => {
-      byStatus[p.status] = (byStatus[p.status] || 0) + 1
-    })
-
-    // Daily breakdown
-    const dailyMap = new Map<string, { count: number; verified: number; rejected: number }>()
-    currentPrescriptions.forEach((p) => {
-      const day = p.verifiedAt?.toLocaleDateString('vi-VN', { weekday: 'short' }) || 'Unknown'
-      if (!dailyMap.has(day)) {
-        dailyMap.set(day, { count: 0, verified: 0, rejected: 0 })
-      }
-      const data = dailyMap.get(day)!
-      data.count++
-      if (p.status === 'verified') data.verified++
-      if (p.status === 'rejected') data.rejected++
-    })
-
-    const daily = Array.from(dailyMap.entries()).map(([day, data]) => ({
-      day,
-      count: data.count,
-      verified: data.verified,
-      rejected: data.rejected
-    }))
-
-    return {
-      total: currentPrescriptions.length,
-      processed: currentPrescriptions.length,
-      pending: byStatus['pending'] || 0,
-      verified: byStatus['verified'] || 0,
-      rejected: byStatus['rejected'] || 0,
-      growth: Math.round(growth * 100) / 100,
-      avgProcessingTime: 0, // Would need timestamp tracking
-      daily,
-      byStatus,
-      trends: {
-        weekOverWeek: growth,
-        monthOverMonth: 0
-      }
-    }
-  }
-
-  /**
-   * Get consultation statistics
-   */
-  async getConsultationStats(pharmacistId: ObjectId, timeRange: string = 'week') {
-    // Placeholder - would need chat/consultation system
-    return {
-      total: 0,
-      active: 0,
-      resolved: 0,
-      avgResponseTime: '0 phút',
-      avgDuration: '0 phút',
-      satisfactionRating: 4.8,
-      byTimeSlot: [],
-      commonTopics: []
-    }
-  }
-
-  /**
-   * Get category analytics
-   */
-  async getCategoryAnalytics(pharmacistId: ObjectId, timeRange: string = 'week') {
-    const { startDate, endDate } = this.getDateRanges(timeRange)
-
-    // Get prescriptions in time range
-    const prescriptions = await databaseService.prescriptions
-      .find({
-        verifiedBy: pharmacistId,
-        verifiedAt: { $gte: startDate, $lte: endDate }
-      })
-      .toArray()
-
-    // Analyze drug categories (simplified - would need product category lookup)
-    const drugCategories: Record<string, number> = {}
-    prescriptions.forEach((p) => {
-      ;(p.medications || []).forEach((med: any) => {
-        const category = 'General' // Would need category lookup
-        drugCategories[category] = (drugCategories[category] || 0) + 1
-      })
-    })
-
-    const totalDrugs = Object.values(drugCategories).reduce((sum, count) => sum + count, 0)
-    const drugCategoriesArray = Object.entries(drugCategories).map(([name, count]) => ({
-      name,
-      prescriptionCount: count,
-      orderCount: 0,
-      percentage: totalDrugs > 0 ? (count / totalDrugs) * 100 : 0
-    }))
-
-    // Time slot analysis
-    const timeSlots: Record<string, number> = {
-      'Sáng (6-12h)': 0,
-      'Chiều (12-18h)': 0,
-      'Tối (18-24h)': 0,
-      'Đêm (0-6h)': 0
-    }
-
-    prescriptions.forEach((p) => {
-      const hour = p.verifiedAt?.getHours() || 0
-      if (hour >= 6 && hour < 12) timeSlots['Sáng (6-12h)']++
-      else if (hour >= 12 && hour < 18) timeSlots['Chiều (12-18h)']++
-      else if (hour >= 18 && hour < 24) timeSlots['Tối (18-24h)']++
-      else timeSlots['Đêm (0-6h)']++
-    })
-
-    const totalActivities = prescriptions.length
-    const timeSlotsArray = Object.entries(timeSlots).map(([time, count]) => ({
-      time,
-      activityCount: count,
-      percentage: totalActivities > 0 ? (count / totalActivities) * 100 : 0,
-      avgResponseTime: '8 phút'
-    }))
-
-    return {
-      drugCategories: drugCategoriesArray,
-      timeSlots: timeSlotsArray,
-      prescriptionTypes: [{ type: 'Kê đơn thường', count: prescriptions.length, percentage: 100 }]
-    }
-  }
-
-  /**
-   * Get performance metrics
-   */
-  async getPerformanceMetrics(pharmacistId: ObjectId, timeRange: string = 'week') {
-    const { startDate, endDate } = this.getDateRanges(timeRange)
-
-    const prescriptions = await databaseService.prescriptions
-      .find({
-        verifiedBy: pharmacistId,
-        verifiedAt: { $gte: startDate, $lte: endDate }
-      })
-      .toArray()
-
-    const orders = await databaseService.orders
-      .find({
-        createdBy: pharmacistId,
-        createdAt: { $gte: startDate, $lte: endDate }
-      })
-      .toArray()
-
-    const totalPrescriptions = prescriptions.length
-    const verifiedPrescriptions = prescriptions.filter((p) => p.status === 'verified').length
-    const completionRate = totalPrescriptions > 0 ? (verifiedPrescriptions / totalPrescriptions) * 100 : 0
-
-    // Calculate days in range
-    const daysInRange = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-
-    return {
-      completionRate: Math.round(completionRate * 100) / 100,
-      onTimeRate: 95, // Placeholder
-      avgResponseTime: '8 phút',
-      avgProcessingTime: '15 phút',
-      satisfactionScore: 4.8,
-      efficiency: 85, // Placeholder
-      productivity: {
-        prescriptionsPerDay: daysInRange > 0 ? Math.round((totalPrescriptions / daysInRange) * 100) / 100 : 0,
-        ordersPerDay: daysInRange > 0 ? Math.round((orders.length / daysInRange) * 100) / 100 : 0,
-        consultationsPerDay: 0
-      },
-      improvements: [
-        {
-          area: 'Response Time',
-          suggestion: 'Maintain current excellent response time',
-          priority: 'low' as const
-        }
-      ]
-    }
-  }
-
-  /**
-   * Helper: Get date ranges based on time range parameter
-   */
-  private getDateRanges(timeRange: string) {
-    const now = new Date()
-    let startDate: Date
-    const endDate = new Date()
-    let previousStartDate: Date
-    let previousEndDate: Date
-
-    switch (timeRange) {
-      case 'today':
-        startDate = new Date(now)
-        startDate.setHours(0, 0, 0, 0)
-        previousStartDate = new Date(startDate.getTime() - 24 * 60 * 60 * 1000)
-        previousEndDate = new Date(startDate.getTime() - 1)
-        break
-      case 'week':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        previousStartDate = new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000)
-        previousEndDate = new Date(startDate.getTime() - 1)
-        break
-      case 'month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1)
-        previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-        previousEndDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
-        break
-      case 'quarter':
-        const currentQuarter = Math.floor(now.getMonth() / 3)
-        startDate = new Date(now.getFullYear(), currentQuarter * 3, 1)
-        previousStartDate = new Date(now.getFullYear(), (currentQuarter - 1) * 3, 1)
-        previousEndDate = new Date(now.getFullYear(), currentQuarter * 3, 0, 23, 59, 59)
-        break
-      default:
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        previousStartDate = new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000)
-        previousEndDate = new Date(startDate.getTime() - 1)
-    }
-
-    return { startDate, endDate, previousStartDate, previousEndDate }
   }
 }
 
