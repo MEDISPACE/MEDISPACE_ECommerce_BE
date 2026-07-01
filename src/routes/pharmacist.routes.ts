@@ -25,6 +25,7 @@ import {
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
 import { authenticatePharmacist, checkLicense, updatePasswordValidator } from '~/middlewares/pharmacists.middlewares'
+import { rateLimitPatientPhi, requirePatientPhiAccess } from '~/middlewares/patientPhi.middlewares'
 
 const pharmacistRouter = Router()
 
@@ -55,7 +56,7 @@ pharmacistRouter.get('/dashboard/recent-activities', wrapRequestHandler(getRecen
  * Query: { phone: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/search', wrapRequestHandler(searchPatientsController))
+pharmacistRouter.get('/patients/search', rateLimitPatientPhi, wrapRequestHandler(searchPatientsController))
 
 /**
  * Description: Get patient history (prescriptions & orders)
@@ -64,7 +65,7 @@ pharmacistRouter.get('/patients/search', wrapRequestHandler(searchPatientsContro
  * Params: { customerId: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/history', wrapRequestHandler(getPatientHistoryController))
+pharmacistRouter.get('/patients/:customerId/history', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getPatientHistoryController))
 
 /**
  * Description: Get pharmacist profile
@@ -83,7 +84,7 @@ pharmacistRouter.get('/profile', wrapRequestHandler(getPharmacistProfileControll
  * Params: { customerId: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/medical-info', wrapRequestHandler(getMedicalInfoController))
+pharmacistRouter.get('/patients/:customerId/medical-info', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getMedicalInfoController))
 
 /**
  * Description: Update patient medical information
@@ -93,7 +94,7 @@ pharmacistRouter.get('/patients/:customerId/medical-info', wrapRequestHandler(ge
  * Body: { blood_type?: string, allergies?: string[], chronic_diseases?: string[] }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.put('/patients/:customerId/medical-info', wrapRequestHandler(updateMedicalInfoController))
+pharmacistRouter.put('/patients/:customerId/medical-info', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(updateMedicalInfoController))
 
 /**
  * Description: Add allergy to patient
@@ -103,7 +104,7 @@ pharmacistRouter.put('/patients/:customerId/medical-info', wrapRequestHandler(up
  * Body: { allergy: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/patients/:customerId/allergies', wrapRequestHandler(addAllergyController))
+pharmacistRouter.post('/patients/:customerId/allergies', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(addAllergyController))
 
 // ========== PATIENT NOTES ROUTES ==========
 
@@ -115,7 +116,7 @@ pharmacistRouter.post('/patients/:customerId/allergies', wrapRequestHandler(addA
  * Body: { note_type: 'consultation' | 'prescription_verification' | 'general', content: string, related_prescription_id?: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/patients/:customerId/notes', wrapRequestHandler(createPatientNoteController))
+pharmacistRouter.post('/patients/:customerId/notes', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(createPatientNoteController))
 
 /**
  * Description: Get all notes for a patient
@@ -124,7 +125,7 @@ pharmacistRouter.post('/patients/:customerId/notes', wrapRequestHandler(createPa
  * Params: { customerId: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/notes', wrapRequestHandler(getPatientNotesController))
+pharmacistRouter.get('/patients/:customerId/notes', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getPatientNotesController))
 
 // ========== MEDICATION TRACKING ROUTES ==========
 
@@ -136,7 +137,7 @@ pharmacistRouter.get('/patients/:customerId/notes', wrapRequestHandler(getPatien
  * Query: { days?: number }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/medications', wrapRequestHandler(getRecentMedicationsController))
+pharmacistRouter.get('/patients/:customerId/medications', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getRecentMedicationsController))
 
 /**
  * Description: Check drug interactions and allergies
@@ -146,7 +147,7 @@ pharmacistRouter.get('/patients/:customerId/medications', wrapRequestHandler(get
  * Body: { drug_name: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/patients/:customerId/check-interactions', wrapRequestHandler(checkDrugInteractionsController))
+pharmacistRouter.post('/patients/:customerId/check-interactions', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(checkDrugInteractionsController))
 
 // ========== ORDER MANAGEMENT ROUTES ==========
 

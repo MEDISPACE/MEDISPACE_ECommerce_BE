@@ -17,6 +17,16 @@ export interface UploadPrescriptionReqBody {
 export interface VerifyPrescriptionReqBody {
   status: 'verified' | 'rejected' // lowercase for consistency
   notes?: string
+  corrections?: Partial<{
+    patientName: string
+    patientAge: string | number
+    patientGender: string
+    diagnosis: string
+    doctorName: string
+    hospitalName: string
+    prescriptionDate: string
+    medications: Medication[]
+  }>
 }
 
 export interface PrescriptionQuery {
