@@ -212,7 +212,7 @@ class PrescriptionsService {
 
   // Verify prescription
   async verifyPrescription(prescriptionId: string, pharmacistId: ObjectId, body: VerifyPrescriptionReqBody) {
-    const { status, notes } = body
+    const { status, notes, corrections } = body
 
     if (![PrescriptionStatus.Verified, PrescriptionStatus.Rejected].includes(status as PrescriptionStatus)) {
       throw new ErrorWithStatus({
@@ -244,6 +244,42 @@ class PrescriptionsService {
 
     if (notes) {
       updateData.pharmacistNotes = notes.trim() // Save notes to pharmacistNotes field
+    }
+
+    if (corrections && Object.keys(corrections).length > 0) {
+      const allowedTextFields = ['patientName', 'patientAge', 'patientGender', 'diagnosis', 'doctorName', 'hospitalName'] as const
+      for (const field of allowedTextFields) {
+        const value = corrections[field]
+        if (value !== undefined) updateData[field] = String(value).trim()
+      }
+
+      if (corrections.prescriptionDate) {
+        const correctedDate = new Date(corrections.prescriptionDate)
+        if (Number.isNaN(correctedDate.getTime())) {
+          throw new ErrorWithStatus({ message: 'Invalid corrected prescription date', status: HTTP_STATUS.BAD_REQUEST })
+        }
+        updateData.prescriptionDate = correctedDate
+      }
+
+      if (corrections.medications) {
+        if (!Array.isArray(corrections.medications) || corrections.medications.length === 0) {
+          throw new ErrorWithStatus({ message: 'Corrected medications must contain at least one item', status: HTTP_STATUS.BAD_REQUEST })
+        }
+        updateData.medications = corrections.medications.map((medication) => ({
+          ...medication,
+          productName: medication.productName?.trim(),
+          dosage: medication.dosage?.trim(),
+          instructions: medication.instructions?.trim(),
+          quantity: Number(medication.quantity) || 1,
+          productId:
+            medication.productId && ObjectId.isValid(medication.productId)
+              ? new ObjectId(medication.productId)
+              : undefined
+        }))
+      }
+
+      updateData.correctedBy = pharmacistId
+      updateData.correctedAt = new Date()
     }
 
     const updateResult = await databaseService.prescriptions.findOneAndUpdate(
