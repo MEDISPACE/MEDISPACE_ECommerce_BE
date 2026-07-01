@@ -276,6 +276,9 @@ class DatabaseService {
       await safeCreateIndex(this.messages, { conversationId: 1, isRead: 1, senderId: 1 })
       await safeCreateIndex(this.db.collection('chatAuditLogs'), { conversationId: 1, createdAt: -1 })
       await safeCreateIndex(this.db.collection('chatAuditLogs'), { actorId: 1, action: 1, createdAt: -1 })
+      await safeCreateIndex(this.patientPhiAuditLogs, { pharmacistId: 1, createdAt: -1 })
+      await safeCreateIndex(this.patientPhiAuditLogs, { customerId: 1, createdAt: -1 })
+      await safeCreateIndex(this.patientPhiAuditLogs, { action: 1, createdAt: -1 })
 
       // Community & Moderation indexes (MVP)
       await safeCreateIndex(this.communityRooms, { slug: 1 }, { unique: true })
@@ -413,6 +416,10 @@ class DatabaseService {
   }
   get notifications(): Collection<Notification> {
     return this.db.collection('notifications')
+  }
+
+  get patientPhiAuditLogs(): Collection {
+    return this.db.collection('patient_phi_audit_logs')
   }
 
   // ── Community / Moderation (MVP) ───────────────────────────────────────────

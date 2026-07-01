@@ -9,6 +9,8 @@ vitest.config.ts
 coverage/
 *.test.ts
 *.spec.ts
+!tests/prescriptions/**/*.test.ts
+!tests/prescriptions/**/*.spec.ts
 !src/tests/
 !src/tests/setup.ts
 !src/tests/community.services.test.ts

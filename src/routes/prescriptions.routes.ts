@@ -62,6 +62,20 @@ prescriptionsRouter.get(
 )
 
 /**
+ * Description: Get pharmacist prescription management list across statuses
+ * Path: /prescriptions/pharmacist
+ * Method: GET
+ * Query: { page?, limit?, status?, sort? }
+ * Headers: { Authorization: Bearer <access_token> } (Pharmacist)
+ */
+prescriptionsRouter.get(
+  '/pharmacist',
+  accessTokenValidator,
+  authenticatePharmacist,
+  wrapRequestHandler(getPendingPrescriptionsController)
+)
+
+/**
  * Description: Scan prescription image via OCR Service
  * Path: /prescriptions/scan
  * Method: POST

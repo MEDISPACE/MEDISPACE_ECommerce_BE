@@ -8,14 +8,16 @@ import PatientNote from '~/models/schemas/PatientNote.schema'
 import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
 import prescriptionsService from './prescriptions.services'
 import { hashPassword } from '~/utils/crypto'
-import { OrderStatus, PrescriptionStatus, ShippingMethod } from '~/constants/enum'
+import { OrderStatus, PrescriptionStatus, ShippingMethod, UserRole, UserStatus } from '~/constants/enum'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import orderService from './orders.services'
+import { canAccessPatientPhi } from '~/middlewares/patientPhi.middlewares'
 
 const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
 const DEFAULT_VAT_RATE = 0.1
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
+const DASHBOARD_STATS_CACHE_MS = Number(process.env.PHARMACIST_DASHBOARD_STATS_CACHE_MS || 30_000)
 const ORDER_STATUSES = new Set(Object.values(OrderStatus))
 const PAYMENT_STATUSES = new Set(['pending', 'paid', 'failed', 'refunded', 'partially_refunded'])
 
@@ -30,8 +32,14 @@ const getVietnamDayRange = (date = new Date()) => {
 }
 
 class PharmacistService {
+  private dashboardStatsCache: { expiresAt: number; value: unknown } | null = null
+
   // Get dashboard statistics
   async getDashboardStats() {
+    if (this.dashboardStatsCache && this.dashboardStatsCache.expiresAt > Date.now()) {
+      return this.dashboardStatsCache.value
+    }
+
     const { startDate, endDate } = getVietnamDayRange()
 
     const [
@@ -93,7 +101,7 @@ class PharmacistService {
       })
     ])
 
-    return {
+    const value = {
       pendingPrescriptions: prescriptionStats.pending,
       prescriptionsToday: {
         total: totalPrescriptionsToday,
@@ -104,6 +112,9 @@ class PharmacistService {
       totalRevenue: totalRevenue[0]?.total || 0,
       activeChats
     }
+
+    this.dashboardStatsCache = { value, expiresAt: Date.now() + DASHBOARD_STATS_CACHE_MS }
+    return value
   }
 
   // Get recent prescriptions
@@ -125,21 +136,31 @@ class PharmacistService {
   }
 
   // Search patients by phone or partial name
-  async searchPatients(searchQuery: string) {
+  async searchPatients(searchQuery: string, pharmacistId?: ObjectId) {
     if (!searchQuery) return []
 
+    const safeSearch = escapeRegex(searchQuery.trim())
     const users = await databaseService.users
       .find({
+        role: UserRole.Customer,
         $or: [
-          { phoneNumber: { $regex: searchQuery, $options: 'i' } },
-          { firstName: { $regex: searchQuery, $options: 'i' } },
-          { lastName: { $regex: searchQuery, $options: 'i' } }
+          { phoneNumber: { $regex: `^${safeSearch}`, $options: 'i' } },
+          { firstName: { $regex: `^${safeSearch}`, $options: 'i' } },
+          { lastName: { $regex: `^${safeSearch}`, $options: 'i' } }
         ]
       })
       .limit(10)
       .toArray()
 
-    return users
+    if (!pharmacistId) return []
+    const scopedUsers = []
+    for (const user of users) {
+      if (user._id && (await canAccessPatientPhi(pharmacistId, user._id))) {
+        scopedUsers.push(user)
+      }
+    }
+
+    return scopedUsers
   }
 
   // Get patient history
@@ -501,8 +522,7 @@ class PharmacistService {
     // Generate order number
     const orderNumber = await this.generateUniquePharmacistOrderNumber()
 
-    // Find customer
-    // customerId can be empty for anonymous guest in POS
+    // Find customer. customerId is currently supplied as phone/search value from the POS UI.
     const customer = orderData.customerId ? await this.findUniqueCustomerByPhone(orderData.customerId) : null
     if (prescription && customer && prescription.customerId.toString() !== customer._id?.toString()) {
       throw new ErrorWithStatus({
@@ -510,7 +530,12 @@ class PharmacistService {
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
-    const userId = customer ? customer._id : new ObjectId() // If customer not found, create temp ID
+
+    const guestCustomer = !prescription && !customer ? await this.createGuestCustomerForPharmacistOrder(orderNumber, orderData.shippingAddress) : null
+    const userId = prescription?.customerId || customer?._id || guestCustomer?._id
+    if (!userId) {
+      throw new ErrorWithStatus({ message: 'Unable to resolve customer for pharmacist order', status: HTTP_STATUS.BAD_REQUEST })
+    }
 
     const isInstore = orderData.deliveryMethod === ShippingMethod.InStore
 
@@ -523,8 +548,8 @@ class PharmacistService {
       itemCount: orderItems.length,
       shippingAddress: orderData.shippingAddress,
       paymentMethod: orderData.paymentMethod,
-      paymentStatus: isInstore ? 'paid' : 'pending',
-      orderStatus: isInstore ? 'delivered' : 'pending',
+      paymentStatus: 'pending',
+      orderStatus: isInstore ? OrderStatus.Confirmed : OrderStatus.Pending,
       subtotal,
       taxAmount,
       shippingFee,
@@ -536,40 +561,54 @@ class PharmacistService {
       createdBy: pharmacistId, // Track who created this order
       createdAt: new Date(),
       updatedAt: new Date(),
-      paidAt: isInstore ? new Date() : undefined,
-      deliveredAt: isInstore ? new Date() : undefined
+      paidAt: undefined,
+      deliveredAt: undefined,
+      customerType: guestCustomer ? 'guest' : 'registered'
     }
 
-    const result = await databaseService.withTransaction(async (session) => {
-      if (prescription?._id) {
-        const existingOrder = await databaseService.orders.findOne({ prescriptionId: prescription._id }, { session })
-        if (existingOrder) {
-          throw new ErrorWithStatus({
-            message: 'An order has already been created for this prescription',
-            status: HTTP_STATUS.CONFLICT
-          })
+    let result
+    try {
+      result = await databaseService.withTransaction(async (session) => {
+        if (prescription?._id) {
+          const existingOrder = await databaseService.orders.findOne({ prescriptionId: prescription._id }, { session })
+          if (existingOrder) {
+            throw new ErrorWithStatus({
+              message: 'An order has already been created for this prescription',
+              status: HTTP_STATUS.CONFLICT
+            })
+          }
         }
-      }
 
-      const insertResult = await databaseService.orders.insertOne(order as any, { session })
+        const insertResult = await databaseService.orders.insertOne(order as any, { session })
 
-      for (const deduction of stockDeductions) {
-        const stockResult = await databaseService.products.updateOne(
-          { _id: deduction.productId, stockQuantity: { $gte: deduction.quantity } },
-          { $inc: { stockQuantity: -deduction.quantity } },
-          { session }
-        )
+        for (const deduction of stockDeductions) {
+          const stockResult = await databaseService.products.updateOne(
+            { _id: deduction.productId, stockQuantity: { $gte: deduction.quantity } },
+            { $inc: { stockQuantity: -deduction.quantity } },
+            { session }
+          )
 
-        if (stockResult.modifiedCount !== 1) {
-          throw new ErrorWithStatus({
-            message: `Insufficient stock for product: ${deduction.productName}`,
-            status: HTTP_STATUS.BAD_REQUEST
-          })
+          if (stockResult.modifiedCount !== 1) {
+            throw new ErrorWithStatus({
+              message: `Insufficient stock for product: ${deduction.productName}`,
+              status: HTTP_STATUS.BAD_REQUEST
+            })
+          }
         }
-      }
 
-      return insertResult
-    })
+        return insertResult
+      })
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new ErrorWithStatus({
+          message: error?.keyPattern?.prescriptionId
+            ? 'An order has already been created for this prescription'
+            : 'Duplicate order number. Please retry order creation.',
+          status: HTTP_STATUS.CONFLICT
+        })
+      }
+      throw error
+    }
 
     // Low-stock alerts after successful order creation.
     for (const deduction of stockDeductions) {
@@ -599,7 +638,7 @@ class PharmacistService {
 
   private async validatePrescriptionForPharmacistOrder(
     prescriptionId: string | undefined,
-    items: Array<{ productId: string }>
+    items: Array<{ productId: string; quantity: number }>
   ) {
     if (!prescriptionId) return null
 
@@ -645,7 +684,55 @@ class PharmacistService {
       })
     }
 
+    for (const item of items) {
+      const medication = (prescription.medications || []).find(
+        (med: any) => med.productId?.toString() === item.productId
+      )
+      if (medication?.quantity !== undefined && (item as any).quantity > Number(medication.quantity)) {
+        throw new ErrorWithStatus({
+          message: `Prescription quantity exceeded for ${medication.productName}`,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+    }
+
     return prescription
+  }
+
+  private async createGuestCustomerForPharmacistOrder(
+    orderNumber: string,
+    shippingAddress: { firstName: string; lastName: string; phone: string; email: string; address: string; ward: string; district: string; province: string }
+  ) {
+    const now = new Date()
+    const guest = {
+      _id: new ObjectId(),
+      email: shippingAddress.email?.trim() || `guest-${orderNumber.toLowerCase()}@medispace.local`,
+      password: '',
+      role: UserRole.Customer,
+      status: UserStatus.Verified,
+      firstName: shippingAddress.firstName || 'Guest',
+      lastName: shippingAddress.lastName || 'Customer',
+      phoneNumber: shippingAddress.phone || '',
+      addresses: [{ ...shippingAddress, isDefault: true, phone: shippingAddress.phone }],
+      medicalProfile: {},
+      isGuest: true,
+      guestSource: 'pharmacist_pos',
+      createdAt: now,
+      updatedAt: now,
+      created_by: new ObjectId(),
+      wishlist: []
+    }
+
+    try {
+      await databaseService.users.insertOne(guest as any)
+      return guest
+    } catch (error: any) {
+      if (error?.code === 11000 && shippingAddress.phone) {
+        const existing = await databaseService.users.findOne({ phoneNumber: shippingAddress.phone })
+        if (existing) return existing
+      }
+      throw error
+    }
   }
 
   private async findUniqueCustomerByPhone(phoneNumber: string) {
