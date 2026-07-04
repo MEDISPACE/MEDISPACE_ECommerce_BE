@@ -26,10 +26,8 @@ async function seed() {
   }
 
   // query_suggestions luôn drop và tạo lại để tránh data cũ lẫn lộn
-  try {
-    await tsClient.collections('query_suggestions').delete()
-    console.log('[Seed] Dropped "query_suggestions" (will recreate fresh).')
-  } catch {}
+  await typesenseService.dropCollections(['query_suggestions'])
+  console.log('[Seed] Dropped "query_suggestions" (will recreate fresh).')
 
   if (!force) {
     try {

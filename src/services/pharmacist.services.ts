@@ -8,18 +8,29 @@ import PatientNote from '~/models/schemas/PatientNote.schema'
 import { PrescriptionMedication } from '~/models/schemas/Prescription.schema'
 import prescriptionsService from './prescriptions.services'
 import { hashPassword } from '~/utils/crypto'
-import { OrderStatus, PrescriptionStatus, ShippingMethod, UserRole, UserStatus } from '~/constants/enum'
+import { OrderStatus, PaymentMethod, PrescriptionStatus, ShippingMethod, UserRole, UserStatus } from '~/constants/enum'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import orderService from './orders.services'
 import { canAccessPatientPhi } from '~/middlewares/patientPhi.middlewares'
+import ghnService from './ghn.services'
+import paymentService from './payment.services'
 
 const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
-const DEFAULT_VAT_RATE = 0.1
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
 const DASHBOARD_STATS_CACHE_MS = Number(process.env.PHARMACIST_DASHBOARD_STATS_CACHE_MS || 30_000)
 const ORDER_STATUSES = new Set(Object.values(OrderStatus))
 const PAYMENT_STATUSES = new Set(['pending', 'paid', 'failed', 'refunded', 'partially_refunded'])
+const IN_STORE_PAYMENT_METHODS = new Set<string>([
+  PaymentMethod.Cash,
+  PaymentMethod.CreditCard_POS,
+  PaymentMethod.BankTransfer,
+  PaymentMethod.PayOS,
+  PaymentMethod.VNPay
+])
+const DELIVERY_PAYMENT_METHODS = new Set<string>([PaymentMethod.COD, PaymentMethod.BankTransfer, PaymentMethod.PayOS, PaymentMethod.VNPay])
+const PAID_AT_COUNTER_METHODS = new Set<string>([PaymentMethod.Cash, PaymentMethod.CreditCard_POS])
+const ONLINE_PAYMENT_METHODS = new Set<string>([PaymentMethod.PayOS, PaymentMethod.VNPay])
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -33,6 +44,111 @@ const getVietnamDayRange = (date = new Date()) => {
 
 class PharmacistService {
   private dashboardStatsCache: { expiresAt: number; value: unknown } | null = null
+
+  private buildPharmacistSnapshot(pharmacist: any) {
+    if (!pharmacist?._id) return undefined
+    const firstName = pharmacist.firstName || ''
+    const lastName = pharmacist.lastName || ''
+    const fullName = `${firstName} ${lastName}`.trim()
+    return {
+      _id: pharmacist._id,
+      firstName: pharmacist.firstName,
+      lastName: pharmacist.lastName,
+      fullName,
+      email: pharmacist.email,
+      phoneNumber: pharmacist.phoneNumber,
+      avatar: pharmacist.avatar,
+      lisenseNumber: pharmacist.lisenseNumber,
+      licenseNumber: pharmacist.lisenseNumber
+    }
+  }
+
+  private async getPharmacistSnapshot(pharmacistId: ObjectId) {
+    const pharmacist = await databaseService.users.findOne(
+      { _id: pharmacistId, role: UserRole.Pharmacist },
+      { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, phoneNumber: 1, avatar: 1, lisenseNumber: 1 } }
+    )
+    const snapshot = this.buildPharmacistSnapshot(pharmacist)
+    if (!snapshot) {
+      throw new ErrorWithStatus({ message: PHARMACIST_MESSAGES.PHARMACIST_NOT_FOUND, status: HTTP_STATUS.NOT_FOUND })
+    }
+    return snapshot
+  }
+
+  private assertValidPharmacistOrderMethod(deliveryMethod: string, paymentMethod: string) {
+    if (!deliveryMethod || typeof deliveryMethod !== 'string') {
+      throw new ErrorWithStatus({ message: 'Delivery method is required', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (!Object.values(PaymentMethod).includes(paymentMethod as PaymentMethod)) {
+      throw new ErrorWithStatus({ message: 'Invalid payment method', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const isInstore = deliveryMethod === ShippingMethod.InStore
+    const isDelivery = !isInstore
+
+    if (isInstore && !IN_STORE_PAYMENT_METHODS.has(paymentMethod)) {
+      throw new ErrorWithStatus({ message: 'Payment method is not allowed for in-store orders', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (isDelivery) {
+      const validDeliveryMethod =
+        [ShippingMethod.Standard, ShippingMethod.Fast, ShippingMethod.Express].includes(deliveryMethod as ShippingMethod) ||
+        /^ghn:\d+$/.test(deliveryMethod)
+      if (!validDeliveryMethod) {
+        throw new ErrorWithStatus({ message: 'Invalid delivery method', status: HTTP_STATUS.BAD_REQUEST })
+      }
+      if (!DELIVERY_PAYMENT_METHODS.has(paymentMethod)) {
+        throw new ErrorWithStatus({ message: 'Payment method is not allowed for delivery orders', status: HTTP_STATUS.BAD_REQUEST })
+      }
+    }
+  }
+
+  private validateShippingAddressForDelivery(shippingAddress: any) {
+    if (!shippingAddress?.address || !shippingAddress?.province || !shippingAddress?.district || !shippingAddress?.ward) {
+      throw new ErrorWithStatus({ message: 'Complete delivery address is required', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (!Number.isFinite(Number(shippingAddress.districtId)) || !shippingAddress.wardCode) {
+      throw new ErrorWithStatus({ message: 'GHN district and ward are required for delivery orders', status: HTTP_STATUS.BAD_REQUEST })
+    }
+  }
+
+  private estimatePackageWeight(stockDeductions: Array<{ quantity: number }>) {
+    void stockDeductions
+    return 1000
+  }
+
+  private async calculatePharmacistShippingFee(deliveryMethod: string, shippingAddress: any, stockDeductions: Array<{ quantity: number }>) {
+    if (deliveryMethod === ShippingMethod.InStore) return 0
+
+    this.validateShippingAddressForDelivery(shippingAddress)
+
+    if (deliveryMethod.startsWith('ghn:')) {
+      const serviceId = Number(deliveryMethod.split(':')[1])
+      if (!Number.isFinite(serviceId) || serviceId <= 0) {
+        throw new ErrorWithStatus({ message: 'Invalid GHN service selected', status: HTTP_STATUS.BAD_REQUEST })
+      }
+
+      const fee = await ghnService.calculateFee({
+        to_district_id: Number(shippingAddress.districtId),
+        to_ward_code: shippingAddress.wardCode,
+        weight: this.estimatePackageWeight(stockDeductions),
+        service_id: serviceId
+      })
+      const total = Number(fee?.total)
+      if (!Number.isFinite(total) || total < 0) {
+        throw new ErrorWithStatus({ message: 'Unable to calculate GHN shipping fee', status: HTTP_STATUS.BAD_REQUEST })
+      }
+      return total
+    }
+
+    const deliveryFees: Record<string, number> = {
+      [ShippingMethod.Standard]: 0,
+      [ShippingMethod.Fast]: 15000,
+      [ShippingMethod.Express]: 25000
+    }
+    return deliveryFees[deliveryMethod] ?? 0
+  }
 
   // Get dashboard statistics
   async getDashboardStats() {
@@ -421,11 +537,17 @@ class PharmacistService {
         ward: string
         district: string
         province: string
+        provinceId?: number
+        districtId?: number
+        wardCode?: string
       }
       deliveryMethod: string
       paymentMethod: string
       orderNotes?: string
       pharmacistNotes?: string
+      idempotencyKey?: string
+      safetyReviewConfirmed?: boolean
+      req?: any
     }
   ) {
     // Validate items
@@ -436,6 +558,8 @@ class PharmacistService {
       })
     }
 
+    this.assertValidPharmacistOrderMethod(orderData.deliveryMethod, orderData.paymentMethod)
+
     const prescription = await this.validatePrescriptionForPharmacistOrder(orderData.prescriptionId, orderData.items)
 
     // Fetch product details and calculate prices
@@ -444,6 +568,10 @@ class PharmacistService {
     const stockDeductions: Array<{ productId: ObjectId; quantity: number; productName: string }> = []
 
     for (const item of orderData.items) {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        throw new ErrorWithStatus({ message: 'Order item quantity must be a positive integer', status: HTTP_STATUS.BAD_REQUEST })
+      }
+
       if (!ObjectId.isValid(item.productId)) {
         throw new ErrorWithStatus({
           message: `Invalid product ID: ${item.productId}`,
@@ -466,7 +594,13 @@ class PharmacistService {
         product.priceVariants?.find((v: any) => v.isDefault) ||
         product.priceVariants?.[0]
       const unitPrice = variant?.price || 0
-      const quantityPerUnit = variant?.quantityPerUnit || 1
+      if (!variant || !Number.isFinite(unitPrice) || unitPrice < 0) {
+        throw new ErrorWithStatus({ message: `Invalid price variant for product: ${product.name}`, status: HTTP_STATUS.BAD_REQUEST })
+      }
+      const quantityPerUnit = Number(variant?.quantityPerUnit ?? 1)
+      if (!Number.isFinite(quantityPerUnit) || quantityPerUnit <= 0) {
+        throw new ErrorWithStatus({ message: `Invalid stock unit conversion for product: ${product.name}`, status: HTTP_STATUS.BAD_REQUEST })
+      }
       const requiredStock = item.quantity * quantityPerUnit
 
       if (product.stockQuantity < requiredStock) {
@@ -494,36 +628,29 @@ class PharmacistService {
       })
     }
 
-    // Calculate delivery fee based on method
-    let shippingFee = 0
-    if (orderData.deliveryMethod === ShippingMethod.InStore) {
-      shippingFee = 0
-    } else {
-      // For standard, fast, express - backend will accept the shippingFee provided by frontend payload if available,
-      // but for now we fallback to standard fees if not provided
-      const deliveryFees: Record<string, number> = {
-        standard: 0,
-        fast: 15000,
-        express: 25000
-      }
-      // If frontend provides an explicit shippingFee we should ideally use it, but since the schema
-      // of orderData in createPharmacistOrder doesn't explicitly accept it yet, we use the fallback or 0
-      shippingFee =
-        (orderData as any).shippingFee !== undefined
-          ? (orderData as any).shippingFee
-          : deliveryFees[orderData.deliveryMethod] || 0
+    const requiresSafetyReview = orderItems.length > 1 || orderItems.some((item) => item.prescriptionRequired)
+    if (requiresSafetyReview && orderData.safetyReviewConfirmed !== true) {
+      throw new ErrorWithStatus({
+        message: 'Pharmacist safety review confirmation is required before creating this order',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
 
-    // Calculate tax and total
-    const taxAmount = Math.round(subtotal * DEFAULT_VAT_RATE)
+    const shippingFee = await this.calculatePharmacistShippingFee(orderData.deliveryMethod, orderData.shippingAddress, stockDeductions)
+
+    // Prices already include VAT, so pharmacist-created orders do not add VAT again.
+    const taxAmount = 0
     const discountAmount = 0 // No discount for now
-    const totalAmount = subtotal + taxAmount + shippingFee - discountAmount
+    const totalAmount = subtotal + shippingFee - discountAmount
 
     // Generate order number
     const orderNumber = await this.generateUniquePharmacistOrderNumber()
 
     // Find customer. customerId is currently supplied as phone/search value from the POS UI.
     const customer = orderData.customerId ? await this.findUniqueCustomerByPhone(orderData.customerId) : null
+    if (prescription && !prescription.customerId) {
+      throw new ErrorWithStatus({ message: 'Prescription is not linked to a customer account', status: HTTP_STATUS.BAD_REQUEST })
+    }
     if (prescription && customer && prescription.customerId.toString() !== customer._id?.toString()) {
       throw new ErrorWithStatus({
         message: 'Prescription does not belong to the selected customer',
@@ -531,13 +658,16 @@ class PharmacistService {
       })
     }
 
-    const guestCustomer = !prescription && !customer ? await this.createGuestCustomerForPharmacistOrder(orderNumber, orderData.shippingAddress) : null
+    const guestCustomer = !prescription && !customer ? await this.createGuestCustomerForPharmacistOrder(orderNumber, orderData.shippingAddress, pharmacistId) : null
     const userId = prescription?.customerId || customer?._id || guestCustomer?._id
     if (!userId) {
       throw new ErrorWithStatus({ message: 'Unable to resolve customer for pharmacist order', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     const isInstore = orderData.deliveryMethod === ShippingMethod.InStore
+    const isPaidAtCounter = isInstore && PAID_AT_COUNTER_METHODS.has(orderData.paymentMethod)
+    const orderStatus = isInstore ? (isPaidAtCounter ? OrderStatus.Delivered : OrderStatus.Confirmed) : OrderStatus.Pending
+    const pharmacistInfo = await this.getPharmacistSnapshot(pharmacistId)
 
     // Create order document
     const order = {
@@ -547,9 +677,10 @@ class PharmacistService {
       items: orderItems,
       itemCount: orderItems.length,
       shippingAddress: orderData.shippingAddress,
+      shippingMethod: orderData.deliveryMethod,
       paymentMethod: orderData.paymentMethod,
-      paymentStatus: 'pending',
-      orderStatus: isInstore ? OrderStatus.Confirmed : OrderStatus.Pending,
+      paymentStatus: isPaidAtCounter ? 'paid' : 'pending',
+      orderStatus,
       subtotal,
       taxAmount,
       shippingFee,
@@ -559,10 +690,16 @@ class PharmacistService {
       pharmacistNotes: orderData.pharmacistNotes || '',
       prescriptionId: prescription?._id,
       createdBy: pharmacistId, // Track who created this order
+      createdByInfo: pharmacistInfo,
+      idempotencyKey: orderData.idempotencyKey,
+      safetyReviewConfirmed: requiresSafetyReview ? true : Boolean(orderData.safetyReviewConfirmed),
+      safetyReviewConfirmedAt: requiresSafetyReview ? new Date() : undefined,
+      safetyReviewConfirmedBy: requiresSafetyReview ? pharmacistId : undefined,
+      safetyReviewConfirmedByInfo: requiresSafetyReview ? pharmacistInfo : undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
-      paidAt: undefined,
-      deliveredAt: undefined,
+      paidAt: isPaidAtCounter ? new Date() : undefined,
+      deliveredAt: isPaidAtCounter ? new Date() : undefined,
       customerType: guestCustomer ? 'guest' : 'registered'
     }
 
@@ -629,10 +766,23 @@ class PharmacistService {
       }
     }
 
+    const persistedOrder = { ...order, _id: result.insertedId }
+    let paymentUrl: string | undefined
+    let paymentUrlError = false
+    if (ONLINE_PAYMENT_METHODS.has(orderData.paymentMethod)) {
+      try {
+        paymentUrl = await paymentService.createPaymentUrl(persistedOrder as any, orderData.req)
+      } catch {
+        paymentUrlError = true
+      }
+    }
+
     return {
-      order: { ...order, _id: result.insertedId },
+      order: persistedOrder,
       orderId: result.insertedId.toString(),
-      orderNumber
+      orderNumber,
+      paymentUrl,
+      paymentUrlError
     }
   }
 
@@ -662,33 +812,16 @@ class PharmacistService {
       throw new ErrorWithStatus({ message: 'Prescription has expired', status: HTTP_STATUS.BAD_REQUEST })
     }
 
-    const mappedProductIds = new Set(
-      (prescription.medications || []).map((medication: any) => medication.productId?.toString()).filter(Boolean)
-    )
-    const orderedProductIds = items.map((item) => item.productId)
-    const hasUnmappedPrescriptionItem = (prescription.medications || []).some(
-      (medication: any) => !medication.productId
-    )
+    const medications = prescription.medications || []
 
-    if (mappedProductIds.size > 0 && orderedProductIds.some((productId) => !mappedProductIds.has(productId))) {
-      throw new ErrorWithStatus({
-        message: 'Order contains products that are not mapped from the verified prescription',
-        status: HTTP_STATUS.BAD_REQUEST
-      })
-    }
-
-    if (hasUnmappedPrescriptionItem && orderedProductIds.length === 0) {
-      throw new ErrorWithStatus({
-        message: 'Prescription has unmapped medications. Please map products before creating an order.',
-        status: HTTP_STATUS.BAD_REQUEST
-      })
-    }
-
+    const orderedQuantityByProductId = new Map<string, number>()
     for (const item of items) {
-      const medication = (prescription.medications || []).find(
-        (med: any) => med.productId?.toString() === item.productId
-      )
-      if (medication?.quantity !== undefined && (item as any).quantity > Number(medication.quantity)) {
+      orderedQuantityByProductId.set(item.productId, (orderedQuantityByProductId.get(item.productId) || 0) + Number(item.quantity || 0))
+    }
+
+    for (const [productId, orderedQuantity] of orderedQuantityByProductId.entries()) {
+      const medication = medications.find((med: any) => med.productId?.toString() === productId)
+      if (medication?.quantity !== undefined && orderedQuantity > Number(medication.quantity)) {
         throw new ErrorWithStatus({
           message: `Prescription quantity exceeded for ${medication.productName}`,
           status: HTTP_STATUS.BAD_REQUEST
@@ -701,7 +834,8 @@ class PharmacistService {
 
   private async createGuestCustomerForPharmacistOrder(
     orderNumber: string,
-    shippingAddress: { firstName: string; lastName: string; phone: string; email: string; address: string; ward: string; district: string; province: string }
+    shippingAddress: { firstName: string; lastName: string; phone: string; email: string; address: string; ward: string; district: string; province: string },
+    pharmacistId: ObjectId
   ) {
     const now = new Date()
     const guest = {
@@ -719,7 +853,7 @@ class PharmacistService {
       guestSource: 'pharmacist_pos',
       createdAt: now,
       updatedAt: now,
-      created_by: new ObjectId(),
+      created_by: pharmacistId,
       wishlist: []
     }
 
@@ -759,6 +893,15 @@ class PharmacistService {
       message: 'Could not generate a unique order number',
       status: HTTP_STATUS.INTERNAL_SERVER_ERROR
     })
+  }
+
+  async getOrderByIdempotencyKey(pharmacistId: ObjectId, idempotencyKey: string) {
+    return databaseService.orders.findOne({ createdBy: pharmacistId, idempotencyKey })
+  }
+
+  async createPaymentUrlForPharmacistOrder(order: any, req?: any) {
+    if (!order || order.paymentStatus === 'paid' || !ONLINE_PAYMENT_METHODS.has(order.paymentMethod)) return undefined
+    return paymentService.createPaymentUrl(order, req)
   }
 
   // Get orders list for pharmacist with filters

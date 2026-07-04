@@ -215,6 +215,11 @@ class DatabaseService {
         { userId: 1, idempotencyKey: 1 },
         { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
       )
+      await safeCreateIndex(
+        this.orders,
+        { createdBy: 1, idempotencyKey: 1 },
+        { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' }, createdBy: { $type: 'objectId' } } }
+      )
 
       // Prescriptions collection indexes for pharmacist dashboard and verification queues.
       await safeCreateIndex(this.prescriptions, { status: 1, createdAt: -1 })

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express'
+import { CookieOptions, Request, Response } from 'express'
 import usersService from '~/services/users.services'
 import { NextFunction, ParamsDictionary } from 'express-serve-static-core'
 import {
@@ -25,6 +25,27 @@ import { config } from 'dotenv'
 import { ErrorWithStatus } from '~/models/Error'
 config()
 
+const isProduction = process.env.NODE_ENV === 'production'
+
+const getRefreshTokenCookieOptions = (maxAge?: number): CookieOptions => {
+  const options: CookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    path: '/'
+  }
+
+  if (maxAge !== undefined) {
+    options.maxAge = maxAge
+  }
+
+  if (process.env.REFRESH_TOKEN_COOKIE_DOMAIN) {
+    options.domain = process.env.REFRESH_TOKEN_COOKIE_DOMAIN
+  }
+
+  return options
+}
+
 export const registerController = async (
   req: Request<ParamsDictionary, unknown, RegisterReqBody>,
   res: Response,
@@ -50,12 +71,7 @@ export const loginController = async (req: Request<ParamsDictionary, unknown, Lo
 
   // Set refresh token as httpOnly cookie
   const refreshTokenExpiresIn = rememberMe ? 90 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000 // milliseconds
-  res.cookie('refreshToken', result.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
-    maxAge: refreshTokenExpiresIn
-  })
+  res.cookie('refreshToken', result.refreshToken, getRefreshTokenCookieOptions(refreshTokenExpiresIn))
 
   // Return only access token in response
   return res.json({
@@ -78,12 +94,7 @@ export const oauthController = async (req: Request, res: Response) => {
     return res.redirect(`${clientRedirectUri}?error=${encodeURIComponent(errorCode)}`)
   }
 
-  res.cookie('refreshToken', result.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000
-  })
+  res.cookie('refreshToken', result.refreshToken, getRefreshTokenCookieOptions(30 * 24 * 60 * 60 * 1000))
 
   return res.redirect(`${clientRedirectUri}?accessToken=${encodeURIComponent(result.accessToken)}`)
 }
@@ -93,11 +104,7 @@ export const logoutController = async (req: Request<ParamsDictionary, unknown, L
   const result = await usersService.logout(req.refreshToken as string)
 
   // Clear refresh token cookie
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax' // Must match the sameSite setting used when setting the cookie
-  })
+  res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
 
   return res.json(result)
 }
@@ -163,12 +170,11 @@ export const refreshTokenController = async (
   })
 
   // Set new refresh token as httpOnly cookie
-  res.cookie('refreshToken', result.refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax', // Changed from 'strict' to 'lax' to allow cross-origin requests
-    maxAge: refreshTokenExpiresIn === '90d' ? 90 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
-  })
+  res.cookie(
+    'refreshToken',
+    result.refreshToken,
+    getRefreshTokenCookieOptions(refreshTokenExpiresIn === '90d' ? 90 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000)
+  )
 
   // Return only access token in response
   return res.json({
