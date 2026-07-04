@@ -5,6 +5,8 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import pharmacistService from '~/services/pharmacist.services'
 import { ObjectId } from 'mongodb'
 import { writePatientPhiAudit } from '~/middlewares/patientPhi.middlewares'
+import { ErrorWithStatus } from '~/models/Error'
+import { redis } from '~/services/cache.services'
 
 // Get dashboard statistics
 export const getDashboardStatsController = async (req: Request, res: Response) => {
@@ -193,13 +195,58 @@ export const checkDrugInteractionsController = async (req: Request<{ customerId:
 export const createPharmacistOrderController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const pharmacistId = new ObjectId(userId)
+  const idempotencyKey = req.header('x-idempotency-key')?.trim()
+  const lockKey = idempotencyKey ? `pharmacist:order:create:${pharmacistId.toString()}:${idempotencyKey}` : undefined
+  let locked = false
+  let lockAvailable = false
 
-  const result = await pharmacistService.createPharmacistOrder(pharmacistId, req.body)
+  try {
+    if (lockKey) {
+      try {
+        locked = (await redis.set(lockKey, '1', 'EX', 60, 'NX')) === 'OK'
+        lockAvailable = true
+      } catch {
+        lockAvailable = false
+      }
 
-  return res.status(HTTP_STATUS.CREATED).json({
-    message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
-    result
-  })
+      if (lockAvailable && !locked) {
+        const existing = await pharmacistService.getOrderByIdempotencyKey(pharmacistId, idempotencyKey!)
+        if (existing) {
+          let paymentUrl: string | undefined
+          let paymentUrlError = false
+          try {
+            paymentUrl = await pharmacistService.createPaymentUrlForPharmacistOrder(existing, req)
+          } catch {
+            paymentUrlError = true
+          }
+          return res.status(HTTP_STATUS.OK).json({
+            message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
+            result: {
+              order: existing,
+              orderId: existing._id?.toString(),
+              orderNumber: existing.orderNumber,
+              paymentUrl,
+              paymentUrlError
+            }
+          })
+        }
+        throw new ErrorWithStatus({ message: 'Order creation is already being processed.', status: HTTP_STATUS.CONFLICT })
+      }
+    }
+
+    const result = await pharmacistService.createPharmacistOrder(pharmacistId, {
+      ...req.body,
+      idempotencyKey,
+      req
+    })
+
+    return res.status(HTTP_STATUS.CREATED).json({
+      message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
+      result
+    })
+  } finally {
+    if (lockKey && locked) await redis.del(lockKey).catch(() => undefined)
+  }
 }
 
 // Get orders with filters

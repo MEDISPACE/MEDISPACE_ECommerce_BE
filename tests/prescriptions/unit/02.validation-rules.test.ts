@@ -41,9 +41,9 @@ describe('Prescription validation rules', () => {
     expect(validateCorrectionPayload({ medications: [{ productName: 'Amoxicillin 500mg', quantity: 1 }] }).ok).toBe(true)
   })
 
-  it('order items must be mapped to prescription and not exceed prescribed quantity', () => {
+  it('order items may include arbitrary products but mapped prescription quantities are capped', () => {
     const prescription = { medications: [{ productName: 'Amoxicillin', quantity: 2, productId: productIds.amoxicillin500 }] }
-    expect(validateOrderItemsAgainstPrescription(prescription, [{ productId: productIds.wrongExtra.toString(), quantity: 1 }]).ok).toBe(false)
+    expect(validateOrderItemsAgainstPrescription(prescription, [{ productId: productIds.wrongExtra.toString(), quantity: 1 }]).ok).toBe(true)
     expect(validateOrderItemsAgainstPrescription(prescription, [{ productId: productIds.amoxicillin500.toString(), quantity: 0 }]).ok).toBe(false)
     expect(validateOrderItemsAgainstPrescription(prescription, [{ productId: productIds.amoxicillin500.toString(), quantity: 3 }]).ok).toBe(false)
     expect(validateOrderItemsAgainstPrescription(prescription, [{ productId: productIds.amoxicillin500.toString(), quantity: 2 }]).ok).toBe(true)

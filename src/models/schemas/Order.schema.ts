@@ -44,6 +44,18 @@ export interface OrderAppliedCoupon {
   applicableCategoryIds?: ObjectId[]
 }
 
+export interface PharmacistSnapshot {
+  _id: ObjectId
+  firstName?: string
+  lastName?: string
+  fullName?: string
+  email?: string
+  phoneNumber?: string
+  avatar?: string
+  lisenseNumber?: string
+  licenseNumber?: string
+}
+
 export interface OrderType {
   _id?: ObjectId
   userId: ObjectId
@@ -78,6 +90,12 @@ export interface OrderType {
   cartClearedAt?: Date
   confirmationEmailSentAt?: Date
   prescriptionId?: ObjectId
+  createdBy?: ObjectId
+  createdByInfo?: PharmacistSnapshot
+  safetyReviewConfirmed?: boolean
+  safetyReviewConfirmedAt?: Date
+  safetyReviewConfirmedBy?: ObjectId
+  safetyReviewConfirmedByInfo?: PharmacistSnapshot
 
   createdAt?: Date
   updatedAt?: Date
@@ -120,6 +138,12 @@ export default class Order {
   cartClearedAt?: Date
   confirmationEmailSentAt?: Date
   prescriptionId?: ObjectId
+  createdBy?: ObjectId
+  createdByInfo?: PharmacistSnapshot
+  safetyReviewConfirmed?: boolean
+  safetyReviewConfirmedAt?: Date
+  safetyReviewConfirmedBy?: ObjectId
+  safetyReviewConfirmedByInfo?: PharmacistSnapshot
 
   createdAt?: Date
   updatedAt?: Date
@@ -161,6 +185,12 @@ export default class Order {
     this.cartClearedAt = order.cartClearedAt
     this.confirmationEmailSentAt = order.confirmationEmailSentAt
     this.prescriptionId = order.prescriptionId
+    this.createdBy = order.createdBy
+    this.createdByInfo = order.createdByInfo
+    this.safetyReviewConfirmed = order.safetyReviewConfirmed
+    this.safetyReviewConfirmedAt = order.safetyReviewConfirmedAt
+    this.safetyReviewConfirmedBy = order.safetyReviewConfirmedBy
+    this.safetyReviewConfirmedByInfo = order.safetyReviewConfirmedByInfo
 
     this.createdAt = order.createdAt || date
     this.updatedAt = order.updatedAt || date
