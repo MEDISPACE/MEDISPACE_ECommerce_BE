@@ -8,6 +8,18 @@ export interface PrescriptionMedication {
   instructions: string
 }
 
+export interface PharmacistSnapshot {
+  _id: ObjectId
+  firstName?: string
+  lastName?: string
+  fullName?: string
+  email?: string
+  phoneNumber?: string
+  avatar?: string
+  lisenseNumber?: string
+  licenseNumber?: string
+}
+
 export interface PrescriptionType {
   _id?: ObjectId
   prescriptionNumber: string
@@ -27,8 +39,12 @@ export interface PrescriptionType {
   // Status & Verification
   status: string // 'pending' | 'verified' | 'rejected' | 'expired'
   verifiedBy?: ObjectId // Admin/Pharmacist who verified
+  verifiedByInfo?: PharmacistSnapshot
   verifiedAt?: Date
   notes?: string // Verification or rejection notes
+  correctedBy?: ObjectId
+  correctedByInfo?: PharmacistSnapshot
+  correctedAt?: Date
 
   // Validity
   validUntil?: Date
@@ -60,8 +76,12 @@ export default class Prescription {
   // Status & Verification
   status: string
   verifiedBy?: ObjectId
+  verifiedByInfo?: PharmacistSnapshot
   verifiedAt?: Date
   notes?: string
+  correctedBy?: ObjectId
+  correctedByInfo?: PharmacistSnapshot
+  correctedAt?: Date
 
   // Validity
   validUntil?: Date
@@ -90,8 +110,12 @@ export default class Prescription {
 
     this.status = prescription.status || 'pending'
     this.verifiedBy = prescription.verifiedBy
+    this.verifiedByInfo = prescription.verifiedByInfo
     this.verifiedAt = prescription.verifiedAt
     this.notes = prescription.notes
+    this.correctedBy = prescription.correctedBy
+    this.correctedByInfo = prescription.correctedByInfo
+    this.correctedAt = prescription.correctedAt
     this.pharmacistNotes = prescription.pharmacistNotes
 
     this.validUntil = prescription.validUntil

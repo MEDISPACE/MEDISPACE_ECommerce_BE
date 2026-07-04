@@ -96,15 +96,15 @@ export function validateCorrectionPayload(corrections: Partial<Pick<Prescription
 }
 
 export function validateOrderItemsAgainstPrescription(prescription: Pick<PrescriptionLike, 'medications'>, items: Array<{ productId: string; quantity: number }>) {
-  const mapped = new Map(
+  const mappedQuantityByProductId = new Map(
     (prescription.medications || [])
       .filter((medication) => medication.productId)
       .map((medication) => [medication.productId!.toString(), Number(medication.quantity)])
   )
   for (const item of items) {
-    if (!mapped.has(item.productId)) return { ok: false, message: 'Product is not mapped to this prescription' }
     if (!Number.isFinite(item.quantity) || item.quantity <= 0) return { ok: false, message: 'Quantity must be positive' }
-    if (item.quantity > mapped.get(item.productId)!) return { ok: false, message: 'Quantity exceeds prescription' }
+    const mappedQuantity = mappedQuantityByProductId.get(item.productId)
+    if (mappedQuantity !== undefined && item.quantity > mappedQuantity) return { ok: false, message: 'Quantity exceeds prescription' }
   }
   return { ok: true as const }
 }

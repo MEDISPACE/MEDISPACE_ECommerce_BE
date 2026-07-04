@@ -257,9 +257,7 @@ export function createPrescriptionApp(harness: PrescriptionTestDb) {
     if (prescriptionId && !prescription) return res.status(404).json({ message: 'Prescription not found' })
     if (prescription && prescription.status !== 'verified') return res.status(400).json({ message: 'Only verified prescriptions can be used to create orders' })
     if (prescription?.validUntil && prescription.validUntil < new Date()) return res.status(400).json({ message: 'Prescription has expired' })
-    const mapped = new Set((prescription?.medications || []).map((m: any) => m.productId?.toString()).filter(Boolean))
     for (const item of req.body.items || []) {
-      if (mapped.size && !mapped.has(item.productId)) return res.status(400).json({ message: 'Order contains products that are not mapped from the verified prescription' })
       const med = (prescription?.medications || []).find((m: any) => m.productId?.toString() === item.productId)
       if (med && item.quantity > med.quantity) return res.status(400).json({ message: `Prescription quantity exceeded for ${med.productName}` })
     }

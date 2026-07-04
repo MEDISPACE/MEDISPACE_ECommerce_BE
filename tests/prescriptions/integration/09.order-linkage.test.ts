@@ -61,10 +61,11 @@ describe('prescriptions/integration/09.order-linkage', () => {
     expect(await harness.orders.countDocuments({})).toBe(0)
   })
 
-  it('blocks productIds not mapped to this prescription', async () => {
+  it('allows arbitrary products when creating from a verified prescription', async () => {
     const res = await api(app).post('/pharmacist/orders').set(pharmacistAuth()).send(orderPayload(undefined, { items: [{ productId: productIds.wrongExtra.toString(), quantity: 1 }] }))
-    expect(res.status).toBe(400)
-    expect(res.body.message).toMatch(/not mapped/i)
+    expect(res.status).toBe(201)
+    const order = await harness.orders.findOne({ prescriptionId: prescriptionIds.verified })
+    expect(order?.items).toEqual(expect.arrayContaining([expect.objectContaining({ productId: productIds.wrongExtra.toString() })]))
   })
 
   it('blocks quantity exceeding prescribed amount', async () => {

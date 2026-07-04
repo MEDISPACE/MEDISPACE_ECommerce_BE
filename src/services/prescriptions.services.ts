@@ -13,6 +13,32 @@ import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 
 class PrescriptionsService {
+  private buildPharmacistSnapshot(pharmacist: any) {
+    if (!pharmacist?._id) return undefined
+    const firstName = pharmacist.firstName || ''
+    const lastName = pharmacist.lastName || ''
+    const fullName = `${firstName} ${lastName}`.trim()
+    return {
+      _id: pharmacist._id,
+      firstName: pharmacist.firstName,
+      lastName: pharmacist.lastName,
+      fullName,
+      email: pharmacist.email,
+      phoneNumber: pharmacist.phoneNumber,
+      avatar: pharmacist.avatar,
+      lisenseNumber: pharmacist.lisenseNumber,
+      licenseNumber: pharmacist.lisenseNumber
+    }
+  }
+
+  private async getPharmacistSnapshot(pharmacistId: ObjectId) {
+    const pharmacist = await databaseService.users.findOne(
+      { _id: pharmacistId },
+      { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, phoneNumber: 1, avatar: 1, lisenseNumber: 1 } }
+    )
+    return this.buildPharmacistSnapshot(pharmacist)
+  }
+
   // Generate unique prescription number
   private generatePrescriptionNumber(): string {
     const timestamp = Date.now()
@@ -114,8 +140,31 @@ class PrescriptionsService {
         databaseService.prescriptions.countDocuments(filter)
       ])
 
+      const prescriptionIds = prescriptions.map((prescription) => prescription._id).filter(Boolean) as ObjectId[]
+      const linkedOrders = prescriptionIds.length
+        ? await databaseService.orders
+            .find(
+              { prescriptionId: { $in: prescriptionIds } },
+              { projection: { _id: 1, prescriptionId: 1, orderNumber: 1, orderStatus: 1, createdAt: 1 } }
+            )
+            .toArray()
+        : []
+      const ordersByPrescriptionId = new Map(linkedOrders.map((order) => [order.prescriptionId?.toString(), order]))
+      const enrichedPrescriptions = prescriptions.map((prescription) => {
+        const linkedOrder = ordersByPrescriptionId.get(prescription._id?.toString())
+        return linkedOrder
+          ? {
+              ...prescription,
+              orderId: linkedOrder._id,
+              orderNumber: linkedOrder.orderNumber,
+              orderStatus: linkedOrder.orderStatus,
+              orderCreatedAt: linkedOrder.createdAt
+            }
+          : prescription
+      })
+
       return {
-        prescriptions,
+        prescriptions: enrichedPrescriptions,
         pagination: {
           page,
           limit,
@@ -166,6 +215,17 @@ class PrescriptionsService {
         message: PRESCRIPTIONS_MESSAGES.PRESCRIPTION_NOT_FOUND,
         status: HTTP_STATUS.NOT_FOUND
       })
+    }
+
+    const linkedOrder = await databaseService.orders.findOne(
+      { prescriptionId: prescription._id },
+      { projection: { _id: 1, orderNumber: 1, orderStatus: 1, createdAt: 1 } }
+    )
+    if (linkedOrder) {
+      prescription.orderId = linkedOrder._id
+      prescription.orderNumber = linkedOrder.orderNumber
+      prescription.orderStatus = linkedOrder.orderStatus
+      prescription.orderCreatedAt = linkedOrder.createdAt
     }
 
     return prescription
@@ -235,9 +295,12 @@ class PrescriptionsService {
       })
     }
 
+    const pharmacistInfo = await this.getPharmacistSnapshot(pharmacistId)
+
     const updateData: Record<string, unknown> = {
       status: status === PrescriptionStatus.Verified ? PrescriptionStatus.Verified : PrescriptionStatus.Rejected,
       verifiedBy: pharmacistId,
+      verifiedByInfo: pharmacistInfo,
       verifiedAt: new Date(),
       updatedAt: new Date()
     }
@@ -279,6 +342,7 @@ class PrescriptionsService {
       }
 
       updateData.correctedBy = pharmacistId
+      updateData.correctedByInfo = pharmacistInfo
       updateData.correctedAt = new Date()
     }
 

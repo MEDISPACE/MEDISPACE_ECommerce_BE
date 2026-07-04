@@ -25,6 +25,8 @@ const ARTICLES_COLLECTION = 'articles'
 const BRANDS_COLLECTION = 'brands'
 const CATEGORIES_COLLECTION = 'categories'
 const QUERY_SUGGESTIONS_COLLECTION = 'query_suggestions'
+const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE !== 'false'
+const TYPESENSE_EMBEDDING_ENABLED = process.env.TYPESENSE_EMBEDDING_ENABLED !== 'false'
 
 const productSchema = {
   name: PRODUCTS_COLLECTION,
@@ -173,6 +175,11 @@ const querySuggestionsSchema = {
   ],
   default_sorting_field: 'count',
   token_separators: ['-', '/', ' ']
+}
+
+if (!TYPESENSE_EMBEDDING_ENABLED) {
+  productSchema.fields = productSchema.fields.filter((field) => field.name !== 'embedding')
+  articleSchema.fields = articleSchema.fields.filter((field) => field.name !== 'embedding')
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -519,6 +526,13 @@ class TypesenseService {
     if (force || state?.dirty) await this.reconcileAll()
   }
 
+  private scheduleReconciliation(force = false): void {
+    if (!TYPESENSE_AUTO_RECONCILE) return
+    void this.reconcileIfNeeded(force).catch((err) => {
+      console.error('[Typesense] Scheduled reconciliation failed:', (err as Error)?.message)
+    })
+  }
+
   private startHealthCheck(): void {
     setInterval(async () => {
       try {
@@ -526,9 +540,9 @@ class TypesenseService {
         if (!this.isAvailable) {
           this.isAvailable = true
           await this.ensureCollections()
-          await this.reconcileIfNeeded(true)
+          this.scheduleReconciliation(true)
         }
-        await this.reconcileIfNeeded()
+        this.scheduleReconciliation()
         await this.flushRetries()
       } catch {
         this.isAvailable = false
@@ -541,7 +555,7 @@ class TypesenseService {
       await client.health.retrieve()
       this.isAvailable = true
       await this.ensureCollections()
-      await this.reconcileIfNeeded(true)
+      this.scheduleReconciliation(true)
       await this.flushRetries()
     } catch {
       this.isAvailable = false
