@@ -15,6 +15,7 @@ import orderService from './orders.services'
 import { canAccessPatientPhi } from '~/middlewares/patientPhi.middlewares'
 import ghnService from './ghn.services'
 import paymentService from './payment.services'
+import typesenseService from './typesense.services'
 
 const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
@@ -34,6 +35,13 @@ const ONLINE_PAYMENT_METHODS = new Set<string>([PaymentMethod.PayOS, PaymentMeth
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+const normalizeVietnamese = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
+
 const getVietnamDayRange = (date = new Date()) => {
   const vietnamTime = new Date(date.getTime() + VIETNAM_TIMEZONE_OFFSET_MINUTES * 60 * 1000)
   const startUtc = Date.UTC(vietnamTime.getUTCFullYear(), vietnamTime.getUTCMonth(), vietnamTime.getUTCDate())
@@ -44,6 +52,192 @@ const getVietnamDayRange = (date = new Date()) => {
 
 class PharmacistService {
   private dashboardStatsCache: { expiresAt: number; value: unknown } | null = null
+
+  private async getCategoryAndDescendantIds(categoryIdOrSlug?: string): Promise<ObjectId[] | undefined> {
+    if (!categoryIdOrSlug || categoryIdOrSlug === 'all') return undefined
+
+    const targetCategory = ObjectId.isValid(categoryIdOrSlug)
+      ? await databaseService.categories.findOne({ _id: new ObjectId(categoryIdOrSlug) })
+      : await databaseService.categories.findOne({ slug: categoryIdOrSlug })
+
+    if (!targetCategory?._id) return []
+
+    let categoryPath = targetCategory.path || `/${targetCategory.slug}`
+    if (!categoryPath.startsWith('/')) categoryPath = `/${categoryPath}`
+    if (categoryPath === '/') categoryPath = `/${targetCategory.slug}`
+    else if (!categoryPath.endsWith(`/${targetCategory.slug}`)) categoryPath = `${categoryPath}/${targetCategory.slug}`
+
+    const escapedPath = escapeRegex(categoryPath)
+    const descendants = await databaseService.categories
+      .find({
+        $or: [{ _id: targetCategory._id }, { path: { $regex: `^${escapedPath}(?:/|$)` } }]
+      })
+      .project({ _id: 1 })
+      .toArray()
+
+    return descendants.map((category) => category._id)
+  }
+
+  private getDrugDatabaseProductProjection() {
+    return {
+      _id: 1,
+      name: 1,
+      slug: 1,
+      sku: 1,
+      barcode: 1,
+      shortDescription: 1,
+      categoryId: 1,
+      brandId: 1,
+      priceVariants: {
+        $map: {
+          input: { $ifNull: ['$priceVariants', []] },
+          as: 'variant',
+          in: {
+            unit: '$$variant.unit',
+            price: '$$variant.price',
+            originalPrice: '$$variant.originalPrice',
+            salePrice: '$$variant.salePrice',
+            discountPercent: '$$variant.discountPercent',
+            isDefault: { $ifNull: ['$$variant.isDefault', false] },
+            quantityPerUnit: '$$variant.quantityPerUnit'
+          }
+        }
+      },
+      stockQuantity: 1,
+      maxOrderQuantity: 1,
+      status: 1,
+      isActive: 1,
+      requiresPrescription: 1,
+      featuredImage: 1,
+      rating: 1,
+      reviewCount: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      category: 1,
+      brand: 1,
+      details: 1,
+      media: 1,
+      warnings: 1,
+      packaging: 1,
+      calculatedPrice: 1
+    }
+  }
+
+  private mapDrugDatabaseProduct(product: any) {
+    const details = product.details || {}
+    const requiredClinicalFields = [
+      'activeIngredients',
+      'dosageForm',
+      'packSize',
+      'manufacturer',
+      'indications',
+      'dosageInstructions',
+      'storageInstructions'
+    ]
+    const missingClinicalFields = requiredClinicalFields.filter((field) => !String(details[field] || '').trim())
+    const activeIngredientText = String(details.activeIngredients || product.activeIngredients || '')
+
+    return {
+      ...product,
+      priceVariants: product.priceVariants || [],
+      stockQuantity: product.stockQuantity || 0,
+      maxOrderQuantity: product.maxOrderQuantity || 0,
+      details: product.details || null,
+      media: product.media || null,
+      lastCheckedAt: new Date(),
+      dataQuality: {
+        completenessPercent: Math.round(((requiredClinicalFields.length - missingClinicalFields.length) / requiredClinicalFields.length) * 100),
+        missingClinicalFields,
+        hasStructuredActiveIngredients: false,
+        activeIngredientSource: activeIngredientText ? 'free_text' : 'missing',
+        clinicalReferenceReady: missingClinicalFields.length === 0 && Boolean(activeIngredientText)
+      }
+    }
+  }
+
+  private buildDrugDatabasePipeline(match: Record<string, unknown>, searchRegex?: string, sort: Record<string, 1 | -1> = { name: 1 }) {
+    return [
+      { $match: match },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'categoryId',
+          foreignField: '_id',
+          as: 'category',
+          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, path: 1 } }]
+        }
+      },
+      {
+        $lookup: {
+          from: 'brands',
+          localField: 'brandId',
+          foreignField: '_id',
+          as: 'brand',
+          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, logo: 1 } }]
+        }
+      },
+      {
+        $lookup: {
+          from: 'productDetails',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'details'
+        }
+      },
+      {
+        $lookup: {
+          from: 'productMedia',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'media'
+        }
+      },
+      {
+        $addFields: {
+          category: { $arrayElemAt: ['$category', 0] },
+          brand: { $arrayElemAt: ['$brand', 0] },
+          details: { $arrayElemAt: ['$details', 0] },
+          media: { $arrayElemAt: ['$media', 0] },
+          calculatedPrice: {
+            $let: {
+              vars: {
+                defaultVariant: {
+                  $ifNull: [
+                    { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                    { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                  ]
+                }
+              },
+              in: { $ifNull: ['$$defaultVariant.price', 0] }
+            }
+          }
+        }
+      },
+      ...(searchRegex
+        ? [
+            {
+              $match: {
+                $or: [
+                  { name: { $regex: searchRegex, $options: 'i' } },
+                  { shortDescription: { $regex: searchRegex, $options: 'i' } },
+                  { sku: { $regex: searchRegex, $options: 'i' } },
+                  { barcode: { $regex: searchRegex, $options: 'i' } },
+                  { 'category.name': { $regex: searchRegex, $options: 'i' } },
+                  { 'brand.name': { $regex: searchRegex, $options: 'i' } },
+                  { 'details.activeIngredients': { $regex: searchRegex, $options: 'i' } },
+                  { 'details.indications': { $regex: searchRegex, $options: 'i' } },
+                  { 'details.manufacturer': { $regex: searchRegex, $options: 'i' } },
+                  { 'details.dosageForm': { $regex: searchRegex, $options: 'i' } },
+                  { 'details.strength': { $regex: searchRegex, $options: 'i' } }
+                ]
+              }
+            }
+          ]
+        : []),
+      { $sort: sort },
+      { $project: this.getDrugDatabaseProductProjection() }
+    ]
+  }
 
   private buildPharmacistSnapshot(pharmacist: any) {
     if (!pharmacist?._id) return undefined
@@ -325,6 +519,134 @@ class PharmacistService {
       createdAt: pharmacist.createdAt,
       updatedAt: pharmacist.updatedAt
     }
+  }
+
+  async getDrugDatabaseProducts(query: {
+    page?: number
+    limit?: number
+    search?: string
+    categoryId?: string
+    type?: string
+    stock?: string
+    activeStatus?: string
+    status?: string
+    sortBy?: string
+    sortOrder?: string
+  }) {
+    const page = Number.isFinite(query.page) && Number(query.page) > 0 ? Number(query.page) : 1
+    const limit = Math.min(Math.max(Number.isFinite(query.limit) && Number(query.limit) > 0 ? Number(query.limit) : 24, 1), 100)
+    const skip = (page - 1) * limit
+    const search = query.search?.trim()
+    const categoryIds = await this.getCategoryAndDescendantIds(query.categoryId)
+
+    const match: Record<string, unknown> = {}
+    const activeStatus = query.activeStatus || 'active'
+    if (activeStatus === 'active') match.isActive = true
+    else if (activeStatus === 'inactive') match.isActive = false
+
+    if (query.status && query.status !== 'all') match.status = query.status
+    if (query.type === 'Rx') match.requiresPrescription = true
+    if (query.type === 'OTC') match.requiresPrescription = false
+    if (categoryIds) match.categoryId = categoryIds.length > 0 ? { $in: categoryIds } : null
+
+    if (query.stock === 'inStock') match.stockQuantity = { $gt: 0 }
+    else if (query.stock === 'lowStock') match.stockQuantity = { $gt: 0, $lte: LOW_STOCK_THRESHOLD }
+    else if (query.stock === 'outOfStock') match.stockQuantity = { $lte: 0 }
+
+    const sortOrder: 1 | -1 = query.sortOrder === 'desc' ? -1 : 1
+    const sortBy = query.sortBy || 'name'
+    const sortField = sortBy === 'price' ? 'calculatedPrice' : ['name', 'stockQuantity', 'createdAt', 'updatedAt', 'rating'].includes(sortBy) ? sortBy : 'name'
+    const sort: Record<string, 1 | -1> = { [sortField]: sortOrder, _id: 1 }
+
+    const canUseTypesense =
+      Boolean(search) &&
+      typesenseService.getAvailability() &&
+      activeStatus === 'active' &&
+      query.stock !== 'outOfStock' &&
+      (!query.status || query.status === 'all' || query.status === 'active')
+
+    if (canUseTypesense) {
+      const tsSortBy =
+        sortBy === 'price'
+          ? sortOrder === -1
+            ? 'price_desc'
+            : 'price_asc'
+          : sortBy === 'createdAt'
+            ? 'newest'
+            : sortBy === 'rating'
+              ? 'rating'
+              : undefined
+      const tsResult = await typesenseService.searchProducts({
+        q: search as string,
+        page,
+        limit,
+        categoryIds: categoryIds?.map((id) => id.toString()),
+        requiresPrescription: query.type === 'Rx' ? true : query.type === 'OTC' ? false : undefined,
+        inStock: query.stock === 'inStock' || query.stock === 'lowStock',
+        sortBy: tsSortBy
+      })
+
+      if (tsResult?.hits) {
+        const ids = tsResult.hits.map((hit: any) => hit.document?.mongoId).filter((id: string) => ObjectId.isValid(id))
+        const objectIds = ids.map((id: string) => new ObjectId(id))
+        const orderIds = objectIds.map((id: ObjectId) => id)
+        const products = objectIds.length
+          ? await databaseService.products
+              .aggregate([
+                { $match: { ...match, _id: { $in: objectIds } } },
+                ...this.buildDrugDatabasePipeline({}, undefined, { _id: 1 }).slice(1, -1),
+                { $addFields: { __order: { $indexOfArray: [orderIds, '$_id'] } } },
+                { $sort: { __order: 1 } },
+                { $project: { ...this.getDrugDatabaseProductProjection(), __order: 0 } }
+              ])
+              .toArray()
+          : []
+
+        return {
+          products: products.map((product) => this.mapDrugDatabaseProduct(product)),
+          pagination: {
+            page,
+            limit,
+            totalPages: Math.ceil((tsResult.found || products.length) / limit),
+            totalCount: tsResult.found || products.length
+          },
+          lowStockThreshold: LOW_STOCK_THRESHOLD,
+          searchSource: 'typesense',
+          lastCheckedAt: new Date()
+        }
+      }
+    }
+
+    const searchRegex = search ? escapeRegex(search) : undefined
+    const pipeline = this.buildDrugDatabasePipeline(match, searchRegex, sort)
+    const [products, countResult] = await Promise.all([
+      databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }]).collation({ locale: 'vi', strength: 1 }).toArray(),
+      databaseService.products.aggregate([...pipeline.slice(0, -2), { $count: 'total' }]).collation({ locale: 'vi', strength: 1 }).toArray()
+    ])
+    const totalCount = countResult[0]?.total || 0
+
+    return {
+      products: products.map((product) => this.mapDrugDatabaseProduct(product)),
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit),
+        totalCount
+      },
+      lowStockThreshold: LOW_STOCK_THRESHOLD,
+      searchSource: search ? 'mongo' : 'mongo',
+      lastCheckedAt: new Date(),
+      normalizedSearch: search ? normalizeVietnamese(search) : undefined
+    }
+  }
+
+  async getDrugDatabaseProduct(productId: string) {
+    const match = ObjectId.isValid(productId) ? { _id: new ObjectId(productId) } : { slug: productId }
+    const products = await databaseService.products.aggregate(this.buildDrugDatabasePipeline(match, undefined, { _id: 1 })).toArray()
+    if (!products.length) {
+      throw new ErrorWithStatus({ message: 'Product not found', status: HTTP_STATUS.NOT_FOUND })
+    }
+    return this.mapDrugDatabaseProduct(products[0])
   }
 
   // ========== PATIENT MEDICAL INFO METHODS ==========
