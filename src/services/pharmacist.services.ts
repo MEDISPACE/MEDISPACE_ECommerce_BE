@@ -79,6 +79,8 @@ class PharmacistService {
   }
 
   private getDrugDatabaseProductProjection() {
+    const safePriceVariants = this.getSafePriceVariantsExpression()
+
     return {
       _id: 1,
       name: 1,
@@ -90,7 +92,7 @@ class PharmacistService {
       brandId: 1,
       priceVariants: {
         $map: {
-          input: { $ifNull: ['$priceVariants', []] },
+          input: safePriceVariants,
           as: 'variant',
           in: {
             unit: '$$variant.unit',
@@ -123,8 +125,15 @@ class PharmacistService {
     }
   }
 
+  private getSafePriceVariantsExpression() {
+    return {
+      $cond: [{ $isArray: '$priceVariants' }, '$priceVariants', []]
+    }
+  }
+
   private mapDrugDatabaseProduct(product: any) {
     const details = product.details || {}
+    const priceVariants = Array.isArray(product.priceVariants) ? product.priceVariants : []
     const requiredClinicalFields = [
       'activeIngredients',
       'dosageForm',
@@ -139,7 +148,7 @@ class PharmacistService {
 
     return {
       ...product,
-      priceVariants: product.priceVariants || [],
+      priceVariants,
       stockQuantity: product.stockQuantity || 0,
       maxOrderQuantity: product.maxOrderQuantity || 0,
       details: product.details || null,
@@ -156,6 +165,8 @@ class PharmacistService {
   }
 
   private buildDrugDatabasePipeline(match: Record<string, unknown>, searchRegex?: string, sort: Record<string, 1 | -1> = { name: 1 }) {
+    const safePriceVariants = this.getSafePriceVariantsExpression()
+
     return [
       { $match: match },
       {
@@ -203,8 +214,8 @@ class PharmacistService {
               vars: {
                 defaultVariant: {
                   $ifNull: [
-                    { $arrayElemAt: [{ $filter: { input: { $ifNull: ['$priceVariants', []] }, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
-                    { $arrayElemAt: [{ $ifNull: ['$priceVariants', []] }, 0] }
+                    { $arrayElemAt: [{ $filter: { input: safePriceVariants, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                    { $arrayElemAt: [safePriceVariants, 0] }
                   ]
                 }
               },
@@ -597,7 +608,7 @@ class PharmacistService {
                 ...this.buildDrugDatabasePipeline({}, undefined, { _id: 1 }).slice(1, -1),
                 { $addFields: { __order: { $indexOfArray: [orderIds, '$_id'] } } },
                 { $sort: { __order: 1 } },
-                { $project: { ...this.getDrugDatabaseProductProjection(), __order: 0 } }
+                { $project: this.getDrugDatabaseProductProjection() }
               ])
               .toArray()
           : []
