@@ -165,7 +165,7 @@ class ProductsService {
    * Called after product CRUD operations.
    */
   private async invalidateProductCache(slug?: string): Promise<void> {
-    const patterns = ['products:*']
+    const patterns = ['products:*', 'pharmacist:drug-database:*']
     if (slug) patterns.push(`products:slug:${slug}`)
     await cacheService.invalidate(...patterns)
     void recommendationsService.notifyCatalogChanged()
@@ -933,6 +933,8 @@ class ProductsService {
         ).catch(() => {})
       } catch { /* socket not ready */ }
     }
+
+    this.invalidateProductCache(updated.slug).catch(() => {})
 
     return updated
   }
