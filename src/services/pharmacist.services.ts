@@ -684,28 +684,29 @@ class PharmacistService {
       }
 
       const searchRegex = search ? escapeRegex(search) : undefined
+      const listLimit = searchRegex ? limit : limit + 1
       const pipeline = searchRegex
         ? this.buildDrugDatabasePipeline(match, searchRegex, sort)
-        : this.buildDrugDatabaseListPipeline(match, sort, skip, limit, sortField === 'calculatedPrice')
+        : this.buildDrugDatabaseListPipeline(match, sort, skip, listLimit, sortField === 'calculatedPrice')
       const collation = { locale: 'vi', strength: 1 }
-      const [products, totalCount] = await Promise.all([
-        searchRegex
-          ? databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray()
-          : databaseService.products.aggregate(pipeline, { collation }).toArray(),
-        searchRegex
-          ? databaseService.products
-              .aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation })
-              .toArray()
-              .then((countResult) => countResult[0]?.total || 0)
-          : databaseService.products.countDocuments(match)
-      ])
+      const products = searchRegex
+        ? await databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray()
+        : await databaseService.products.aggregate(pipeline, { collation }).toArray()
+      const hasNextPage = !searchRegex && products.length > limit
+      const pageProducts = hasNextPage ? products.slice(0, limit) : products
+      const totalCount = searchRegex
+        ? await databaseService.products
+            .aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation })
+            .toArray()
+            .then((countResult) => countResult[0]?.total || 0)
+        : skip + pageProducts.length + (hasNextPage ? 1 : 0)
 
       return {
-        products: products.map((product) => this.mapDrugDatabaseProduct(product)),
+        products: pageProducts.map((product) => this.mapDrugDatabaseProduct(product)),
         pagination: {
           page,
           limit,
-          totalPages: Math.ceil(totalCount / limit),
+          totalPages: searchRegex ? Math.ceil(totalCount / limit) : page + (hasNextPage ? 1 : 0),
           totalCount
         },
         lowStockThreshold: LOW_STOCK_THRESHOLD,
