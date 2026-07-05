@@ -722,7 +722,8 @@ class PharmacistService {
           categoryIds: categoryIds?.map((id) => id.toString()),
           requiresPrescription: query.type === 'Rx' ? true : query.type === 'OTC' ? false : undefined,
           inStock: query.stock === 'inStock' || query.stock === 'lowStock',
-          sortBy: tsSortBy
+          sortBy: tsSortBy,
+          includeDrugDatabaseFields: true
         })
 
         if (tsResult?.hits) {
