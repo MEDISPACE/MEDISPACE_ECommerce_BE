@@ -630,9 +630,10 @@ class PharmacistService {
 
     const searchRegex = search ? escapeRegex(search) : undefined
     const pipeline = this.buildDrugDatabasePipeline(match, searchRegex, sort)
+    const collation = { locale: 'vi', strength: 1 }
     const [products, countResult] = await Promise.all([
-      databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }]).collation({ locale: 'vi', strength: 1 }).toArray(),
-      databaseService.products.aggregate([...pipeline.slice(0, -2), { $count: 'total' }]).collation({ locale: 'vi', strength: 1 }).toArray()
+      databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray(),
+      databaseService.products.aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation }).toArray()
     ])
     const totalCount = countResult[0]?.total || 0
 
