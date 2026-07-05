@@ -29,7 +29,9 @@ describe('VNPayProvider configuration', () => {
   })
 
   it('rejects a return payload with an invalid signature', async () => {
+    process.env.VNP_URL = 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'
     process.env.VNP_HASH_SECRET = 'test-secret'
+    process.env.VNP_TMN_CODE = 'TEST'
     const provider = new VNPayProvider()
 
     const result = await provider.verifyReturn({
