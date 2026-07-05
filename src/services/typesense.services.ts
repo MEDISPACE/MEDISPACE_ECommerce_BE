@@ -874,7 +874,7 @@ class TypesenseService {
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
         include_fields:
-          'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,dosageForm,strength,packSize',
+          'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt',
         sort_by: sortByStr,
         page,
         per_page: limit,
