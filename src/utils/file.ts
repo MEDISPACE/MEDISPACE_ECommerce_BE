@@ -14,6 +14,8 @@ import { PutObjectCommand } from '@aws-sdk/client-s3'
 import s3Client from './s3'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
+import { ErrorWithStatus } from '~/models/Error'
+import HTTP_STATUS from '~/constants/httpStatus'
 
 export const initFolder = () => {
   ;[UPLOAD_IMAGE_TEMP_DIR, UPLOAD_VIDEO_TEMP_DIR].forEach((dir) => {
@@ -23,12 +25,14 @@ export const initFolder = () => {
   })
 }
 export const handleUploadImage = async (req: Request) => {
+  const uploadPurpose = String(req.query.purpose || '').trim().toLowerCase()
+  const isPrescriptionUpload = uploadPurpose === 'prescription'
   const form = formidable({
     uploadDir: UPLOAD_IMAGE_TEMP_DIR,
     maxFiles: 4,
     keepExtensions: true,
-    maxFileSize: 2 * 1024 * 1024, // 2MB
-    maxTotalFileSize: 4 * 2 * 1024 * 1024, // 8MB
+    maxFileSize: (isPrescriptionUpload ? 10 : 2) * 1024 * 1024,
+    maxTotalFileSize: 4 * (isPrescriptionUpload ? 10 : 2) * 1024 * 1024,
     filter: function (part: any) {
       const { name, mimetype } = part
       const valid = name === 'image' && Boolean(mimetype?.includes('image/'))
@@ -41,10 +45,12 @@ export const handleUploadImage = async (req: Request) => {
   return new Promise<File[]>((resolve, reject) => {
     form.parse(req, (err: any, fields: any, files: any) => {
       if (err) {
-        return reject(err)
+        const status = err.httpCode === 413 ? HTTP_STATUS.PAYLOAD_TOO_LARGE : HTTP_STATUS.BAD_REQUEST
+        const message = err.httpCode === 413 ? 'Image file must not exceed 2MB' : err.message
+        return reject(new ErrorWithStatus({ message, status }))
       }
       if (Boolean(files.image) === false) {
-        return reject(new Error(USERS_MESSAGES.FILE_IS_EMPTY))
+        return reject(new ErrorWithStatus({ message: USERS_MESSAGES.FILE_IS_EMPTY, status: HTTP_STATUS.BAD_REQUEST }))
       }
       resolve(files.image as File[])
     })
@@ -68,6 +74,10 @@ export const getExtensionFromFullName = (fullName: string) => {
  * @returns S3 URL của file đã upload
  */
 export const uploadFileToS3 = async (filePath: string, folder: string, contentType: string): Promise<string> => {
+  if (!S3_BUCKET_NAME || !process.env.AWS_REGION) {
+    throw new ErrorWithStatus({ message: 'S3 upload is not configured', status: HTTP_STATUS.SERVICE_UNAVAILABLE })
+  }
+
   const fileStream = fs.createReadStream(filePath)
   const fileName = `${folder}/${uuidv4()}.${getExtensionFromFullName(filePath)}`
 
@@ -90,7 +100,8 @@ export const uploadFileToS3 = async (filePath: string, folder: string, contentTy
     const s3Url = `https://${S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`
     return s3Url
   } catch (error) {
-    throw error
+    console.error('[S3UploadError]', error)
+    throw new ErrorWithStatus({ message: 'S3 upload failed', status: HTTP_STATUS.SERVICE_UNAVAILABLE })
   }
 }
 

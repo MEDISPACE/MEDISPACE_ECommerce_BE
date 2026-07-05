@@ -12,6 +12,8 @@ import {
   getPatientNotesController,
   getRecentMedicationsController,
   checkDrugInteractionsController,
+  getDrugDatabaseProductsController,
+  getDrugDatabaseProductController,
   createPharmacistOrderController,
   getOrdersController,
   getOrderDetailsController,
@@ -20,16 +22,12 @@ import {
   updateProfileController,
   updatePasswordController,
   getWorkingStatsController,
-  updateOnlineStatusController,
-  getReportsAnalyticsController,
-  getPrescriptionAnalyticsController,
-  getConsultationStatsController,
-  getCategoryAnalyticsController,
-  getPerformanceMetricsController
+  updateOnlineStatusController
 } from '~/controllers/pharmacist.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
-import { authenticatePharmacist, updatePasswordValidator } from '~/middlewares/pharmacists.middlewares'
+import { authenticatePharmacist, checkLicense, updatePasswordValidator } from '~/middlewares/pharmacists.middlewares'
+import { rateLimitPatientPhi, requirePatientPhiAccess } from '~/middlewares/patientPhi.middlewares'
 
 const pharmacistRouter = Router()
 
@@ -60,7 +58,7 @@ pharmacistRouter.get('/dashboard/recent-activities', wrapRequestHandler(getRecen
  * Query: { phone: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/search', wrapRequestHandler(searchPatientsController))
+pharmacistRouter.get('/patients/search', rateLimitPatientPhi, wrapRequestHandler(searchPatientsController))
 
 /**
  * Description: Get patient history (prescriptions & orders)
@@ -69,7 +67,7 @@ pharmacistRouter.get('/patients/search', wrapRequestHandler(searchPatientsContro
  * Params: { customerId: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/history', wrapRequestHandler(getPatientHistoryController))
+pharmacistRouter.get('/patients/:customerId/history', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getPatientHistoryController))
 
 /**
  * Description: Get pharmacist profile
@@ -88,7 +86,7 @@ pharmacistRouter.get('/profile', wrapRequestHandler(getPharmacistProfileControll
  * Params: { customerId: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/medical-info', wrapRequestHandler(getMedicalInfoController))
+pharmacistRouter.get('/patients/:customerId/medical-info', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getMedicalInfoController))
 
 /**
  * Description: Update patient medical information
@@ -98,7 +96,7 @@ pharmacistRouter.get('/patients/:customerId/medical-info', wrapRequestHandler(ge
  * Body: { blood_type?: string, allergies?: string[], chronic_diseases?: string[] }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.put('/patients/:customerId/medical-info', wrapRequestHandler(updateMedicalInfoController))
+pharmacistRouter.put('/patients/:customerId/medical-info', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(updateMedicalInfoController))
 
 /**
  * Description: Add allergy to patient
@@ -108,7 +106,7 @@ pharmacistRouter.put('/patients/:customerId/medical-info', wrapRequestHandler(up
  * Body: { allergy: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/patients/:customerId/allergies', wrapRequestHandler(addAllergyController))
+pharmacistRouter.post('/patients/:customerId/allergies', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(addAllergyController))
 
 // ========== PATIENT NOTES ROUTES ==========
 
@@ -120,7 +118,7 @@ pharmacistRouter.post('/patients/:customerId/allergies', wrapRequestHandler(addA
  * Body: { note_type: 'consultation' | 'prescription_verification' | 'general', content: string, related_prescription_id?: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/patients/:customerId/notes', wrapRequestHandler(createPatientNoteController))
+pharmacistRouter.post('/patients/:customerId/notes', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(createPatientNoteController))
 
 /**
  * Description: Get all notes for a patient
@@ -129,7 +127,7 @@ pharmacistRouter.post('/patients/:customerId/notes', wrapRequestHandler(createPa
  * Params: { customerId: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/notes', wrapRequestHandler(getPatientNotesController))
+pharmacistRouter.get('/patients/:customerId/notes', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getPatientNotesController))
 
 // ========== MEDICATION TRACKING ROUTES ==========
 
@@ -141,7 +139,7 @@ pharmacistRouter.get('/patients/:customerId/notes', wrapRequestHandler(getPatien
  * Query: { days?: number }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.get('/patients/:customerId/medications', wrapRequestHandler(getRecentMedicationsController))
+pharmacistRouter.get('/patients/:customerId/medications', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(getRecentMedicationsController))
 
 /**
  * Description: Check drug interactions and allergies
@@ -151,7 +149,26 @@ pharmacistRouter.get('/patients/:customerId/medications', wrapRequestHandler(get
  * Body: { drug_name: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/patients/:customerId/check-interactions', wrapRequestHandler(checkDrugInteractionsController))
+pharmacistRouter.post('/patients/:customerId/check-interactions', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(checkDrugInteractionsController))
+
+// ========== DRUG DATABASE ROUTES ==========
+
+/**
+ * Description: Pharmacist-only drug reference products with live server-side search and filters
+ * Path: /pharmacist/drug-database/products
+ * Method: GET
+ * Query: { page?, limit?, search?, categoryId?, type?, stock?, activeStatus?, status?, sortBy?, sortOrder? }
+ * Headers: { Authorization: Bearer <access_token> }
+ */
+pharmacistRouter.get('/drug-database/products', wrapRequestHandler(getDrugDatabaseProductsController))
+
+/**
+ * Description: Pharmacist-only live product detail for the drug reference modal
+ * Path: /pharmacist/drug-database/products/:productId
+ * Method: GET
+ * Headers: { Authorization: Bearer <access_token> }
+ */
+pharmacistRouter.get('/drug-database/products/:productId', wrapRequestHandler(getDrugDatabaseProductController))
 
 // ========== ORDER MANAGEMENT ROUTES ==========
 
@@ -162,7 +179,7 @@ pharmacistRouter.post('/patients/:customerId/check-interactions', wrapRequestHan
  * Body: { customerId, prescriptionId?, items[], shippingAddress, deliveryMethod, paymentMethod, orderNotes?, pharmacistNotes? }
  * Headers: { Authorization: Bearer <access_token> }
  */
-pharmacistRouter.post('/orders', wrapRequestHandler(createPharmacistOrderController))
+pharmacistRouter.post('/orders', checkLicense, wrapRequestHandler(createPharmacistOrderController))
 
 /**
  * Description: Get orders list with filters
@@ -244,52 +261,5 @@ pharmacistRouter.get('/stats/working', wrapRequestHandler(getWorkingStatsControl
  * Headers: { Authorization: Bearer <access_token> }
  */
 pharmacistRouter.patch('/online-status', wrapRequestHandler(updateOnlineStatusController))
-
-// ==================== REPORTS & ANALYTICS ====================
-
-/**
- * Description: Get comprehensive reports analytics
- * Path: /pharmacist/reports/analytics
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/analytics', wrapRequestHandler(getReportsAnalyticsController))
-
-/**
- * Description: Get prescription analytics
- * Path: /pharmacist/reports/prescriptions
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/prescriptions', wrapRequestHandler(getPrescriptionAnalyticsController))
-
-/**
- * Description: Get consultation statistics
- * Path: /pharmacist/reports/consultations
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/consultations', wrapRequestHandler(getConsultationStatsController))
-
-/**
- * Description: Get category analytics
- * Path: /pharmacist/reports/categories
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/categories', wrapRequestHandler(getCategoryAnalyticsController))
-
-/**
- * Description: Get performance metrics
- * Path: /pharmacist/reports/performance
- * Method: GET
- * Query: { timeRange?: 'today' | 'week' | 'month' | 'quarter' }
- * Headers: { Authorization: Bearer <access_token> }
- */
-pharmacistRouter.get('/reports/performance', wrapRequestHandler(getPerformanceMetricsController))
 
 export default pharmacistRouter

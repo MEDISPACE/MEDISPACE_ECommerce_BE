@@ -10,7 +10,6 @@ import { ErrorWithStatus } from '~/models/Error'
 import brandsService from './brands.services'
 import categoriesService from './categories.services'
 import typesenseService from './typesense.services'
-import campaignService from './campaigns.services'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 
@@ -166,7 +165,7 @@ class ProductsService {
    * Called after product CRUD operations.
    */
   private async invalidateProductCache(slug?: string): Promise<void> {
-    const patterns = ['products:*']
+    const patterns = ['products:*', 'pharmacist:drug-database:*']
     if (slug) patterns.push(`products:slug:${slug}`)
     await cacheService.invalidate(...patterns)
     void recommendationsService.notifyCatalogChanged()
@@ -648,7 +647,7 @@ class ProductsService {
     const endTime = Date.now()
 
     return {
-      products: await campaignService.enrichProductsWithCampaigns(products),
+      products,
       pagination: {
         page,
         limit,
@@ -713,7 +712,7 @@ class ProductsService {
       })
     }
 
-    return campaignService.enrichProductWithCampaign(products[0])
+    return { ...products[0], campaign: null }
   }
 
   // Get product by slug with populated category and brand data
@@ -773,7 +772,7 @@ class ProductsService {
         })
       }
 
-      return campaignService.enrichProductWithCampaign(products[0])
+      return { ...products[0], campaign: null }
     }, 120) // 2 minutes
   }
 
@@ -934,6 +933,8 @@ class ProductsService {
         ).catch(() => {})
       } catch { /* socket not ready */ }
     }
+
+    this.invalidateProductCache(updated.slug).catch(() => {})
 
     return updated
   }

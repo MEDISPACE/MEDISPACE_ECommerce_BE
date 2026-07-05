@@ -5,36 +5,33 @@
 
 services:
   backend:
-    image: ${DOCKERHUB_USERNAME}/medispace-be:latest
+    image: ${DOCKERHUB_USERNAME}/medispace-be:${BACKEND_TAG:-latest}
     container_name: medispace-backend
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - ../.env
     environment:
       TYPESENSE_HOST: typesense
       TYPESENSE_PORT: 8108
+      TYPESENSE_AUTO_RECONCILE: "false"
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
       REDIS_URL: redis://redis:6379
     volumes:
-      - ./uploads:/app/uploads
+      - ../uploads:/app/uploads
     depends_on:
-      redis:
-        condition: service_healthy
-      typesense:
-        condition: service_started
-      ocr-service:
-        condition: service_started
-      ml-service:
-        condition: service_started
+      - redis
+      - typesense
+      - ocr-service
+      - ml-service
     restart: unless-stopped
     networks:
       - medispace-net
 
   frontend:
-    image: ${DOCKERHUB_USERNAME}/medispace-fe:latest
+    image: ${DOCKERHUB_USERNAME}/medispace-fe:${FRONTEND_TAG:-latest}
     container_name: medispace-frontend
     ports:
       - "3000:80"
@@ -45,43 +42,31 @@ services:
       - medispace-net
 
   ocr-service:
-    image: ${DOCKERHUB_USERNAME}/medispace-ocr:latest
+    image: ${DOCKERHUB_USERNAME}/medispace-ocr:${OCR_SERVICE_TAG:-latest}
     container_name: medispace-ocr
     ports:
       - "8001:8001"
     env_file:
-      - .env
+      - ../.env
     volumes:
       - ocr-paddle-models:/root/.paddleocr
       - ocr-vietocr-models:/root/.cache/vietocr
-      - ./logs/ocr:/app/logs
+      - ../logs/ocr:/app/logs
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
 
   ml-service:
-    image: ${DOCKERHUB_USERNAME}/medispace-ml:latest
+    image: ${DOCKERHUB_USERNAME}/medispace-ml:${ML_SERVICE_TAG:-latest}
     container_name: medispace-ml
     env_file:
-      - .env
+      - ../.env
     environment:
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
       BE_SERVICE_URLS: http://backend:8000
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   redis:
     image: redis:7-alpine
@@ -94,11 +79,6 @@ services:
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
 
   typesense:
     image: typesense/typesense:27.1
@@ -106,19 +86,13 @@ services:
     ports:
       - "7700:8108"
     volumes:
-      - ./typesense-data:/data
+      - ../typesense-data:/data
     environment:
       TYPESENSE_API_KEY: ${TYPESENSE_API_KEY}
       TYPESENSE_DATA_DIR: /data
     restart: unless-stopped
     networks:
       - medispace-net
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8108/health | grep -q ok || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
 volumes:
   redis-data:

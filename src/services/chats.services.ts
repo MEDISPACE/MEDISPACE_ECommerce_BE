@@ -1,23 +1,137 @@
 import { ObjectId } from 'mongodb'
 import databaseService from './database.services'
 import Conversation from '~/models/schemas/Conversation.schema'
-import Message, { MessageType } from '~/models/schemas/Message.schema'
+import Message, { AIClassification, MessageType, ProductRef } from '~/models/schemas/Message.schema'
 import { SendMessageReqBody } from '~/models/requests/Chat.request'
+import { ErrorWithStatus } from '~/models/Error'
+import HTTP_STATUS from '~/constants/httpStatus'
 
 type ChatAccessRole = 'customer' | 'pharmacist' | 'admin'
+type ConversationType = 'ai' | 'pharmacist'
+
+const CHAT_IMAGE_ALLOWED_HOSTS = (process.env.CHAT_IMAGE_ALLOWED_HOSTS || process.env.MEDIA_ALLOWED_HOSTS || '')
+  .split(',')
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean)
+
+const isValidConversationType = (type: unknown): type is ConversationType => type === 'ai' || type === 'pharmacist'
+
+const productMessagePreview = (productRef?: ProductRef) => `[Sản phẩm] ${productRef?.name || ''}`.trim()
+const unassignedConversationClause = { $or: [{ pharmacistId: { $exists: false } }, { pharmacistId: null }] }
 
 class ChatsService {
-  async assertConversationAccess(conversationId: string, userId: string, role: ChatAccessRole) {
-    const conversationObjectId = new ObjectId(conversationId)
-    const conversation = await databaseService.conversations.findOne({ _id: conversationObjectId })
+  private assertValidConversationType(type: unknown): asserts type is ConversationType {
+    if (!isValidConversationType(type)) {
+      throw new ErrorWithStatus({ message: 'Loại cuộc trò chuyện không hợp lệ', status: HTTP_STATUS.BAD_REQUEST })
+    }
+  }
 
+  private validateImageUrl(imageUrl?: string) {
+    if (!imageUrl) return
+
+    let parsed: URL
+    try {
+      parsed = new URL(imageUrl)
+    } catch {
+      throw new ErrorWithStatus({ message: 'URL ảnh không hợp lệ', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new ErrorWithStatus({ message: 'URL ảnh phải sử dụng http(s)', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (CHAT_IMAGE_ALLOWED_HOSTS.length > 0 && !CHAT_IMAGE_ALLOWED_HOSTS.includes(parsed.hostname.toLowerCase())) {
+      throw new ErrorWithStatus({ message: 'URL ảnh không thuộc nguồn được phép', status: HTTP_STATUS.BAD_REQUEST })
+    }
+  }
+
+  private async buildProductRefFromPayload(productRef?: ProductRef): Promise<ProductRef> {
+    const productId = productRef?.productId
+    if (!productId || !ObjectId.isValid(productId)) {
+      throw new ErrorWithStatus({ message: 'Sản phẩm không hợp lệ', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const product = await databaseService.products.findOne({ _id: new ObjectId(productId), isActive: true })
+    if (!product) {
+      throw new ErrorWithStatus({ message: 'Không tìm thấy sản phẩm', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    const defaultVariant = product.priceVariants?.find((variant: any) => variant.isDefault) || product.priceVariants?.[0]
+    if (!defaultVariant) {
+      throw new ErrorWithStatus({ message: 'Sản phẩm chưa có thông tin giá', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    return {
+      productId: product._id?.toString() || productId,
+      name: product.name,
+      slug: product.slug,
+      price: defaultVariant.price || 0,
+      unit: defaultVariant.unit || 'Sản phẩm',
+      imageUrl: product.featuredImage,
+      requiresPrescription: Boolean(product.requiresPrescription)
+    }
+  }
+
+  private async sanitizeOutgoingMessagePayload(
+    senderRole: 'customer' | 'pharmacist',
+    payload: SendMessageReqBody
+  ): Promise<SendMessageReqBody> {
+    const type = (payload.type || MessageType.Text) as MessageType
+    if (![MessageType.Text, MessageType.Image, MessageType.Product].includes(type)) {
+      throw new ErrorWithStatus({ message: 'Loại tin nhắn không hợp lệ', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (payload.content && payload.content.length > 2000) {
+      throw new ErrorWithStatus({ message: 'Nội dung tin nhắn không được vượt quá 2000 ký tự', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    this.validateImageUrl(payload.imageUrl)
+
+    if (type === MessageType.Product) {
+      if (senderRole !== 'pharmacist') {
+        throw new ErrorWithStatus({ message: 'Chỉ dược sĩ mới có thể gửi thẻ sản phẩm', status: HTTP_STATUS.FORBIDDEN })
+      }
+      const safeProductRef = await this.buildProductRefFromPayload(payload.productRef)
+      return {
+        ...payload,
+        type: MessageType.Product,
+        productRef: safeProductRef,
+        content: payload.content || `Dược sĩ giới thiệu: ${safeProductRef.name}`
+      }
+    }
+
+    if (!payload.content && !payload.imageUrl) {
+      throw new ErrorWithStatus({ message: 'Nội dung tin nhắn không được để trống', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    return { ...payload, type }
+  }
+
+  private async logChatAudit(action: string, actorId: string, conversationId: string, metadata?: Record<string, unknown>) {
+    try {
+      await databaseService.db.collection('chatAuditLogs').insertOne({
+        action,
+        actorId: new ObjectId(actorId),
+        conversationId: new ObjectId(conversationId),
+        metadata: metadata || {},
+        createdAt: new Date()
+      })
+    } catch (error) {
+      console.error('[ChatAudit] Failed to write audit log:', error)
+    }
+  }
+
+  async assertConversationAccess(conversationId: string, userId: string, role: ChatAccessRole) {
+    if (!ObjectId.isValid(conversationId)) {
+      throw new Error('Conversation not found')
+    }
+
+    const conversation = await databaseService.conversations.findOne({ _id: new ObjectId(conversationId) })
     if (!conversation) {
       throw new Error('Conversation not found')
     }
 
-    if (role === 'admin') {
-      return conversation
-    }
+    if (role === 'admin') return conversation
 
     if (role === 'customer') {
       if (conversation.customerId?.toString() !== userId) {
@@ -26,11 +140,10 @@ class ChatsService {
       return conversation
     }
 
-    if (conversation.type !== 'pharmacist') {
-      throw new Error('Access denied')
-    }
+    const isAssignedToPharmacist = conversation.pharmacistId?.toString() === userId
+    const isOpenPharmacistConversation = conversation.type === 'pharmacist' && !conversation.pharmacistId
 
-    if (conversation.pharmacistId && conversation.pharmacistId.toString() !== userId) {
+    if (!isAssignedToPharmacist && !isOpenPharmacistConversation) {
       throw new Error('Access denied')
     }
 
@@ -38,7 +151,8 @@ class ChatsService {
   }
 
   // Get or create conversation for customer (shared inbox - no specific pharmacist)
-  async getOrCreateConversation(customerId: string, type: 'ai' | 'pharmacist' = 'ai') {
+  async getOrCreateConversation(customerId: string, type: ConversationType = 'ai') {
+    this.assertValidConversationType(type)
     const customerObjectId = new ObjectId(customerId)
 
     // Chỉ tìm conversation đang active — hỗ trợ migrate cuộc trò chuyện cũ chưa có type
@@ -57,13 +171,20 @@ class ChatsService {
     // Không có active conversation → tạo mới
     if (!conversation) {
       const newConversation = new Conversation({
+        _id: new ObjectId(),
         customerId: customerObjectId,
         status: 'active',
         type: type
       })
+      delete newConversation.pharmacistId
+      delete newConversation.lastRepliedBy
 
-      const result = await databaseService.conversations.insertOne(newConversation)
-      conversation = { ...newConversation, _id: result.insertedId }
+      const result = await databaseService.conversations.findOneAndUpdate(
+        query,
+        { $setOnInsert: newConversation },
+        { upsert: true, returnDocument: 'after' }
+      )
+      conversation = result || { ...newConversation }
     } else if (conversation.type === undefined) {
       // Tự động bổ sung type: 'ai' cho conversation cũ nếu tìm thấy
       await databaseService.conversations.updateOne(
@@ -88,16 +209,22 @@ class ChatsService {
     const userObjectId = new ObjectId(userId)
     const skip = (page - 1) * limit
 
-    // Shared inbox: pharmacists see ALL conversations, customers see only their own
-    const query: Record<string, any> = role === 'customer' ? { customerId: userObjectId } : {}
-    if (status) query.status = status
+    const queryClauses: Record<string, any>[] = [
+      role === 'customer'
+        ? { customerId: userObjectId }
+        : { $or: [{ pharmacistId: { $exists: false } }, { pharmacistId: null }, { pharmacistId: userObjectId }] }
+    ]
+    if (status) queryClauses.push({ status })
     if (type) {
+      this.assertValidConversationType(type)
       if (type === 'ai') {
-        query.$or = [{ type: 'ai' }, { type: { $exists: false } }]
+        queryClauses.push({ $or: [{ type: 'ai' }, { type: { $exists: false } }] })
       } else {
-        query.type = type
+        queryClauses.push({ type })
       }
     }
+    if (role === 'pharmacist') queryClauses.push({ lastMessage: { $ne: '' } })
+    const query: Record<string, any> = queryClauses.length === 1 ? queryClauses[0] : { $and: queryClauses }
 
     const [conversations, total] = await Promise.all([
       databaseService.conversations
@@ -111,7 +238,7 @@ class ChatsService {
               }
             }
           },
-          { $sort: { sortDate: -1 } },
+          { $sort: { sortDate: role === 'pharmacist' && type === 'pharmacist' ? 1 : -1 } },
           { $skip: skip },
           { $limit: limit },
           {
@@ -177,21 +304,19 @@ class ChatsService {
   async sendMessage(senderId: string, senderRole: 'customer' | 'pharmacist', payload: SendMessageReqBody) {
     const senderObjectId = new ObjectId(senderId)
     let conversationId: ObjectId
+    const safePayload = await this.sanitizeOutgoingMessagePayload(senderRole, payload)
 
     // If conversationId is provided, use it
-    if (payload.conversationId) {
-      conversationId = new ObjectId(payload.conversationId)
+    if (safePayload.conversationId) {
+      conversationId = new ObjectId(safePayload.conversationId)
 
       // Block sending to closed conversations
-      const conv = await this.assertConversationAccess(payload.conversationId, senderId, senderRole)
+      const conv = await this.assertConversationAccess(safePayload.conversationId, senderId, senderRole)
+      if (senderRole === 'pharmacist' && !conv.pharmacistId && conv.status !== 'closed') {
+        await this.assignConversationToPharmacist(safePayload.conversationId, senderId)
+      }
       if (conv.status === 'closed') {
         throw new Error('Conversation đã được đóng. Vui lòng bắt đầu cuộc tư vấn mới.')
-      }
-      if (senderRole === 'pharmacist' && !conv.pharmacistId) {
-        await databaseService.conversations.updateOne(
-          { _id: conversationId },
-          { $set: { pharmacistId: senderObjectId, updatedAt: new Date() } }
-        )
       }
     } else {
       // Create or get conversation for customer (shared inbox)
@@ -209,10 +334,10 @@ class ChatsService {
       conversationId,
       senderId: senderObjectId,
       senderRole,
-      content: payload.content || '',
-      type: (payload.type as MessageType) || MessageType.Text,
-      imageUrl: payload.imageUrl,
-      productRef: payload.productRef, // Forward product card data
+      content: safePayload.content || '',
+      type: (safePayload.type as MessageType) || MessageType.Text,
+      imageUrl: safePayload.imageUrl,
+      productRef: safePayload.productRef,
       isRead: false
     })
 
@@ -220,11 +345,15 @@ class ChatsService {
 
     // Update conversation's last message
     const updateField = senderRole === 'customer' ? 'unreadCount.pharmacist' : 'unreadCount.customer'
+    const lastMessage = safePayload.type === MessageType.Product
+      ? productMessagePreview(safePayload.productRef)
+      : safePayload.content || (safePayload.imageUrl ? '[Ảnh]' : '')
+
     await databaseService.conversations.updateOne(
       { _id: conversationId },
       {
         $set: {
-          lastMessage: payload.content,
+          lastMessage,
           lastMessageAt: new Date(),
           updatedAt: new Date()
         },
@@ -244,7 +373,7 @@ class ChatsService {
   async sendAIMessage(
     conversationId: string,
     content: string,
-    classification?: 'emergency' | 'prescription_request' | 'general',
+    classification?: AIClassification,
     type: MessageType = MessageType.Text,
     productRef?: any,
     suggestedProducts?: any[],
@@ -317,6 +446,8 @@ class ChatsService {
 
   // Mark messages as read
   async markAsRead(conversationId: string, userId: string, userRole: 'customer' | 'pharmacist') {
+    await this.assertConversationAccess(conversationId, userId, userRole)
+
     const conversationObjectId = new ObjectId(conversationId)
     const userObjectId = new ObjectId(userId)
 
@@ -423,6 +554,15 @@ class ChatsService {
   async assignPharmacist(conversationId: string): Promise<{ pharmacistId: ObjectId | null }> {
     const conversationObjectId = new ObjectId(conversationId)
 
+    const currentConversation = await databaseService.conversations.findOne({ _id: conversationObjectId })
+    if (!currentConversation) throw new ErrorWithStatus({ message: 'Conversation not found', status: HTTP_STATUS.NOT_FOUND })
+    if (currentConversation.status === 'closed') {
+      throw new ErrorWithStatus({ message: 'Không thể nhận cuộc hội thoại đã đóng', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (currentConversation.pharmacistId) {
+      return { pharmacistId: currentConversation.pharmacistId as ObjectId }
+    }
+
     // Find all online pharmacists (role = 1, isOnline = true)
     const onlinePharmacists = await databaseService.users.find({ role: 1, isOnline: true }).toArray()
 
@@ -445,13 +585,19 @@ class ChatsService {
     counts.sort((a, b) => a.count - b.count)
     const chosen = counts[0].pharmacist
 
-    // Assign to conversation
-    await databaseService.conversations.updateOne(
-      { _id: conversationObjectId },
-      { $set: { pharmacistId: chosen._id, updatedAt: new Date() } }
+    // Assign atomically so two pharmacists cannot claim the same pending conversation.
+    const assigned = await databaseService.conversations.findOneAndUpdate(
+      { _id: conversationObjectId, status: 'active', ...unassignedConversationClause },
+      { $set: { pharmacistId: chosen._id, type: 'pharmacist', assignedAt: new Date(), updatedAt: new Date() } },
+      { returnDocument: 'after' }
     )
 
-    return { pharmacistId: chosen._id as ObjectId }
+    if (!assigned?.pharmacistId) {
+      const latest = await databaseService.conversations.findOne({ _id: conversationObjectId })
+      return { pharmacistId: latest?.pharmacistId || null }
+    }
+
+    return { pharmacistId: assigned.pharmacistId as ObjectId }
   }
 
   // Manual assign: assign specific pharmacist to conversation
@@ -459,14 +605,30 @@ class ChatsService {
     const conv = await databaseService.conversations.findOne({ _id: new ObjectId(conversationId) })
     if (!conv) throw new Error('Conversation not found')
     if (conv.status === 'closed') throw new Error('Không thể nhận cuộc hội thoại đã đóng')
+    if (conv.pharmacistId) {
+      if (conv.pharmacistId.toString() === pharmacistId) return
+      throw new ErrorWithStatus({ message: 'Cuộc tư vấn đã được dược sĩ khác nhận', status: HTTP_STATUS.CONFLICT })
+    }
 
-    await databaseService.conversations.updateOne(
-      { _id: new ObjectId(conversationId) },
-      { $set: { pharmacistId: new ObjectId(pharmacistId), updatedAt: new Date() } }
+    const result = await databaseService.conversations.findOneAndUpdate(
+      { _id: new ObjectId(conversationId), status: 'active', ...unassignedConversationClause },
+      {
+        $set: {
+          pharmacistId: new ObjectId(pharmacistId),
+          type: 'pharmacist',
+          assignedAt: new Date(),
+          updatedAt: new Date()
+        }
+      },
+      { returnDocument: 'after' }
     )
+
+    if (!result) {
+      throw new ErrorWithStatus({ message: 'Cuộc tư vấn đã được dược sĩ khác nhận', status: HTTP_STATUS.CONFLICT })
+    }
   }
 
-  // Delete conversation and all its messages
+  // Archive conversation without deleting medical consultation history.
   async deleteConversation(conversationId: string, userId: string) {
     const conversationObjectId = new ObjectId(conversationId)
 
@@ -479,7 +641,7 @@ class ChatsService {
       throw new Error('Conversation not found')
     }
 
-    // Permission check: customer can only delete their own, pharmacist can delete any
+    // Permission check: customer can only archive their own, pharmacist must own assigned conversations.
     const user = await databaseService.users.findOne({ _id: new ObjectId(userId) })
     if (!user) {
       throw new Error('User not found')
@@ -489,17 +651,22 @@ class ChatsService {
     if (user.role === 0 && conversation.customerId.toString() !== userId) {
       throw new Error('Access denied')
     }
-    // Pharmacists (role 1) can delete any conversation in shared inbox
+    if (user.role === 1 && conversation.pharmacistId && conversation.pharmacistId.toString() !== userId) {
+      throw new Error('Access denied')
+    }
 
-    // Delete all messages in this conversation
-    await databaseService.messages.deleteMany({
-      conversationId: conversationObjectId
-    })
-
-    // Delete the conversation
-    await databaseService.conversations.deleteOne({
-      _id: conversationObjectId
-    })
+    await databaseService.conversations.updateOne(
+      { _id: conversationObjectId },
+      {
+        $set: {
+          status: 'closed',
+          archivedAt: new Date(),
+          archivedBy: new ObjectId(userId),
+          updatedAt: new Date()
+        }
+      }
+    )
+    await this.logChatAudit('ARCHIVE_CONVERSATION', userId, conversationId, { role: user.role })
   }
 
   // ==================== ADMIN METHODS ====================
@@ -517,7 +684,7 @@ class ChatsService {
               total: [{ $count: 'count' }],
               active: [{ $match: { status: 'active' } }, { $count: 'count' }],
               closed: [{ $match: { status: 'closed' } }, { $count: 'count' }],
-              unassigned: [{ $match: { pharmacistId: { $exists: false }, status: 'active' } }, { $count: 'count' }],
+              unassigned: [{ $match: { ...unassignedConversationClause, status: 'active' } }, { $count: 'count' }],
               todayNew: [{ $match: { createdAt: { $gte: todayStart } } }, { $count: 'count' }],
               todayClosed: [{ $match: { status: 'closed', updatedAt: { $gte: todayStart } } }, { $count: 'count' }],
               // Top 5 dược sĩ theo số conversation đang xử lý
@@ -677,18 +844,21 @@ class ChatsService {
   }
 
   // Admin đóng conversation
-  async adminCloseConversation(conversationId: string) {
+  async adminCloseConversation(conversationId: string, adminId?: string) {
+    const setFields: Record<string, any> = { status: 'closed', closedAt: new Date(), updatedAt: new Date() }
+    if (adminId) setFields.closedBy = new ObjectId(adminId)
     const result = await databaseService.conversations.findOneAndUpdate(
       { _id: new ObjectId(conversationId) },
-      { $set: { status: 'closed', updatedAt: new Date() } },
+      { $set: setFields },
       { returnDocument: 'after' }
     )
     if (!result) throw new Error('Conversation not found')
+    if (adminId) await this.logChatAudit('ADMIN_CLOSE_CONVERSATION', adminId, conversationId)
     return result
   }
 
   // Admin chuyển conversation sang dược sĩ khác
-  async adminTransferConversation(conversationId: string, targetPharmacistId: string) {
+  async adminTransferConversation(conversationId: string, targetPharmacistId: string, adminId?: string) {
     // Verify pharmacist tồn tại và là dược sĩ
     const pharmacist = await databaseService.users.findOne({
       _id: new ObjectId(targetPharmacistId),
@@ -697,12 +867,24 @@ class ChatsService {
     if (!pharmacist) throw new Error('Pharmacist not found')
 
     const result = await databaseService.conversations.findOneAndUpdate(
-      { _id: new ObjectId(conversationId) },
-      { $set: { pharmacistId: new ObjectId(targetPharmacistId), updatedAt: new Date() } },
+      { _id: new ObjectId(conversationId), status: 'active' },
+      {
+        $set: {
+          pharmacistId: new ObjectId(targetPharmacistId),
+          type: 'pharmacist',
+          transferredAt: new Date(),
+          updatedAt: new Date()
+        }
+      },
       { returnDocument: 'after' }
     )
     if (!result) throw new Error('Conversation not found')
+    if (adminId) await this.logChatAudit('ADMIN_TRANSFER_CONVERSATION', adminId, conversationId, { targetPharmacistId })
     return result
+  }
+
+  async logAdminConversationView(conversationId: string, adminId: string) {
+    await this.logChatAudit('ADMIN_VIEW_CONVERSATION_MESSAGES', adminId, conversationId)
   }
 
   // Save user feedback for a message (AI response rating)

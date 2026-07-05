@@ -9,7 +9,7 @@ import {
   scanPrescriptionController
 } from '~/controllers/prescriptions.controllers'
 import { wrapRequestHandler } from '~/utils/handlers'
-import { accessTokenValidator } from '~/middlewares/users.middlewares'
+import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { authenticatePharmacist, checkLicense } from '~/middlewares/pharmacists.middlewares'
 
 const prescriptionsRouter = Router()
@@ -21,7 +21,7 @@ const prescriptionsRouter = Router()
  * Body: UploadPrescriptionReqBody
  * Headers: { Authorization: Bearer <access_token> } (Customer)
  */
-prescriptionsRouter.post('/', accessTokenValidator, wrapRequestHandler(uploadPrescriptionController))
+prescriptionsRouter.post('/', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(uploadPrescriptionController))
 
 /**
  * Description: Get user's prescriptions with pagination and filters
@@ -62,13 +62,27 @@ prescriptionsRouter.get(
 )
 
 /**
+ * Description: Get pharmacist prescription management list across statuses
+ * Path: /prescriptions/pharmacist
+ * Method: GET
+ * Query: { page?, limit?, status?, sort? }
+ * Headers: { Authorization: Bearer <access_token> } (Pharmacist)
+ */
+prescriptionsRouter.get(
+  '/pharmacist',
+  accessTokenValidator,
+  authenticatePharmacist,
+  wrapRequestHandler(getPendingPrescriptionsController)
+)
+
+/**
  * Description: Scan prescription image via OCR Service
  * Path: /prescriptions/scan
  * Method: POST
  * Body: { imageUrl: string }
  * Headers: { Authorization: Bearer <access_token> }
  */
-prescriptionsRouter.post('/scan', accessTokenValidator, wrapRequestHandler(scanPrescriptionController))
+prescriptionsRouter.post('/scan', accessTokenValidator, verifiedUserValidator, wrapRequestHandler(scanPrescriptionController))
 
 /**
  * Description: Get prescription by ID

@@ -25,6 +25,8 @@ const ARTICLES_COLLECTION = 'articles'
 const BRANDS_COLLECTION = 'brands'
 const CATEGORIES_COLLECTION = 'categories'
 const QUERY_SUGGESTIONS_COLLECTION = 'query_suggestions'
+const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE !== 'false'
+const TYPESENSE_EMBEDDING_ENABLED = process.env.TYPESENSE_EMBEDDING_ENABLED !== 'false'
 
 const productSchema = {
   name: PRODUCTS_COLLECTION,
@@ -173,6 +175,11 @@ const querySuggestionsSchema = {
   ],
   default_sorting_field: 'count',
   token_separators: ['-', '/', ' ']
+}
+
+if (!TYPESENSE_EMBEDDING_ENABLED) {
+  productSchema.fields = productSchema.fields.filter((field) => field.name !== 'embedding')
+  articleSchema.fields = articleSchema.fields.filter((field) => field.name !== 'embedding')
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -465,7 +472,8 @@ class TypesenseService {
         { $addFields: { category: { $arrayElemAt: ['$category', 0] }, brand: { $arrayElemAt: ['$brand', 0] }, details: { $arrayElemAt: ['$details', 0] } } }
       ])
       .toArray()
-    const { default: campaignService } = await import('./campaigns.services')
+    const campaignModule = await import('./campaigns.services.js')
+    const campaignService = (campaignModule.default as any)?.default ?? campaignModule.default
     return campaignService.enrichProductsWithCampaigns(products)
   }
 
@@ -498,11 +506,10 @@ class TypesenseService {
         this.bulkIndexCategories(categories)
       ])
       if (this.retryQueue.length > 0) throw new Error(`${this.retryQueue.length} Typesense operations are still queued`)
-      const campaignFingerprint = await this.getCampaignFingerprint()
       this.retryQueue = []
       await databaseService.typesenseSyncState.updateOne(
         { key: 'global' },
-        { $set: { key: 'global', dirty: false, reconciledAt: new Date(), campaignFingerprint }, $unset: { reason: '' } },
+        { $set: { key: 'global', dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } },
         { upsert: true }
       )
       console.log('[Typesense] Full reconciliation completed.')
@@ -516,22 +523,14 @@ class TypesenseService {
 
   private async reconcileIfNeeded(force = false): Promise<void> {
     const state = await databaseService.typesenseSyncState.findOne({ key: 'global' })
-    const campaignFingerprint = await this.getCampaignFingerprint()
-    if (force || state?.dirty || state?.campaignFingerprint !== campaignFingerprint) await this.reconcileAll()
+    if (force || state?.dirty) await this.reconcileAll()
   }
 
-  private async getCampaignFingerprint(): Promise<string> {
-    const now = new Date()
-    const campaigns = await databaseService.campaigns
-      .find(
-        { status: 'active', startDate: { $lte: now }, endDate: { $gte: now } },
-        { projection: { _id: 1, updatedAt: 1, startDate: 1, endDate: 1 } }
-      )
-      .sort({ _id: 1 })
-      .toArray()
-    return campaigns
-      .map((campaign) => `${campaign._id}:${campaign.updatedAt?.getTime?.() || ''}:${campaign.startDate}:${campaign.endDate}`)
-      .join('|')
+  private scheduleReconciliation(force = false): void {
+    if (!TYPESENSE_AUTO_RECONCILE) return
+    void this.reconcileIfNeeded(force).catch((err) => {
+      console.error('[Typesense] Scheduled reconciliation failed:', (err as Error)?.message)
+    })
   }
 
   private startHealthCheck(): void {
@@ -541,9 +540,9 @@ class TypesenseService {
         if (!this.isAvailable) {
           this.isAvailable = true
           await this.ensureCollections()
-          await this.reconcileIfNeeded(true)
+          this.scheduleReconciliation(true)
         }
-        await this.reconcileIfNeeded()
+        this.scheduleReconciliation()
         await this.flushRetries()
       } catch {
         this.isAvailable = false
@@ -556,7 +555,7 @@ class TypesenseService {
       await client.health.retrieve()
       this.isAvailable = true
       await this.ensureCollections()
-      await this.reconcileIfNeeded(true)
+      this.scheduleReconciliation(true)
       await this.flushRetries()
     } catch {
       this.isAvailable = false
@@ -582,7 +581,8 @@ class TypesenseService {
 
   async indexProduct(product: any): Promise<void> {
     await this.runOrQueue(`indexProduct ${product?._id?.toString?.() || product?.mongoId || ''}`, async () => {
-      const { default: campaignService } = await import('./campaigns.services')
+      const campaignModule = await import('./campaigns.services.js')
+      const campaignService = (campaignModule.default as any)?.default ?? campaignModule.default
       const enriched = await campaignService.enrichProductWithCampaign(product)
       await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(enriched))
     })
@@ -597,7 +597,8 @@ class TypesenseService {
   async bulkIndexProducts(products: any[]): Promise<void> {
     if (!products.length) return
     await this.runOrQueue(`bulkIndexProducts ${products.length}`, async () => {
-      const { default: campaignService } = await import('./campaigns.services')
+      const campaignModule = await import('./campaigns.services.js')
+      const campaignService = (campaignModule.default as any)?.default ?? campaignModule.default
       const enriched = await campaignService.enrichProductsWithCampaigns(products)
       const result = await client.collections(PRODUCTS_COLLECTION).documents().import(enriched.map(toProductDocument), { action: 'upsert' })
       const failed = result.filter((r: any) => !r.success).length
@@ -823,11 +824,26 @@ class TypesenseService {
     priceMax?: number
     ratingMin?: number
     sortBy?: string
+    includeDrugDatabaseFields?: boolean
   }): Promise<any> {
     console.log('[Typesense] searchProducts called, isAvailable =', this.isAvailable)
     if (!this.isAvailable) return null
 
-    const { q, page = 1, limit = 20, categoryId, categoryIds, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
+    const {
+      q,
+      page = 1,
+      limit = 20,
+      categoryId,
+      categoryIds,
+      brandId,
+      requiresPrescription,
+      inStock,
+      priceMin,
+      priceMax,
+      ratingMin,
+      sortBy,
+      includeDrugDatabaseFields = false
+    } = params
 
     let reqPrescription = requiresPrescription
     if (reqPrescription === undefined && (priceMin !== undefined || priceMax !== undefined || sortBy === 'price_asc' || sortBy === 'price_desc')) {
@@ -859,16 +875,30 @@ class TypesenseService {
     else if (sortBy === 'newest') sortByStr = `${rxSort}createdAt:desc`.replace(/,$/, '')
     else if (sortBy === 'rating') sortByStr = `${rxSort}rating:desc,reviewCount:desc`
 
+    const normalizedQuery = q && q !== '*' ? normalizeVietnamese(q) : ''
+    const searchQuery = q && q !== '*'
+      ? normalizedQuery && normalizedQuery !== q
+        ? `${q} ${normalizedQuery}`
+        : q
+      : '*'
+
+    const publicIncludeFields =
+      'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients'
+    const drugDatabaseIncludeFields =
+      'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt'
+
     try {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({
-        q: q && q !== '*' ? `${q} ${normalizeVietnamese(q)}` : '*',
+        q: searchQuery,
         query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode,searchTextNormalized',
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
+        include_fields: includeDrugDatabaseFields ? drugDatabaseIncludeFields : publicIncludeFields,
         sort_by: sortByStr,
         page,
         per_page: limit,
-        num_typos: 2
+        num_typos: 2,
+        prefix: true
       })
     } catch (err) {
       console.error('[Typesense] searchProducts error:', err)
@@ -908,7 +938,7 @@ class TypesenseService {
 
   async requestReconciliation(reason: string): Promise<void> {
     await this.markDirty(reason)
-    if (this.isAvailable) void this.reconcileAll()
+    if (TYPESENSE_AUTO_RECONCILE && this.isAvailable) void this.reconcileAll()
   }
 
   async getConsistencyStatus(): Promise<Record<string, unknown>> {

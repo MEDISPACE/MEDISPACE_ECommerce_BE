@@ -4,6 +4,9 @@ import { PHARMACIST_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import pharmacistService from '~/services/pharmacist.services'
 import { ObjectId } from 'mongodb'
+import { writePatientPhiAudit } from '~/middlewares/patientPhi.middlewares'
+import { ErrorWithStatus } from '~/models/Error'
+import { redis } from '~/services/cache.services'
 
 // Get dashboard statistics
 export const getDashboardStatsController = async (req: Request, res: Response) => {
@@ -35,7 +38,9 @@ export const getRecentActivitiesController = async (req: Request, res: Response)
 // Search patients by phone or partial name
 export const searchPatientsController = async (req: Request, res: Response) => {
   const { phone } = req.query as { phone: string }
-  const result = await pharmacistService.searchPatients(phone)
+  const { userId } = req.decoded_authorization as TokenPayload
+  const result = await pharmacistService.searchPatients(phone, new ObjectId(userId))
+  await writePatientPhiAudit(req, 'patient_search', undefined, { query: phone, resultCount: result.length })
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_PATIENT_INFO_SUCCESS,
     result // Now returns an array of users instead of exactly 1 user
@@ -46,6 +51,7 @@ export const searchPatientsController = async (req: Request, res: Response) => {
 export const getPatientHistoryController = async (req: Request<{ customerId: string }>, res: Response) => {
   const { customerId } = req.params
   const result = await pharmacistService.getPatientHistory(customerId)
+  await writePatientPhiAudit(req, 'patient_history_view', new ObjectId(customerId))
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_PATIENT_HISTORY_SUCCESS,
     result
@@ -80,6 +86,7 @@ export const getMedicalInfoController = async (req: Request<{ customerId: string
       startDate: medication.prescribed_date
     }))
   }
+  await writePatientPhiAudit(req, 'patient_medical_info_view', new ObjectId(customerId))
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_MEDICAL_INFO_SUCCESS,
     result
@@ -95,6 +102,7 @@ export const updateMedicalInfoController = async (req: Request<{ customerId: str
     allergies,
     chronic_diseases: chronic_diseases ?? chronicDiseases
   })
+  await writePatientPhiAudit(req, 'patient_medical_info_update', new ObjectId(customerId))
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.UPDATE_MEDICAL_INFO_SUCCESS,
     result
@@ -106,6 +114,7 @@ export const addAllergyController = async (req: Request<{ customerId: string }>,
   const { customerId } = req.params
   const { allergy, allergen } = req.body
   const result = await pharmacistService.addAllergy(customerId, allergy ?? allergen)
+  await writePatientPhiAudit(req, 'patient_allergy_add', new ObjectId(customerId))
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.ADD_ALLERGY_SUCCESS,
     result
@@ -135,6 +144,7 @@ export const createPatientNoteController = async (req: Request<{ customerId: str
     content,
     related_prescription_id
   })
+  await writePatientPhiAudit(req, 'patient_note_create', new ObjectId(customerId), { noteType: note_type })
 
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.CREATE_NOTE_SUCCESS,
@@ -146,6 +156,7 @@ export const createPatientNoteController = async (req: Request<{ customerId: str
 export const getPatientNotesController = async (req: Request<{ customerId: string }>, res: Response) => {
   const { customerId } = req.params
   const result = await pharmacistService.getPatientNotes(customerId)
+  await writePatientPhiAudit(req, 'patient_notes_view', new ObjectId(customerId), { resultCount: result.length })
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_NOTES_SUCCESS,
     result
@@ -159,6 +170,7 @@ export const getRecentMedicationsController = async (req: Request<{ customerId: 
   const { customerId } = req.params
   const daysBack = Number(req.query.days) || 30
   const result = await pharmacistService.getRecentMedications(customerId, daysBack)
+  await writePatientPhiAudit(req, 'patient_medications_view', new ObjectId(customerId), { daysBack })
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_MEDICATIONS_SUCCESS,
     result
@@ -170,8 +182,52 @@ export const checkDrugInteractionsController = async (req: Request<{ customerId:
   const { customerId } = req.params
   const { drug_name } = req.body
   const result = await pharmacistService.checkDrugInteractions(customerId, drug_name)
+  await writePatientPhiAudit(req, 'patient_interaction_check', new ObjectId(customerId), { drugName: drug_name })
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.CHECK_INTERACTIONS_SUCCESS,
+    result
+  })
+}
+
+// ========== DRUG DATABASE CONTROLLERS ==========
+
+export const getDrugDatabaseProductsController = async (req: Request, res: Response) => {
+  const { page, limit, search, categoryId, type, stock, activeStatus, status, sortBy, sortOrder } = req.query as {
+    page?: string
+    limit?: string
+    search?: string
+    categoryId?: string
+    type?: string
+    stock?: string
+    activeStatus?: string
+    status?: string
+    sortBy?: string
+    sortOrder?: string
+  }
+
+  const result = await pharmacistService.getDrugDatabaseProducts({
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined,
+    search,
+    categoryId,
+    type,
+    stock,
+    activeStatus,
+    status,
+    sortBy,
+    sortOrder
+  })
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get pharmacist drug database products successfully',
+    result
+  })
+}
+
+export const getDrugDatabaseProductController = async (req: Request<{ productId: string }>, res: Response) => {
+  const result = await pharmacistService.getDrugDatabaseProduct(req.params.productId)
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get pharmacist drug database product successfully',
     result
   })
 }
@@ -182,13 +238,58 @@ export const checkDrugInteractionsController = async (req: Request<{ customerId:
 export const createPharmacistOrderController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const pharmacistId = new ObjectId(userId)
+  const idempotencyKey = req.header('x-idempotency-key')?.trim()
+  const lockKey = idempotencyKey ? `pharmacist:order:create:${pharmacistId.toString()}:${idempotencyKey}` : undefined
+  let locked = false
+  let lockAvailable = false
 
-  const result = await pharmacistService.createPharmacistOrder(pharmacistId, req.body)
+  try {
+    if (lockKey) {
+      try {
+        locked = (await redis.set(lockKey, '1', 'EX', 60, 'NX')) === 'OK'
+        lockAvailable = true
+      } catch {
+        lockAvailable = false
+      }
 
-  return res.status(HTTP_STATUS.CREATED).json({
-    message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
-    result
-  })
+      if (lockAvailable && !locked) {
+        const existing = await pharmacistService.getOrderByIdempotencyKey(pharmacistId, idempotencyKey!)
+        if (existing) {
+          let paymentUrl: string | undefined
+          let paymentUrlError = false
+          try {
+            paymentUrl = await pharmacistService.createPaymentUrlForPharmacistOrder(existing, req)
+          } catch {
+            paymentUrlError = true
+          }
+          return res.status(HTTP_STATUS.OK).json({
+            message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
+            result: {
+              order: existing,
+              orderId: existing._id?.toString(),
+              orderNumber: existing.orderNumber,
+              paymentUrl,
+              paymentUrlError
+            }
+          })
+        }
+        throw new ErrorWithStatus({ message: 'Order creation is already being processed.', status: HTTP_STATUS.CONFLICT })
+      }
+    }
+
+    const result = await pharmacistService.createPharmacistOrder(pharmacistId, {
+      ...req.body,
+      idempotencyKey,
+      req
+    })
+
+    return res.status(HTTP_STATUS.CREATED).json({
+      message: PHARMACIST_MESSAGES.CREATE_ORDER_SUCCESS,
+      result
+    })
+  } finally {
+    if (lockKey && locked) await redis.del(lockKey).catch(() => undefined)
+  }
 }
 
 // Get orders with filters
@@ -322,73 +423,6 @@ export const updateOnlineStatusController = async (req: Request, res: Response) 
 
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.UPDATE_ONLINE_STATUS_SUCCESS,
-    result
-  })
-}
-
-// ==================== REPORTS & ANALYTICS ====================
-
-// Get comprehensive reports analytics
-export const getReportsAnalyticsController = async (req: Request, res: Response) => {
-  const { userId } = req.decoded_authorization as TokenPayload
-  const { timeRange = 'week' } = req.query as { timeRange?: string }
-
-  const result = await pharmacistService.getReportsAnalytics(new ObjectId(userId), timeRange)
-
-  return res.status(HTTP_STATUS.OK).json({
-    message: 'Get reports analytics successfully',
-    result
-  })
-}
-
-// Get prescription analytics
-export const getPrescriptionAnalyticsController = async (req: Request, res: Response) => {
-  const { userId } = req.decoded_authorization as TokenPayload
-  const { timeRange = 'week' } = req.query as { timeRange?: string }
-
-  const result = await pharmacistService.getPrescriptionAnalytics(new ObjectId(userId), timeRange)
-
-  return res.status(HTTP_STATUS.OK).json({
-    message: 'Get prescription analytics successfully',
-    result
-  })
-}
-
-// Get consultation statistics
-export const getConsultationStatsController = async (req: Request, res: Response) => {
-  const { userId } = req.decoded_authorization as TokenPayload
-  const { timeRange = 'week' } = req.query as { timeRange?: string }
-
-  const result = await pharmacistService.getConsultationStats(new ObjectId(userId), timeRange)
-
-  return res.status(HTTP_STATUS.OK).json({
-    message: 'Get consultation stats successfully',
-    result
-  })
-}
-
-// Get category analytics
-export const getCategoryAnalyticsController = async (req: Request, res: Response) => {
-  const { userId } = req.decoded_authorization as TokenPayload
-  const { timeRange = 'week' } = req.query as { timeRange?: string }
-
-  const result = await pharmacistService.getCategoryAnalytics(new ObjectId(userId), timeRange)
-
-  return res.status(HTTP_STATUS.OK).json({
-    message: 'Get category analytics successfully',
-    result
-  })
-}
-
-// Get performance metrics
-export const getPerformanceMetricsController = async (req: Request, res: Response) => {
-  const { userId } = req.decoded_authorization as TokenPayload
-  const { timeRange = 'week' } = req.query as { timeRange?: string }
-
-  const result = await pharmacistService.getPerformanceMetrics(new ObjectId(userId), timeRange)
-
-  return res.status(HTTP_STATUS.OK).json({
-    message: 'Get performance metrics successfully',
     result
   })
 }

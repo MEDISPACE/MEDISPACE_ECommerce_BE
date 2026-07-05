@@ -2,6 +2,8 @@ import { Router } from 'express'
 import {
   getNotificationsController,
   getUnreadCountController,
+  getNotificationPreferencesController,
+  updateNotificationPreferencesController,
   markAllAsReadController,
   markAsReadController,
   deleteNotificationController,
@@ -26,6 +28,18 @@ notificationsRouter.get('/', ...auth, getNotificationsValidator, wrapRequestHand
  * Get count of unread notifications (for bell badge)
  */
 notificationsRouter.get('/unread-count', ...auth, wrapRequestHandler(getUnreadCountController))
+
+/**
+ * GET /notifications/preferences
+ * Get notification channel/type preferences for the authenticated user
+ */
+notificationsRouter.get('/preferences', ...auth, wrapRequestHandler(getNotificationPreferencesController))
+
+/**
+ * PATCH /notifications/preferences
+ * Update notification channel/type preferences for the authenticated user
+ */
+notificationsRouter.patch('/preferences', ...auth, wrapRequestHandler(updateNotificationPreferencesController))
 
 /**
  * PATCH /notifications/read-all

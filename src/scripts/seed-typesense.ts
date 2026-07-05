@@ -8,11 +8,18 @@ import { config } from 'dotenv'
 config()
 
 import { MongoClient } from 'mongodb'
-import typesenseService from '../services/typesense.services'
+
+// Reindex is already a full source-of-truth rebuild. Disable the service's
+// background reconciliation loop during this process so it cannot delete and
+// rebuild collections while the seed job is importing documents.
+process.env.TYPESENSE_AUTO_RECONCILE = 'false'
 
 const MONGO_URI = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/${process.env.DB_NAME}?retryWrites=true&w=majority`
 
 async function seed() {
+  const typesenseModule = await import('../services/typesense.services.js')
+  const typesenseService = (typesenseModule.default as any)?.default ?? typesenseModule.default ?? typesenseModule
+
   console.log('[Seed] Connecting to MongoDB...')
   const mongoClient = new MongoClient(MONGO_URI)
   await mongoClient.connect()
@@ -26,10 +33,8 @@ async function seed() {
   }
 
   // query_suggestions luôn drop và tạo lại để tránh data cũ lẫn lộn
-  try {
-    await tsClient.collections('query_suggestions').delete()
-    console.log('[Seed] Dropped "query_suggestions" (will recreate fresh).')
-  } catch {}
+  await typesenseService.dropCollections(['query_suggestions'])
+  console.log('[Seed] Dropped "query_suggestions" (will recreate fresh).')
 
   if (!force) {
     try {
@@ -211,6 +216,12 @@ async function seed() {
 
   console.log(`[Seed] Generated ${suggestions.length} query suggestions. Indexing...`)
   await typesenseService.bulkIndexQuerySuggestions(suggestions)
+
+  await db.collection('typesense_sync_state').updateOne(
+    { key: 'global' },
+    { $set: { key: 'global', dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } },
+    { upsert: true }
+  )
 
   await mongoClient.close()
   console.log('[Seed] ✅ Done! Typesense is now synced with MongoDB (products, articles, brands, categories, query_suggestions).')

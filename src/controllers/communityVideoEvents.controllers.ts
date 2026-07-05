@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { ObjectId } from 'mongodb'
 import { TokenPayload } from '~/models/requests/User.request'
 import communityVideoEventsService from '~/services/communityVideoEvents.services'
+import liveKitService from '~/services/livekit.services'
 
 function authContext(req: Request) {
   const decoded = req.decoded_authorization as TokenPayload | undefined
@@ -44,6 +45,11 @@ export const listMyVideoEventsController = async (req: Request, res: Response) =
 export const getVideoEventDetailController = async (req: Request, res: Response) => {
   const event = await communityVideoEventsService.getEventDetail(new ObjectId(paramString(req.params.eventId)), authContext(req))
   return res.status(200).json({ message: 'OK', data: event })
+}
+
+export const getLiveKitDiagnosticsController = async (_req: Request, res: Response) => {
+  const result = await liveKitService.checkReachability()
+  return res.status(200).json({ message: 'OK', data: result })
 }
 
 export const registerVideoEventController = async (req: Request, res: Response) => {
@@ -185,4 +191,27 @@ export const updateAdminVideoEventRegistrationController = async (req: Request, 
     req.body
   )
   return res.status(200).json({ message: 'Cập nhật đăng ký thành công', data: registration })
+}
+
+export const listAdminVideoEventParticipantsController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.listLiveParticipants(new ObjectId(paramString(req.params.eventId)), authContext(req) || {})
+  return res.status(200).json({ message: 'OK', data: result })
+}
+
+export const muteAdminVideoEventParticipantController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.muteLiveParticipantAudio(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã tắt micro người tham gia', data: result })
+}
+
+export const kickAdminVideoEventParticipantController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.kickLiveParticipant(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã mời người tham gia khỏi phòng họp', data: result })
 }

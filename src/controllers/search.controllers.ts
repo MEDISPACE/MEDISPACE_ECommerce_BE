@@ -29,7 +29,7 @@ export const suggestController = async (req: Request, res: Response) => {
   const q = (req.query.q as string) || ''
 
   if (!q || q.trim().length < 2) {
-    return res.json({ products: [], brands: [], categories: [], articles: [] })
+    return res.json({ products: [], brands: [], categories: [], articles: [], querySuggestions: [] })
   }
 
   // Chạy song song: product/brand/category results + query text completions

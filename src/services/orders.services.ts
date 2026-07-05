@@ -13,7 +13,6 @@ import { ORDERS_MESSAGES, CARTS_MESSAGES, PRODUCTS_MESSAGES } from '~/constants/
 import { PaymentMethod, ShippingMethod } from '~/constants/enum'
 import couponService from './coupons.services'
 import loyaltyService from './loyalty.services'
-import campaignsService from './campaigns.services'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import recommendationsService from './recommendations.services'
@@ -318,15 +317,7 @@ class OrderService {
           if (v) originalPrice = v.price
         }
 
-        // Fetch campaign and compute sale price using shared helper
-        const campaign = await campaignsService.getActiveCampaignForProduct(
-          product._id,
-          product.categoryId,
-          product.brandId,
-          product.requiresPrescription
-        )
-
-        const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        const unitPrice = originalPrice
 
         orderItems.push({
           productId: product._id,
@@ -338,7 +329,6 @@ class OrderService {
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * item.quantity,
-          campaignId: campaign?._id,
           prescriptionRequired: product.requiresPrescription,
           image:
             product.featuredImage ||
@@ -381,7 +371,6 @@ class OrderService {
         }
       }
 
-      // Re-verify campaign price at checkout time (campaign may have changed since added to cart)
       for (const cartItem of filteredCartItems) {
         const product = await productsService.getProductById(cartItem.productId.toString())
         if (!product) {
@@ -392,14 +381,7 @@ class OrderService {
         const selectedVariant = product.priceVariants?.find((v: any) => v.unit === cartItem.unit)
         const originalPrice = selectedVariant?.price || product.price || 0
 
-        const campaign = await campaignsService.getActiveCampaignForProduct(
-          product._id,
-          product.categoryId,
-          product.brandId,
-          product.requiresPrescription
-        )
-
-        const unitPrice = campaignsService.applyDiscountToPrice(originalPrice, campaign)
+        const unitPrice = originalPrice
         if (cartItem.quantity > (product.maxOrderQuantity || 10)) {
           throw new ErrorWithStatus({
             message: `Số lượng đặt mua vượt quá giới hạn cho sản phẩm "${product.name}".`,
@@ -413,7 +395,6 @@ class OrderService {
           unitPrice,
           originalUnitPrice: originalPrice,
           totalPrice: unitPrice * cartItem.quantity,
-          campaignId: campaign?._id,
           prescriptionRequired: product.requiresPrescription || false
         })
       }
@@ -637,14 +618,9 @@ class OrderService {
           { projection: { _id: 1, name: 1, stockQuantity: 1 } }
         )
         if (updatedProduct && updatedProduct.stockQuantity <= LOW_STOCK_THRESHOLD) {
-          try {
-            const io = getIO()
-            notificationService
-              .notifyLowStock(updatedProduct._id!, updatedProduct.name, updatedProduct.stockQuantity, io)
-              .catch(() => {})
-          } catch {
-            /* socket not ready */
-          }
+          let io
+          try { io = getIO() } catch { io = undefined }
+          Promise.resolve((notificationService as any).notifyLowStock?.(updatedProduct._id!, updatedProduct.name, updatedProduct.stockQuantity, io)).catch(() => {})
         }
       }
     }
@@ -689,55 +665,39 @@ class OrderService {
     }
 
     // Notify all admins about new order (fire-and-forget)
-    try {
-      const io = getIO()
-      notificationService.notifyNewOrderToAdmin(orderNumber, totalAmount, io).catch(() => {})
-    } catch {
-      /* socket not ready */
-    }
+    let orderNotificationIO
+    try { orderNotificationIO = getIO() } catch { orderNotificationIO = undefined }
+    Promise.resolve((notificationService as any).notifyNewOrderToAdmin?.(orderNumber, totalAmount, orderNotificationIO)).catch(() => {})
 
     // Notify customer that their order was placed successfully (fire-and-forget)
-    try {
-      const io = getIO()
-      const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
-      notificationService
-        .createAndPush(
-          {
-            userId,
-            type: 'order' as any,
-            title: 'Đặt hàng thành công! 🎉',
-            message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
-            actionUrl: '/account/orders',
-            metadata: { orderNumber, totalAmount },
-            targetRole: 'customer'
-          },
-          io
-        )
-        .catch(() => {})
-    } catch {
-      /* socket not ready */
-    }
+    const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
+    Promise.resolve((notificationService as any).createAndPush?.(
+        {
+          userId,
+          type: 'order',
+          title: 'Đặt hàng thành công',
+          message: `Đơn hàng ${orderNumber} (${formattedAmount}) đã được tiếp nhận. Chúng tôi sẽ xử lý sớm nhất có thể.`,
+          actionUrl: '/account/orders',
+          metadata: { orderNumber, totalAmount },
+          targetRole: 'customer',
+          eventKey: `order:${result.insertedId.toString()}:placed`
+        },
+        orderNotificationIO
+      )).catch(() => {})
 
     // Notify all pharmacists about new order to prepare (fire-and-forget)
-    try {
-      const io = getIO()
-      const formattedAmount = totalAmount.toLocaleString('vi-VN') + 'đ'
-      notificationService
-        .broadcastToRole(
-          'pharmacist',
-          {
-            type: 'order' as any,
-            title: 'Đơn hàng mới cần chuẩn bị',
-            message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
-            actionUrl: '/pharmacist/orders',
-            metadata: { orderNumber, totalAmount }
-          },
-          io
-        )
-        .catch(() => {})
-    } catch {
-      /* socket not ready */
-    }
+    Promise.resolve((notificationService as any).broadcastToRole?.(
+        'pharmacist',
+        {
+          type: 'order',
+          title: 'Đơn hàng mới cần chuẩn bị',
+          message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt và cần chuẩn bị thuốc.`,
+          actionUrl: '/pharmacist/orders',
+          metadata: { orderNumber, totalAmount },
+          eventKey: `order:${result.insertedId.toString()}:pharmacist:new`
+        },
+        orderNotificationIO
+      )).catch(() => {})
 
     return {
       order: { ...order, _id: result.insertedId },
@@ -892,13 +852,11 @@ class OrderService {
 
     // Notify customer about order status change (fire-and-forget)
     if (updatedOrder && order.userId) {
-      try {
-        const io = getIO()
-        notificationService
-          .notifyOrderStatusChange(order.userId, orderId, order.orderNumber, newStatus, io)
-          .catch(() => {})
-      } catch {
-        /* socket not ready */
+      let io
+      try { io = getIO() } catch { io = undefined }
+      Promise.resolve((notificationService as any).notifyOrderStatusChange?.(order.userId, orderId, order.orderNumber, newStatus, io)).catch(() => {})
+      if (newStatus === 'shipped') {
+        Promise.resolve((notificationService as any).notifyShippingStatusChange?.(order.userId, orderId, order.orderNumber, 'shipped', trackingNumber, io)).catch(() => {})
       }
     }
 
@@ -977,6 +935,12 @@ class OrderService {
     }
 
     await databaseService.orders.updateOne({ _id: orderId }, { $set: updateData })
+
+    let io
+    try { io = getIO() } catch { io = undefined }
+    if (order.userId && (newStatus === 'paid' || newStatus === 'failed')) {
+      Promise.resolve((notificationService as any).notifyPaymentStatusChange?.(order.userId, orderId, order.orderNumber, newStatus, io)).catch(() => {})
+    }
 
     return await databaseService.orders.findOne({ _id: orderId })
   }

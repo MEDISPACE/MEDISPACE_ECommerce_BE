@@ -19,6 +19,11 @@ class MediasService {
    */
   async uploadImage(req: Request) {
     const files = await handleUploadImage(req)
+    const uploadPurpose = String(req.query.purpose || '').trim().toLowerCase()
+    const isPrescriptionUpload = uploadPurpose === 'prescription'
+    const jpegQuality = isPrescriptionUpload
+      ? Number(process.env.PRESCRIPTION_IMAGE_JPEG_QUALITY || 95)
+      : Number(process.env.MEDIA_IMAGE_JPEG_QUALITY || 80)
 
     const result: Media[] = await Promise.all(
       files.map(async (file) => {
@@ -28,7 +33,8 @@ class MediasService {
         try {
           // Xử lý ảnh với Sharp: convert sang JPEG và optimize
           await sharp(file.filepath)
-            .jpeg({ quality: 80 }) // Compress với quality 80%
+            .rotate()
+            .jpeg({ quality: jpegQuality })
             .toFile(tempProcessedPath)
 
           // Upload file đã xử lý lên S3
