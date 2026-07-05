@@ -160,6 +160,7 @@ class DatabaseService {
 
       // Products collection indexes
       await safeCreateIndex(this.products, { categoryId: 1, isActive: 1, createdAt: -1 })
+      await safeCreateIndex(this.products, { isActive: 1, name: 1, _id: 1 })
       await safeCreateIndex(this.products, { categoryId: 1 })
       await safeCreateIndex(this.products, { slug: 1 }, { unique: true })
       await safeCreateIndex(this.products, { sku: 1 }, { unique: true })
