@@ -194,6 +194,29 @@ class PharmacistService {
     ]
   }
 
+  private getDrugDatabaseListLookupStages() {
+    return [
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'categoryId',
+          foreignField: '_id',
+          as: 'category',
+          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, path: 1 } }]
+        }
+      },
+      {
+        $lookup: {
+          from: 'brands',
+          localField: 'brandId',
+          foreignField: '_id',
+          as: 'brand',
+          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, logo: 1 } }]
+        }
+      }
+    ]
+  }
+
   private getDrugDatabaseHydrationStage() {
     return {
       $addFields: {
@@ -283,7 +306,7 @@ class PharmacistService {
       { $sort: sort },
       { $skip: skip },
       { $limit: limit },
-      ...this.getDrugDatabaseLookupStages(),
+      ...this.getDrugDatabaseListLookupStages(),
       this.getDrugDatabaseHydrationStage(),
       { $project: this.getDrugDatabaseProductProjection() }
     ]
