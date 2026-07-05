@@ -268,10 +268,16 @@ class PharmacistService {
     ]
   }
 
-  private buildDrugDatabaseListPipeline(match: Record<string, unknown>, sort: Record<string, 1 | -1>, skip: number, limit: number) {
+  private buildDrugDatabaseListPipeline(
+    match: Record<string, unknown>,
+    sort: Record<string, 1 | -1>,
+    skip: number,
+    limit: number,
+    needsCalculatedPrice = false
+  ) {
     return [
       { $match: match },
-      this.getCalculatedPriceStage(),
+      ...(needsCalculatedPrice ? [this.getCalculatedPriceStage()] : []),
       { $sort: sort },
       { $skip: skip },
       { $limit: limit },
@@ -662,7 +668,7 @@ class PharmacistService {
     const searchRegex = search ? escapeRegex(search) : undefined
     const pipeline = searchRegex
       ? this.buildDrugDatabasePipeline(match, searchRegex, sort)
-      : this.buildDrugDatabaseListPipeline(match, sort, skip, limit)
+      : this.buildDrugDatabaseListPipeline(match, sort, skip, limit, sortField === 'calculatedPrice')
     const collation = { locale: 'vi', strength: 1 }
     const [products, totalCount] = await Promise.all([
       searchRegex
