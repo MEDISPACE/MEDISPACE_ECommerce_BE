@@ -824,11 +824,26 @@ class TypesenseService {
     priceMax?: number
     ratingMin?: number
     sortBy?: string
+    includeDrugDatabaseFields?: boolean
   }): Promise<any> {
     console.log('[Typesense] searchProducts called, isAvailable =', this.isAvailable)
     if (!this.isAvailable) return null
 
-    const { q, page = 1, limit = 20, categoryId, categoryIds, brandId, requiresPrescription, inStock, priceMin, priceMax, ratingMin, sortBy } = params
+    const {
+      q,
+      page = 1,
+      limit = 20,
+      categoryId,
+      categoryIds,
+      brandId,
+      requiresPrescription,
+      inStock,
+      priceMin,
+      priceMax,
+      ratingMin,
+      sortBy,
+      includeDrugDatabaseFields = false
+    } = params
 
     let reqPrescription = requiresPrescription
     if (reqPrescription === undefined && (priceMin !== undefined || priceMax !== undefined || sortBy === 'price_asc' || sortBy === 'price_desc')) {
@@ -867,14 +882,18 @@ class TypesenseService {
         : q
       : '*'
 
+    const publicIncludeFields =
+      'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients'
+    const drugDatabaseIncludeFields =
+      'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt'
+
     try {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({
         q: searchQuery,
         query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode,searchTextNormalized',
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
-        include_fields:
-          'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt',
+        include_fields: includeDrugDatabaseFields ? drugDatabaseIncludeFields : publicIncludeFields,
         sort_by: sortByStr,
         page,
         per_page: limit,
