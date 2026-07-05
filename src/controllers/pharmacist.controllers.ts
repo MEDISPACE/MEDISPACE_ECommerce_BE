@@ -189,6 +189,49 @@ export const checkDrugInteractionsController = async (req: Request<{ customerId:
   })
 }
 
+// ========== DRUG DATABASE CONTROLLERS ==========
+
+export const getDrugDatabaseProductsController = async (req: Request, res: Response) => {
+  const { page, limit, search, categoryId, type, stock, activeStatus, status, sortBy, sortOrder } = req.query as {
+    page?: string
+    limit?: string
+    search?: string
+    categoryId?: string
+    type?: string
+    stock?: string
+    activeStatus?: string
+    status?: string
+    sortBy?: string
+    sortOrder?: string
+  }
+
+  const result = await pharmacistService.getDrugDatabaseProducts({
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined,
+    search,
+    categoryId,
+    type,
+    stock,
+    activeStatus,
+    status,
+    sortBy,
+    sortOrder
+  })
+
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get pharmacist drug database products successfully',
+    result
+  })
+}
+
+export const getDrugDatabaseProductController = async (req: Request<{ productId: string }>, res: Response) => {
+  const result = await pharmacistService.getDrugDatabaseProduct(req.params.productId)
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Get pharmacist drug database product successfully',
+    result
+  })
+}
+
 // ========== ORDER MANAGEMENT CONTROLLERS ==========
 
 // Create order (for pharmacist)

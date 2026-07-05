@@ -12,6 +12,8 @@ import {
   getPatientNotesController,
   getRecentMedicationsController,
   checkDrugInteractionsController,
+  getDrugDatabaseProductsController,
+  getDrugDatabaseProductController,
   createPharmacistOrderController,
   getOrdersController,
   getOrderDetailsController,
@@ -148,6 +150,25 @@ pharmacistRouter.get('/patients/:customerId/medications', rateLimitPatientPhi, r
  * Headers: { Authorization: Bearer <access_token> }
  */
 pharmacistRouter.post('/patients/:customerId/check-interactions', rateLimitPatientPhi, requirePatientPhiAccess, wrapRequestHandler(checkDrugInteractionsController))
+
+// ========== DRUG DATABASE ROUTES ==========
+
+/**
+ * Description: Pharmacist-only drug reference products with live server-side search and filters
+ * Path: /pharmacist/drug-database/products
+ * Method: GET
+ * Query: { page?, limit?, search?, categoryId?, type?, stock?, activeStatus?, status?, sortBy?, sortOrder? }
+ * Headers: { Authorization: Bearer <access_token> }
+ */
+pharmacistRouter.get('/drug-database/products', wrapRequestHandler(getDrugDatabaseProductsController))
+
+/**
+ * Description: Pharmacist-only live product detail for the drug reference modal
+ * Path: /pharmacist/drug-database/products/:productId
+ * Method: GET
+ * Headers: { Authorization: Bearer <access_token> }
+ */
+pharmacistRouter.get('/drug-database/products/:productId', wrapRequestHandler(getDrugDatabaseProductController))
 
 // ========== ORDER MANAGEMENT ROUTES ==========
 
