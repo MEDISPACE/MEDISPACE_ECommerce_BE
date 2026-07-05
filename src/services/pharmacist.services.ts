@@ -16,10 +16,12 @@ import { canAccessPatientPhi } from '~/middlewares/patientPhi.middlewares'
 import ghnService from './ghn.services'
 import paymentService from './payment.services'
 import typesenseService from './typesense.services'
+import cacheService from './cache.services'
 
 const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
 const DASHBOARD_STATS_CACHE_MS = Number(process.env.PHARMACIST_DASHBOARD_STATS_CACHE_MS || 30_000)
+const DRUG_DATABASE_CACHE_TTL_SECONDS = Number(process.env.PHARMACIST_DRUG_DATABASE_CACHE_TTL_SECONDS || 60)
 const ORDER_STATUSES = new Set(Object.values(OrderStatus))
 const PAYMENT_STATUSES = new Set(['pending', 'paid', 'failed', 'refunded', 'partially_refunded'])
 const IN_STORE_PAYMENT_METHODS = new Set<string>([
@@ -606,104 +608,124 @@ class PharmacistService {
     const sortField = sortBy === 'price' ? 'calculatedPrice' : ['name', 'stockQuantity', 'createdAt', 'updatedAt', 'rating'].includes(sortBy) ? sortBy : 'name'
     const sort: Record<string, 1 | -1> = { [sortField]: sortOrder, _id: 1 }
 
-    const canUseTypesense =
-      Boolean(search) &&
-      typesenseService.getAvailability() &&
-      activeStatus === 'active' &&
-      query.stock !== 'outOfStock' &&
-      (!query.status || query.status === 'all' || query.status === 'active')
+    const cacheKey = `pharmacist:drug-database:products:${cacheService.hashQuery({
+      page,
+      limit,
+      search: search || '',
+      categoryId: query.categoryId || 'all',
+      categoryIds: categoryIds?.map((id) => id.toString()).sort() || [],
+      type: query.type || 'all',
+      stock: query.stock || 'all',
+      activeStatus,
+      status: query.status || 'all',
+      sortBy,
+      sortOrder
+    })}`
 
-    if (canUseTypesense) {
-      const tsSortBy =
-        sortBy === 'price'
-          ? sortOrder === -1
-            ? 'price_desc'
-            : 'price_asc'
-          : sortBy === 'createdAt'
-            ? 'newest'
-            : sortBy === 'rating'
-              ? 'rating'
-              : undefined
-      const tsResult = await typesenseService.searchProducts({
-        q: search as string,
-        page,
-        limit,
-        categoryIds: categoryIds?.map((id) => id.toString()),
-        requiresPrescription: query.type === 'Rx' ? true : query.type === 'OTC' ? false : undefined,
-        inStock: query.stock === 'inStock' || query.stock === 'lowStock',
-        sortBy: tsSortBy
-      })
+    return cacheService.getOrSet(cacheKey, async () => {
 
-      if (tsResult?.hits) {
-        const ids = tsResult.hits.map((hit: any) => hit.document?.mongoId).filter((id: string) => ObjectId.isValid(id))
-        const objectIds = ids.map((id: string) => new ObjectId(id))
-        const orderIds = objectIds.map((id: ObjectId) => id)
-        const products = objectIds.length
-          ? await databaseService.products
-              .aggregate([
-                { $match: { ...match, _id: { $in: objectIds } } },
-                ...this.buildDrugDatabasePipeline({}, undefined, { _id: 1 }).slice(1, -1),
-                { $addFields: { __order: { $indexOfArray: [orderIds, '$_id'] } } },
-                { $sort: { __order: 1 } },
-                { $project: this.getDrugDatabaseProductProjection() }
-              ])
-              .toArray()
-          : []
+      const canUseTypesense =
+        Boolean(search) &&
+        typesenseService.getAvailability() &&
+        activeStatus === 'active' &&
+        query.stock !== 'outOfStock' &&
+        (!query.status || query.status === 'all' || query.status === 'active')
 
-        return {
-          products: products.map((product) => this.mapDrugDatabaseProduct(product)),
-          pagination: {
-            page,
-            limit,
-            totalPages: Math.ceil((tsResult.found || products.length) / limit),
-            totalCount: tsResult.found || products.length
-          },
-          lowStockThreshold: LOW_STOCK_THRESHOLD,
-          searchSource: 'typesense',
-          lastCheckedAt: new Date()
+      if (canUseTypesense) {
+        const tsSortBy =
+          sortBy === 'price'
+            ? sortOrder === -1
+              ? 'price_desc'
+              : 'price_asc'
+            : sortBy === 'createdAt'
+              ? 'newest'
+              : sortBy === 'rating'
+                ? 'rating'
+                : undefined
+        const tsResult = await typesenseService.searchProducts({
+          q: search as string,
+          page,
+          limit,
+          categoryIds: categoryIds?.map((id) => id.toString()),
+          requiresPrescription: query.type === 'Rx' ? true : query.type === 'OTC' ? false : undefined,
+          inStock: query.stock === 'inStock' || query.stock === 'lowStock',
+          sortBy: tsSortBy
+        })
+
+        if (tsResult?.hits) {
+          const ids = tsResult.hits.map((hit: any) => hit.document?.mongoId).filter((id: string) => ObjectId.isValid(id))
+          const objectIds = ids.map((id: string) => new ObjectId(id))
+          const orderIds = objectIds.map((id: ObjectId) => id)
+          const products = objectIds.length
+            ? await databaseService.products
+                .aggregate([
+                  { $match: { ...match, _id: { $in: objectIds } } },
+                  ...this.buildDrugDatabasePipeline({}, undefined, { _id: 1 }).slice(1, -1),
+                  { $addFields: { __order: { $indexOfArray: [orderIds, '$_id'] } } },
+                  { $sort: { __order: 1 } },
+                  { $project: this.getDrugDatabaseProductProjection() }
+                ])
+                .toArray()
+            : []
+
+          return {
+            products: products.map((product) => this.mapDrugDatabaseProduct(product)),
+            pagination: {
+              page,
+              limit,
+              totalPages: Math.ceil((tsResult.found || products.length) / limit),
+              totalCount: tsResult.found || products.length
+            },
+            lowStockThreshold: LOW_STOCK_THRESHOLD,
+            searchSource: 'typesense',
+            lastCheckedAt: new Date()
+          }
         }
       }
-    }
 
-    const searchRegex = search ? escapeRegex(search) : undefined
-    const pipeline = searchRegex
-      ? this.buildDrugDatabasePipeline(match, searchRegex, sort)
-      : this.buildDrugDatabaseListPipeline(match, sort, skip, limit, sortField === 'calculatedPrice')
-    const collation = { locale: 'vi', strength: 1 }
-    const [products, totalCount] = await Promise.all([
-      searchRegex
-        ? databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray()
-        : databaseService.products.aggregate(pipeline, { collation }).toArray(),
-      searchRegex
-        ? databaseService.products
-            .aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation })
-            .toArray()
-            .then((countResult) => countResult[0]?.total || 0)
-        : databaseService.products.countDocuments(match)
-    ])
+      const searchRegex = search ? escapeRegex(search) : undefined
+      const pipeline = searchRegex
+        ? this.buildDrugDatabasePipeline(match, searchRegex, sort)
+        : this.buildDrugDatabaseListPipeline(match, sort, skip, limit, sortField === 'calculatedPrice')
+      const collation = { locale: 'vi', strength: 1 }
+      const [products, totalCount] = await Promise.all([
+        searchRegex
+          ? databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray()
+          : databaseService.products.aggregate(pipeline, { collation }).toArray(),
+        searchRegex
+          ? databaseService.products
+              .aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation })
+              .toArray()
+              .then((countResult) => countResult[0]?.total || 0)
+          : databaseService.products.countDocuments(match)
+      ])
 
-    return {
-      products: products.map((product) => this.mapDrugDatabaseProduct(product)),
-      pagination: {
-        page,
-        limit,
-        totalPages: Math.ceil(totalCount / limit),
-        totalCount
-      },
-      lowStockThreshold: LOW_STOCK_THRESHOLD,
-      searchSource: search ? 'mongo' : 'mongo',
-      lastCheckedAt: new Date(),
-      normalizedSearch: search ? normalizeVietnamese(search) : undefined
-    }
+      return {
+        products: products.map((product) => this.mapDrugDatabaseProduct(product)),
+        pagination: {
+          page,
+          limit,
+          totalPages: Math.ceil(totalCount / limit),
+          totalCount
+        },
+        lowStockThreshold: LOW_STOCK_THRESHOLD,
+        searchSource: search ? 'mongo' : 'mongo',
+        lastCheckedAt: new Date(),
+        normalizedSearch: search ? normalizeVietnamese(search) : undefined
+      }
+    }, DRUG_DATABASE_CACHE_TTL_SECONDS)
   }
 
   async getDrugDatabaseProduct(productId: string) {
-    const match = ObjectId.isValid(productId) ? { _id: new ObjectId(productId) } : { slug: productId }
-    const products = await databaseService.products.aggregate(this.buildDrugDatabasePipeline(match, undefined, { _id: 1 })).toArray()
-    if (!products.length) {
-      throw new ErrorWithStatus({ message: 'Product not found', status: HTTP_STATUS.NOT_FOUND })
-    }
-    return this.mapDrugDatabaseProduct(products[0])
+    const cacheKey = `pharmacist:drug-database:product:${productId}`
+    return cacheService.getOrSet(cacheKey, async () => {
+      const match = ObjectId.isValid(productId) ? { _id: new ObjectId(productId) } : { slug: productId }
+      const products = await databaseService.products.aggregate(this.buildDrugDatabasePipeline(match, undefined, { _id: 1 })).toArray()
+      if (!products.length) {
+        throw new ErrorWithStatus({ message: 'Product not found', status: HTTP_STATUS.NOT_FOUND })
+      }
+      return this.mapDrugDatabaseProduct(products[0])
+    }, DRUG_DATABASE_CACHE_TTL_SECONDS)
   }
 
   // ========== PATIENT MEDICAL INFO METHODS ==========
