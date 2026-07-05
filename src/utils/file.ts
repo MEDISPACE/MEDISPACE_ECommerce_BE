@@ -23,12 +23,14 @@ export const initFolder = () => {
   })
 }
 export const handleUploadImage = async (req: Request) => {
+  const uploadPurpose = String(req.query.purpose || '').trim().toLowerCase()
+  const isPrescriptionUpload = uploadPurpose === 'prescription'
   const form = formidable({
     uploadDir: UPLOAD_IMAGE_TEMP_DIR,
     maxFiles: 4,
     keepExtensions: true,
-    maxFileSize: 2 * 1024 * 1024, // 2MB
-    maxTotalFileSize: 4 * 2 * 1024 * 1024, // 8MB
+    maxFileSize: (isPrescriptionUpload ? 10 : 2) * 1024 * 1024,
+    maxTotalFileSize: 4 * (isPrescriptionUpload ? 10 : 2) * 1024 * 1024,
     filter: function (part: any) {
       const { name, mimetype } = part
       const valid = name === 'image' && Boolean(mimetype?.includes('image/'))

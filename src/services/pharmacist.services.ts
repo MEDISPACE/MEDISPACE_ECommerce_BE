@@ -1049,6 +1049,13 @@ class PharmacistService {
         })
       }
 
+      if (product.requiresPrescription && !verifiedPrescription) {
+        throw new ErrorWithStatus({
+          message: `Verified prescription is required for product: ${product.name}`,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
       // Check stock with unit conversion
       const variant =
         product.priceVariants?.find((v: any) => v.unit === item.unit) ||
