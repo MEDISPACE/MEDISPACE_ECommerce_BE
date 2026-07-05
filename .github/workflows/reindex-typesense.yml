@@ -1,0 +1,65 @@
+name: Reindex Typesense
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Drop and recreate product/article/brand/category indexes before seeding'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+concurrency:
+  group: medispace-typesense-reindex
+  cancel-in-progress: false
+
+jobs:
+  reindex:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Run Typesense seed in backend container
+        run: |
+          FORCE="${{ github.event.inputs.force }}"
+          COMPOSE_FILE_OVERRIDE="${{ secrets.DEPLOY_COMPOSE_FILE }}"
+
+          ssh -i ~/.ssh/id_rsa ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "FORCE=\"$FORCE\" COMPOSE_FILE_OVERRIDE=\"$COMPOSE_FILE_OVERRIDE\" bash -s" << 'REMOTE'
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            if [ -n "${COMPOSE_FILE_OVERRIDE:-}" ]; then
+              COMPOSE_ARGS=(-f "$COMPOSE_FILE_OVERRIDE")
+            elif [ -f docker-compose.yml ]; then
+              COMPOSE_ARGS=()
+            elif [ -f infra/docker-compose.prod.yml ]; then
+              COMPOSE_ARGS=(-f infra/docker-compose.prod.yml)
+            else
+              echo "No Docker Compose file found in deploy path."
+              exit 1
+            fi
+
+            compose() {
+              docker compose "${COMPOSE_ARGS[@]}" "$@"
+            }
+
+            SEED_ARGS=""
+            if [ "${FORCE:-false}" = "true" ]; then
+              SEED_ARGS="--force"
+            fi
+
+            compose exec -T backend sh -lc "node dist/scripts/seed-typesense.js $SEED_ARGS"
+          REMOTE
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
