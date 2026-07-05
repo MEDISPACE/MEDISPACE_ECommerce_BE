@@ -860,16 +860,24 @@ class TypesenseService {
     else if (sortBy === 'newest') sortByStr = `${rxSort}createdAt:desc`.replace(/,$/, '')
     else if (sortBy === 'rating') sortByStr = `${rxSort}rating:desc,reviewCount:desc`
 
+    const normalizedQuery = q && q !== '*' ? normalizeVietnamese(q) : ''
+    const searchQuery = q && q !== '*'
+      ? normalizedQuery && normalizedQuery !== q
+        ? `${q} ${normalizedQuery}`
+        : q
+      : '*'
+
     try {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({
-        q: q && q !== '*' ? `${q} ${normalizeVietnamese(q)}` : '*',
+        q: searchQuery,
         query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode,searchTextNormalized',
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
         sort_by: sortByStr,
         page,
         per_page: limit,
-        num_typos: 2
+        num_typos: 2,
+        prefix: true
       })
     } catch (err) {
       console.error('[Typesense] searchProducts error:', err)
