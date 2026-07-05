@@ -136,8 +136,9 @@ jobs:
               set +a
             }
 
-            echo "📥 Pulling latest code..."
-            git pull origin main
+            echo "📥 Syncing latest code..."
+            git fetch origin main
+            git reset --hard origin/main
 
             echo "🔑 Login Docker Hub..."
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
