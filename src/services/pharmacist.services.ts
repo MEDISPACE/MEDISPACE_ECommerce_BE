@@ -261,6 +261,56 @@ class PharmacistService {
     }
   }
 
+  private mapTypesenseDrugDatabaseHit(hit: any) {
+    const doc = hit?.document || {}
+    let priceVariants: any[] = []
+    if (typeof doc.priceVariantsJson === 'string' && doc.priceVariantsJson) {
+      try {
+        const parsed = JSON.parse(doc.priceVariantsJson)
+        priceVariants = Array.isArray(parsed) ? parsed : []
+      } catch {
+        priceVariants = []
+      }
+    }
+
+    const details = {
+      activeIngredients: doc.activeIngredients || '',
+      indications: doc.indications || '',
+      manufacturer: doc.manufacturer || '',
+      dosageForm: doc.dosageForm || '',
+      strength: doc.strength || '',
+      packSize: doc.packSize || '',
+      dosageInstructions: doc.dosageInstructions || '',
+      storageInstructions: doc.storageInstructions || ''
+    }
+
+    return this.mapDrugDatabaseProduct({
+      _id: doc.mongoId,
+      name: doc.name || '',
+      slug: doc.slug || '',
+      sku: doc.sku || '',
+      barcode: doc.barcode || '',
+      shortDescription: doc.shortDescription || '',
+      categoryId: doc.categoryId || '',
+      brandId: doc.brandId || '',
+      priceVariants,
+      stockQuantity: doc.stockQuantity || 0,
+      maxOrderQuantity: doc.maxOrderQuantity || 0,
+      status: doc.isActive === false ? 'inactive' : 'active',
+      isActive: doc.isActive !== false,
+      requiresPrescription: Boolean(doc.requiresPrescription),
+      featuredImage: doc.featuredImage || '',
+      rating: doc.rating || 0,
+      reviewCount: doc.reviewCount || 0,
+      createdAt: doc.createdAt ? new Date(doc.createdAt) : undefined,
+      category: doc.categoryId || doc.categoryName ? { _id: doc.categoryId || '', name: doc.categoryName || '', slug: '' } : null,
+      brand: doc.brandId || doc.brandName ? { _id: doc.brandId || '', name: doc.brandName || '', slug: '' } : null,
+      details,
+      media: doc.featuredImage ? { url: doc.featuredImage, isPrimary: true } : null,
+      calculatedPrice: doc.price || 0
+    })
+  }
+
   private buildDrugDatabasePipeline(match: Record<string, unknown>, searchRegex?: string, sort: Record<string, 1 | -1> = { name: 1 }) {
     return [
       { $match: match },
@@ -676,28 +726,13 @@ class PharmacistService {
         })
 
         if (tsResult?.hits) {
-          const ids = tsResult.hits.map((hit: any) => hit.document?.mongoId).filter((id: string) => ObjectId.isValid(id))
-          const objectIds = ids.map((id: string) => new ObjectId(id))
-          const orderIds = objectIds.map((id: ObjectId) => id)
-          const products = objectIds.length
-            ? await databaseService.products
-                .aggregate([
-                  { $match: { ...match, _id: { $in: objectIds } } },
-                  ...this.buildDrugDatabasePipeline({}, undefined, { _id: 1 }).slice(1, -1),
-                  { $addFields: { __order: { $indexOfArray: [orderIds, '$_id'] } } },
-                  { $sort: { __order: 1 } },
-                  { $project: this.getDrugDatabaseProductProjection() }
-                ])
-                .toArray()
-            : []
-
           return {
-            products: products.map((product) => this.mapDrugDatabaseProduct(product)),
+            products: tsResult.hits.map((hit: any) => this.mapTypesenseDrugDatabaseHit(hit)),
             pagination: {
               page,
               limit,
-              totalPages: Math.ceil((tsResult.found || products.length) / limit),
-              totalCount: tsResult.found || products.length
+              totalPages: Math.ceil((tsResult.found || tsResult.hits.length) / limit),
+              totalCount: tsResult.found || tsResult.hits.length
             },
             lowStockThreshold: LOW_STOCK_THRESHOLD,
             searchSource: 'typesense',
