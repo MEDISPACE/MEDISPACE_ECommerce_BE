@@ -17,7 +17,7 @@ process.env.TYPESENSE_AUTO_RECONCILE = 'false'
 const MONGO_URI = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/${process.env.DB_NAME}?retryWrites=true&w=majority`
 
 async function seed() {
-  const { default: typesenseService } = await import('../services/typesense.services')
+  const { default: typesenseService } = await import('../services/typesense.services.js')
 
   console.log('[Seed] Connecting to MongoDB...')
   const mongoClient = new MongoClient(MONGO_URI)
