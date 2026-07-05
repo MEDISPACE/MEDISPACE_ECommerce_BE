@@ -57,7 +57,7 @@ jobs:
               SEED_ARGS="--force"
             fi
 
-            compose exec -T backend sh -lc "node dist/scripts/seed-typesense.js $SEED_ARGS"
+            compose exec -T backend sh -lc "TYPESENSE_AUTO_RECONCILE=false node dist/scripts/seed-typesense.js $SEED_ARGS"
           REMOTE
 
       - name: Cleanup SSH
