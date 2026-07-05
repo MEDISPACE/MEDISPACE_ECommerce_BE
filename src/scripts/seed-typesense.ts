@@ -8,11 +8,17 @@ import { config } from 'dotenv'
 config()
 
 import { MongoClient } from 'mongodb'
-import typesenseService from '../services/typesense.services'
+
+// Reindex is already a full source-of-truth rebuild. Disable the service's
+// background reconciliation loop during this process so it cannot delete and
+// rebuild collections while the seed job is importing documents.
+process.env.TYPESENSE_AUTO_RECONCILE = 'false'
 
 const MONGO_URI = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@medispacedb.35qkwso.mongodb.net/${process.env.DB_NAME}?retryWrites=true&w=majority`
 
 async function seed() {
+  const { default: typesenseService } = await import('../services/typesense.services')
+
   console.log('[Seed] Connecting to MongoDB...')
   const mongoClient = new MongoClient(MONGO_URI)
   await mongoClient.connect()
