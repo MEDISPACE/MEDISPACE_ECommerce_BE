@@ -298,14 +298,26 @@ export const initChatSocket = (httpServer: HTTPServer) => {
   // Connection handler
   io.on('connection', async (socket: AuthenticatedSocket) => {
     // --- FIX 3.4: dùng atomic increment thay bool để handle đa tab ---
+    // Pharmacist availability is controlled manually from /pharmacist/online-status.
+    // Socket presence must not overwrite that preference during refresh/reconnect.
     if (socket.userId) {
-      await databaseService.users.updateOne(
-        { _id: new ObjectId(socket.userId) },
-        {
-          $inc: { onlineCount: 1 },
-          $set: { isOnline: true, updatedAt: new Date() }
-        }
-      )
+      if (socket.userRole === 'pharmacist') {
+        await databaseService.users.updateOne(
+          { _id: new ObjectId(socket.userId) },
+          {
+            $inc: { onlineCount: 1 },
+            $set: { updatedAt: new Date() }
+          }
+        )
+      } else {
+        await databaseService.users.updateOne(
+          { _id: new ObjectId(socket.userId) },
+          {
+            $inc: { onlineCount: 1 },
+            $set: { isOnline: true, updatedAt: new Date() }
+          }
+        )
+      }
 
       // Broadcast online status
       io.emit('user:online', { userId: socket.userId })
@@ -852,10 +864,17 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
         const newCount = user?.onlineCount ?? 0
         if (newCount <= 0) {
-          await databaseService.users.updateOne(
-            { _id: new ObjectId(socket.userId) },
-            { $set: { isOnline: false, onlineCount: 0 } }
-          )
+          if (socket.userRole === 'pharmacist') {
+            await databaseService.users.updateOne(
+              { _id: new ObjectId(socket.userId) },
+              { $set: { onlineCount: 0 } }
+            )
+          } else {
+            await databaseService.users.updateOne(
+              { _id: new ObjectId(socket.userId) },
+              { $set: { isOnline: false, onlineCount: 0 } }
+            )
+          }
           io.emit('user:offline', { userId: socket.userId })
         }
       }
