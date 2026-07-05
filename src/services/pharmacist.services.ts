@@ -131,6 +131,78 @@ class PharmacistService {
     }
   }
 
+  private getCalculatedPriceStage() {
+    const safePriceVariants = this.getSafePriceVariantsExpression()
+
+    return {
+      $addFields: {
+        calculatedPrice: {
+          $let: {
+            vars: {
+              defaultVariant: {
+                $ifNull: [
+                  { $arrayElemAt: [{ $filter: { input: safePriceVariants, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
+                  { $arrayElemAt: [safePriceVariants, 0] }
+                ]
+              }
+            },
+            in: { $ifNull: ['$$defaultVariant.price', 0] }
+          }
+        }
+      }
+    }
+  }
+
+  private getDrugDatabaseLookupStages() {
+    return [
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'categoryId',
+          foreignField: '_id',
+          as: 'category',
+          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, path: 1 } }]
+        }
+      },
+      {
+        $lookup: {
+          from: 'brands',
+          localField: 'brandId',
+          foreignField: '_id',
+          as: 'brand',
+          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, logo: 1 } }]
+        }
+      },
+      {
+        $lookup: {
+          from: 'productDetails',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'details'
+        }
+      },
+      {
+        $lookup: {
+          from: 'productMedia',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'media'
+        }
+      }
+    ]
+  }
+
+  private getDrugDatabaseHydrationStage() {
+    return {
+      $addFields: {
+        category: { $arrayElemAt: ['$category', 0] },
+        brand: { $arrayElemAt: ['$brand', 0] },
+        details: { $arrayElemAt: ['$details', 0] },
+        media: { $arrayElemAt: ['$media', 0] }
+      }
+    }
+  }
+
   private mapDrugDatabaseProduct(product: any) {
     const details = product.details || {}
     const priceVariants = Array.isArray(product.priceVariants) ? product.priceVariants : []
@@ -165,65 +237,11 @@ class PharmacistService {
   }
 
   private buildDrugDatabasePipeline(match: Record<string, unknown>, searchRegex?: string, sort: Record<string, 1 | -1> = { name: 1 }) {
-    const safePriceVariants = this.getSafePriceVariantsExpression()
-
     return [
       { $match: match },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'categoryId',
-          foreignField: '_id',
-          as: 'category',
-          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, path: 1 } }]
-        }
-      },
-      {
-        $lookup: {
-          from: 'brands',
-          localField: 'brandId',
-          foreignField: '_id',
-          as: 'brand',
-          pipeline: [{ $project: { _id: 1, name: 1, slug: 1, logo: 1 } }]
-        }
-      },
-      {
-        $lookup: {
-          from: 'productDetails',
-          localField: '_id',
-          foreignField: 'productId',
-          as: 'details'
-        }
-      },
-      {
-        $lookup: {
-          from: 'productMedia',
-          localField: '_id',
-          foreignField: 'productId',
-          as: 'media'
-        }
-      },
-      {
-        $addFields: {
-          category: { $arrayElemAt: ['$category', 0] },
-          brand: { $arrayElemAt: ['$brand', 0] },
-          details: { $arrayElemAt: ['$details', 0] },
-          media: { $arrayElemAt: ['$media', 0] },
-          calculatedPrice: {
-            $let: {
-              vars: {
-                defaultVariant: {
-                  $ifNull: [
-                    { $arrayElemAt: [{ $filter: { input: safePriceVariants, cond: { $eq: ['$$this.isDefault', true] } } }, 0] },
-                    { $arrayElemAt: [safePriceVariants, 0] }
-                  ]
-                }
-              },
-              in: { $ifNull: ['$$defaultVariant.price', 0] }
-            }
-          }
-        }
-      },
+      this.getCalculatedPriceStage(),
+      ...this.getDrugDatabaseLookupStages(),
+      this.getDrugDatabaseHydrationStage(),
       ...(searchRegex
         ? [
             {
@@ -246,6 +264,19 @@ class PharmacistService {
           ]
         : []),
       { $sort: sort },
+      { $project: this.getDrugDatabaseProductProjection() }
+    ]
+  }
+
+  private buildDrugDatabaseListPipeline(match: Record<string, unknown>, sort: Record<string, 1 | -1>, skip: number, limit: number) {
+    return [
+      { $match: match },
+      this.getCalculatedPriceStage(),
+      { $sort: sort },
+      { $skip: skip },
+      { $limit: limit },
+      ...this.getDrugDatabaseLookupStages(),
+      this.getDrugDatabaseHydrationStage(),
       { $project: this.getDrugDatabaseProductProjection() }
     ]
   }
@@ -629,13 +660,21 @@ class PharmacistService {
     }
 
     const searchRegex = search ? escapeRegex(search) : undefined
-    const pipeline = this.buildDrugDatabasePipeline(match, searchRegex, sort)
+    const pipeline = searchRegex
+      ? this.buildDrugDatabasePipeline(match, searchRegex, sort)
+      : this.buildDrugDatabaseListPipeline(match, sort, skip, limit)
     const collation = { locale: 'vi', strength: 1 }
-    const [products, countResult] = await Promise.all([
-      databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray(),
-      databaseService.products.aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation }).toArray()
+    const [products, totalCount] = await Promise.all([
+      searchRegex
+        ? databaseService.products.aggregate([...pipeline, { $skip: skip }, { $limit: limit }], { collation }).toArray()
+        : databaseService.products.aggregate(pipeline, { collation }).toArray(),
+      searchRegex
+        ? databaseService.products
+            .aggregate([...pipeline.slice(0, -2), { $count: 'total' }], { collation })
+            .toArray()
+            .then((countResult) => countResult[0]?.total || 0)
+        : databaseService.products.countDocuments(match)
     ])
-    const totalCount = countResult[0]?.total || 0
 
     return {
       products: products.map((product) => this.mapDrugDatabaseProduct(product)),
