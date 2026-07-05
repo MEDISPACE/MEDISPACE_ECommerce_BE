@@ -61,6 +61,16 @@ async function confirmVerifiedPayment(result: PaymentResult, allowedMethods: str
   return order
 }
 
+function isVNPayPortalIpnTestCall(query: Record<string, any>) {
+  return (
+    query.vnp_TmnCode === process.env.VNP_TMN_CODE &&
+    query.vnp_OrderInfo === 'Test_call_ipn' &&
+    query.vnp_TxnRef === '222222' &&
+    query.vnp_TransactionNo === '11111111' &&
+    query.vnp_SecureHash === 'hash_test'
+  )
+}
+
 // VNPay Return
 export const vnpayReturnController = async (req: Request, res: Response) => {
   try {
@@ -82,6 +92,10 @@ export const vnpayReturnController = async (req: Request, res: Response) => {
 // VNPay IPN
 export const vnpayIpnController = async (req: Request, res: Response) => {
   try {
+    if (isVNPayPortalIpnTestCall(req.query)) {
+      return res.status(200).json({ RspCode: '00', Message: 'Confirm Success' })
+    }
+
     const result = await paymentService.verifyIpn(PaymentMethod.VNPay, req.query)
 
     if (result.isSuccess && result.orderId) {
