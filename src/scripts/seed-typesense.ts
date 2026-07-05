@@ -217,6 +217,12 @@ async function seed() {
   console.log(`[Seed] Generated ${suggestions.length} query suggestions. Indexing...`)
   await typesenseService.bulkIndexQuerySuggestions(suggestions)
 
+  await db.collection('typesense_sync_state').updateOne(
+    { key: 'global' },
+    { $set: { key: 'global', dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } },
+    { upsert: true }
+  )
+
   await mongoClient.close()
   console.log('[Seed] ✅ Done! Typesense is now synced with MongoDB (products, articles, brands, categories, query_suggestions).')
   process.exit(0)
