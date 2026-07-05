@@ -873,6 +873,8 @@ class TypesenseService {
         query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode,searchTextNormalized',
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
+        include_fields:
+          'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,dosageForm,strength,packSize',
         sort_by: sortByStr,
         page,
         per_page: limit,
