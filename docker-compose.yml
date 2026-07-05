@@ -21,6 +21,7 @@ services:
     environment:
       TYPESENSE_HOST: typesense
       TYPESENSE_PORT: 8108
+      TYPESENSE_AUTO_RECONCILE: "false"
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
