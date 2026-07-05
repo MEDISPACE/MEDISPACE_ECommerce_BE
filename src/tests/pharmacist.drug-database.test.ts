@@ -16,6 +16,11 @@ vi.mock('~/services/typesense.services', () => ({
   }
 }))
 
+process.env.DB_PRODUCTS_COLLECTION = 'products'
+process.env.DB_CATEGORIES_COLLECTION = 'categories'
+process.env.DB_BRANDS_COLLECTION = 'brands'
+
+const { default: databaseService } = await import('~/services/database.services')
 const { default: pharmacistService } = await import('~/services/pharmacist.services')
 
 describe('pharmacist drug database aggregation', () => {
@@ -77,5 +82,41 @@ describe('pharmacist drug database aggregation', () => {
     expect(result.every((product) => Array.isArray(product.priceVariants))).toBe(true)
     expect(result.every((product) => product.priceVariants.length === 0)).toBe(true)
     expect(result.every((product) => product.calculatedPrice === 0)).toBe(true)
+  })
+
+  it('loads the product list through the service using aggregate collation options', async () => {
+    const db = client.db('drug-database-service-regression')
+    ;(databaseService as any).db = db
+
+    const products = db.collection('products')
+    const categoryId = new ObjectId()
+    const brandId = new ObjectId()
+
+    await db.collection('categories').insertOne({ _id: categoryId, name: 'Thuoc', slug: 'thuoc', path: '/thuoc' })
+    await db.collection('brands').insertOne({ _id: brandId, name: 'Legacy Brand', slug: 'legacy-brand' })
+    await products.insertOne({
+      _id: new ObjectId(),
+      name: 'A legacy active product',
+      slug: 'a-legacy-active-product',
+      sku: 'LEGACY-ACTIVE',
+      categoryId,
+      brandId,
+      priceVariants: 'invalid',
+      stockQuantity: 10,
+      isActive: true,
+      requiresPrescription: false,
+      status: 'active'
+    })
+
+    const result = await pharmacistService.getDrugDatabaseProducts({
+      page: 1,
+      limit: 24,
+      sortBy: 'name',
+      sortOrder: 'asc',
+      activeStatus: 'active'
+    })
+
+    expect(result.pagination.totalCount).toBe(1)
+    expect(result.products[0].priceVariants).toEqual([])
   })
 })
