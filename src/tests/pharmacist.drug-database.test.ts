@@ -1,7 +1,22 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import { MongoClient, ObjectId } from 'mongodb'
-import pharmacistService from '~/services/pharmacist.services'
+
+vi.mock('~/services/payment.services', () => ({ default: {} }))
+vi.mock('~/services/orders.services', () => ({ default: {} }))
+vi.mock('~/services/ghn.services', () => ({ default: {} }))
+vi.mock('~/services/prescriptions.services', () => ({ default: { getPrescriptionStats: vi.fn() } }))
+vi.mock('~/services/notifications.services', () => ({ default: { notifyLowStock: vi.fn() } }))
+vi.mock('~/sockets/chat.socket', () => ({ getIO: vi.fn() }))
+vi.mock('~/middlewares/patientPhi.middlewares', () => ({ canAccessPatientPhi: vi.fn() }))
+vi.mock('~/services/typesense.services', () => ({
+  default: {
+    getAvailability: vi.fn(() => false),
+    searchProducts: vi.fn()
+  }
+}))
+
+const { default: pharmacistService } = await import('~/services/pharmacist.services')
 
 describe('pharmacist drug database aggregation', () => {
   let mongoServer: MongoMemoryServer
