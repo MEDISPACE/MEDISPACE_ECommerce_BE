@@ -56,6 +56,12 @@ class PrescriptionsService {
       _id: new ObjectId(),
       prescriptionNumber,
       customerId,
+      patientName: body.patientName,
+      patientAge: body.patientAge,
+      patientGender: body.patientGender,
+      phoneNumber: body.phoneNumber,
+      diagnosis: body.diagnosis,
+      specialNotes: body.specialNotes,
       doctorName: body.doctorName,
       hospitalName: body.hospitalName,
       prescriptionDate: new Date(body.prescriptionDate),
@@ -73,6 +79,10 @@ class PrescriptionsService {
       rejectionReason: undefined,
       notes: undefined,
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+      ocrRawText: body.ocrRawText,
+      ocrConfidence: body.ocrConfidence,
+      ocrExtractionMethod: body.ocrExtractionMethod,
+      ocrQuality: body.ocrQuality,
       createdAt: new Date(),
       updatedAt: new Date(),
       updateVerification: undefined, // Required by schema
