@@ -938,7 +938,7 @@ class TypesenseService {
 
   async requestReconciliation(reason: string): Promise<void> {
     await this.markDirty(reason)
-    if (this.isAvailable) void this.reconcileAll()
+    if (TYPESENSE_AUTO_RECONCILE && this.isAvailable) void this.reconcileAll()
   }
 
   async getConsistencyStatus(): Promise<Record<string, unknown>> {
