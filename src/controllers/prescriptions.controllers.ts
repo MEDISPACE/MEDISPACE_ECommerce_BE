@@ -131,59 +131,274 @@ export const getPrescriptionStatsController = async (req: Request, res: Response
 
 // ★ Scan prescription via OCR Service proxy
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8001'
+const MAX_SCAN_IMAGE_BYTES = Number(process.env.PRESCRIPTION_SCAN_MAX_BYTES || 8 * 1024 * 1024)
+const OCR_SCAN_TIMEOUT_MS = Number(process.env.PRESCRIPTION_OCR_SCAN_TIMEOUT_MS || 150000)
+const OCR_SCAN_RETRIES = Number(process.env.PRESCRIPTION_OCR_SCAN_RETRIES || 6)
+const MAX_SCAN_IMAGES = Number(process.env.PRESCRIPTION_SCAN_MAX_IMAGES || 5)
+const ALLOWED_OCR_MODES = new Set(['traditional', 'vision', 'parallel', 'parallel_benchmark'])
+const RETRYABLE_OCR_ERROR_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNABORTED'])
 
-export const scanPrescriptionController = async (req: Request, res: Response) => {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const resolveOcrMode = (mode?: string) => {
+  const selectedMode = (mode || process.env.PRESCRIPTION_OCR_MODE || 'parallel').trim().toLowerCase()
+  return ALLOWED_OCR_MODES.has(selectedMode) ? selectedMode : null
+}
+
+const isAllowedScanImageUrl = (imageUrl: string) => {
   try {
-    const { imageUrl } = req.body as { imageUrl: string }
+    const parsed = new URL(imageUrl)
+    if (!['https:', 'http:'].includes(parsed.protocol)) return false
 
-    if (!imageUrl) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        message: 'imageUrl is required'
-      })
+    const configuredHosts = (process.env.PRESCRIPTION_IMAGE_ALLOWED_HOSTS || '')
+      .split(',')
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean)
+
+    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET_NAME
+    const region = process.env.AWS_REGION
+    const s3Host = bucketName && region ? `${bucketName}.s3.${region}.amazonaws.com`.toLowerCase() : undefined
+    const s3GlobalHost = bucketName ? `${bucketName}.s3.amazonaws.com`.toLowerCase() : undefined
+    const regionalS3Host = region ? `s3.${region}.amazonaws.com`.toLowerCase() : undefined
+    const allowedHosts = new Set([
+      ...configuredHosts,
+      ...(s3Host ? [s3Host] : []),
+      ...(s3GlobalHost ? [s3GlobalHost] : []),
+      ...(regionalS3Host ? [regionalS3Host] : []),
+      's3.amazonaws.com'
+    ])
+
+    if (allowedHosts.size === 0 || !allowedHosts.has(parsed.hostname.toLowerCase())) {
+      console.warn('[scanPrescription] Rejected imageUrl host:', parsed.hostname, 'allowed:', Array.from(allowedHosts))
+      return false
     }
 
-    // 1. Download image from the URL (e.g. S3)
-    const imageResponse = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-      timeout: 30000
-    })
-
-    const contentType = imageResponse.headers['content-type'] || 'image/jpeg'
-    const buffer = Buffer.from(imageResponse.data as ArrayBuffer)
-
-    // Determine file extension from content-type
-    const extMap: Record<string, string> = {
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp'
+    if ([regionalS3Host, 's3.amazonaws.com'].includes(parsed.hostname.toLowerCase()) && bucketName) {
+      return parsed.pathname.startsWith(`/${bucketName}/`)
     }
-    const ext = extMap[contentType] || 'jpg'
 
-    // 2. Forward to OCR service as multipart upload
+    return true
+  } catch {
+    return false
+  }
+}
+
+const shouldRetryOcrRequest = (error: any) => {
+  if (!axios.isAxiosError(error)) return false
+  if (error.response) return false
+  return RETRYABLE_OCR_ERROR_CODES.has(String(error.code || ''))
+}
+
+const postImageToOcrService = async (buffer: Buffer, contentType: string, ext: string, selectedMode: string) => {
+  let lastError: any
+
+  for (let attempt = 0; attempt <= OCR_SCAN_RETRIES; attempt += 1) {
     const formData = new FormData()
     formData.append('file', buffer, {
       filename: `prescription.${ext}`,
       contentType: contentType
     })
+    formData.append('mode', selectedMode)
 
-    const ocrResponse = await axios.post(
-      `${OCR_SERVICE_URL}/api/ocr/extract-prescription`,
-      formData,
-      {
+    try {
+      return await axios.post(`${OCR_SERVICE_URL}/api/ocr/extract-prescription`, formData, {
         headers: formData.getHeaders(),
-        timeout: 150000, // OCR + LLM can take up to ~50s
+        timeout: OCR_SCAN_TIMEOUT_MS,
         maxContentLength: Infinity,
         maxBodyLength: Infinity
-      }
-    )
+      })
+    } catch (error: any) {
+      lastError = error
+      if (!shouldRetryOcrRequest(error) || attempt >= OCR_SCAN_RETRIES) break
 
-    const ocrData = ocrResponse.data
+      const delayMs = Math.min(1000 * 2 ** attempt, 5000)
+      console.warn(
+        `[scanPrescription] OCR service unavailable (${error.code || error.message}); retry ${attempt + 1}/${OCR_SCAN_RETRIES} in ${delayMs}ms`
+      )
+      await sleep(delayMs)
+    }
+  }
+
+  throw lastError
+}
+
+const downloadScanImage = async (imageUrl: string) => {
+  const imageResponse = await axios.get(imageUrl, {
+    responseType: 'arraybuffer',
+    timeout: 30000,
+    maxContentLength: MAX_SCAN_IMAGE_BYTES,
+    maxBodyLength: MAX_SCAN_IMAGE_BYTES
+  })
+
+  const headerContentType = imageResponse.headers['content-type']
+  const contentType = (Array.isArray(headerContentType) ? headerContentType[0] : String(headerContentType || 'image/jpeg'))
+    .split(';')[0]
+    .trim()
+    .toLowerCase()
+  if (!contentType.startsWith('image/')) {
+    throw new Error('imageUrl must point to an image resource')
+  }
+
+  const buffer = Buffer.from(imageResponse.data as ArrayBuffer)
+  if (buffer.length > MAX_SCAN_IMAGE_BYTES) {
+    throw new Error('Image is too large for prescription scanning')
+  }
+
+  const extMap: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp'
+  }
+
+  return {
+    buffer,
+    contentType,
+    ext: extMap[contentType] || 'jpg'
+  }
+}
+
+const scanSingleImage = async (imageUrl: string, selectedMode: string, pageIndex: number) => {
+  const image = await downloadScanImage(imageUrl)
+  const ocrResponse = await postImageToOcrService(image.buffer, image.contentType, image.ext, selectedMode)
+  return {
+    ...ocrResponse.data,
+    pageIndex,
+    imageUrl
+  }
+}
+
+const firstNonEmpty = (values: unknown[]) => values.find((value) => value !== undefined && value !== null && value !== '')
+
+const mergeOcrPages = (pages: any[]) => {
+  if (pages.length === 1) return pages[0]
+
+  const pageData = pages.map((page) => page?.data || {})
+  const mergedData: Record<string, unknown> = {}
+  for (const field of [
+    'patientName',
+    'patientAge',
+    'patientGender',
+    'phoneNumber',
+    'doctorName',
+    'hospitalName',
+    'prescriptionDate',
+    'diagnosis',
+    'specialNotes'
+  ]) {
+    mergedData[field] = firstNonEmpty(pageData.map((data) => data?.[field])) ?? null
+  }
+
+  const seenMedications = new Set<string>()
+  mergedData.medications = pageData.flatMap((data, pageIndex) => {
+    const medications = Array.isArray(data?.medications) ? data.medications : []
+    return medications
+      .map((med: any) => ({
+        ...med,
+        sourcePage: pageIndex + 1,
+        source: med.source || `page_${pageIndex + 1}`
+      }))
+      .filter((med: any) => {
+        const key = [med.productName, med.quantity, med.unit, med.dosage]
+          .map((value) => String(value || '').trim().toLowerCase())
+          .join('|')
+        if (!key.replace(/\|/g, '')) return false
+        if (seenMedications.has(key)) return false
+        seenMedications.add(key)
+        return true
+      })
+  })
+
+  const confidenceRank: Record<string, number> = { low: 0, medium: 1, high: 2 }
+  const confidences = pageData.map((data) => String(data?.confidence || 'low').toLowerCase())
+  const lowestConfidence = confidences.reduce((lowest, current) => {
+    return (confidenceRank[current] ?? 0) < (confidenceRank[lowest] ?? 0) ? current : lowest
+  }, 'high')
+
+  mergedData.confidence = lowestConfidence
+  mergedData._extraction_method = `multi_page_${pages.map((page) => page?.data?._extraction_method || page?.timing?.mode || 'ocr').join('+')}`
+
+  return {
+    success: pages.some((page) => page?.success),
+    message: 'Prescription scanned successfully',
+    rawText: pages
+      .map((page, index) => `--- Page ${index + 1} ---\n${page?.rawText || ''}`.trim())
+      .join('\n\n'),
+    data: mergedData,
+    quality: {
+      score: Math.round(
+        pages.reduce((sum, page) => sum + Number(page?.quality?.score || 0), 0) / Math.max(pages.length, 1)
+      ),
+      level: lowestConfidence,
+      pages: pages.map((page, index) => ({
+        page: index + 1,
+        success: page?.success,
+        quality: page?.quality,
+        imageQuality: page?.imageQuality || page?.quality?.imageQuality
+      }))
+    },
+    timing: {
+      mode: pages[0]?.timing?.mode,
+      pages: pages.map((page, index) => ({ page: index + 1, timing: page?.timing }))
+    },
+    pages
+  }
+}
+
+export const scanPrescriptionController = async (req: Request, res: Response) => {
+  try {
+    const { imageUrl, imageUrls, mode } = req.body as { imageUrl?: string; imageUrls?: string[]; mode?: string }
+    const scanImageUrls = (Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls : imageUrl ? [imageUrl] : [])
+      .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+      .map((url) => url.trim())
+
+    if (scanImageUrls.length === 0) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'imageUrl or imageUrls is required'
+      })
+    }
+
+    if (scanImageUrls.length > MAX_SCAN_IMAGES) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: `Too many prescription images. Maximum allowed is ${MAX_SCAN_IMAGES}`
+      })
+    }
+
+    const selectedMode = resolveOcrMode(mode)
+    if (!selectedMode) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: 'Unsupported OCR mode'
+      })
+    }
+
+    for (const url of scanImageUrls) {
+      if (!isAllowedScanImageUrl(url)) {
+        let rejectedHost = 'unknown'
+        try {
+          rejectedHost = new URL(url).hostname
+        } catch {
+          // ignore invalid URL parsing here; the generic message below is enough
+        }
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+          message: 'imageUrl host is not allowed for prescription scanning',
+          ...(process.env.NODE_ENV === 'development' ? { rejectedHost } : {})
+        })
+      }
+    }
+
+    const scannedPages = []
+    for (let index = 0; index < scanImageUrls.length; index += 1) {
+      scannedPages.push(await scanSingleImage(scanImageUrls[index], selectedMode, index + 1))
+    }
+
+    const ocrData = mergeOcrPages(scannedPages)
 
     // Map OCR medications to actual products in Database
-    if (ocrData && Array.isArray(ocrData.medications)) {
+    const medicationContainer = ocrData?.data && Array.isArray(ocrData.data.medications) ? ocrData.data : ocrData
+    if (medicationContainer && Array.isArray(medicationContainer.medications)) {
       const enrichedMedications = await Promise.all(
-        ocrData.medications.map(async (med: any) => {
+        medicationContainer.medications.map(async (med: any) => {
           if (!med.productName) return med
+          if (med.needsReview || med.confidence === 'low') return med
 
           try {
             // Create a regex to match the product name
@@ -195,11 +410,12 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
             })
 
             if (product) {
+              const productImages = Array.isArray((product as any).images) ? (product as any).images : []
               return {
                 ...med,
-                productId: product._id,
+                productId: product._id.toString(),
                 matchedName: product.name,
-                image: product.featuredImage || (product.images && product.images.length > 0 ? product.images[0] : null)
+                image: product.featuredImage || (productImages.length > 0 ? productImages[0] : null)
               }
             }
           } catch (e) {
@@ -208,7 +424,7 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
           return med
         })
       )
-      ocrData.medications = enrichedMedications
+      medicationContainer.medications = enrichedMedications
     }
 
     return res.status(HTTP_STATUS.OK).json({
@@ -218,11 +434,24 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('[scanPrescription] Error:', error?.message || error)
 
+    if (shouldRetryOcrRequest(error)) {
+      return res.status(503).json({
+        message: 'OCR service is temporarily unavailable. Please retry in a few seconds.',
+        detail: error?.code || error?.message || 'OCR service unavailable'
+      })
+    }
+
     // Forward OCR service errors
     if (error?.response?.data) {
       return res.status(error.response.status || HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
         message: 'OCR service error',
         detail: error.response.data
+      })
+    }
+
+    if (['imageUrl must point to an image resource', 'Image is too large for prescription scanning'].includes(error?.message)) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        message: error.message
       })
     }
 

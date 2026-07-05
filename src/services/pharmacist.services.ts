@@ -380,6 +380,54 @@ class PharmacistService {
       })
     }
 
+    // customerId is currently a phone number in the pharmacist POS payload.
+    const customer = orderData.customerId
+      ? await databaseService.users.findOne({ phoneNumber: orderData.customerId })
+      : null
+    const userId = customer ? customer._id : new ObjectId() // If customer not found, create temp ID
+
+    let verifiedPrescription: any = null
+    if (orderData.prescriptionId) {
+      if (!ObjectId.isValid(orderData.prescriptionId)) {
+        throw new ErrorWithStatus({
+          message: 'Invalid prescription ID',
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
+      verifiedPrescription = await databaseService.prescriptions.findOne({
+        _id: new ObjectId(orderData.prescriptionId)
+      })
+
+      if (!verifiedPrescription) {
+        throw new ErrorWithStatus({
+          message: 'Prescription not found',
+          status: HTTP_STATUS.NOT_FOUND
+        })
+      }
+
+      if (verifiedPrescription.status !== 'verified') {
+        throw new ErrorWithStatus({
+          message: 'Prescription must be verified before creating an order',
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
+      if (verifiedPrescription.validUntil && new Date(verifiedPrescription.validUntil) < new Date()) {
+        throw new ErrorWithStatus({
+          message: 'Prescription has expired',
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+
+      if (customer && verifiedPrescription.customerId?.toString() !== customer._id.toString()) {
+        throw new ErrorWithStatus({
+          message: 'Prescription does not belong to the selected customer',
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
+    }
+
     // Fetch product details and calculate prices
     const orderItems = []
     let subtotal = 0
@@ -391,6 +439,13 @@ class PharmacistService {
         throw new ErrorWithStatus({
           message: `Product not found: ${item.productId}`,
           status: HTTP_STATUS.NOT_FOUND
+        })
+      }
+
+      if (product.requiresPrescription && !verifiedPrescription) {
+        throw new ErrorWithStatus({
+          message: `Verified prescription is required for product: ${product.name}`,
+          status: HTTP_STATUS.BAD_REQUEST
         })
       }
 
@@ -453,13 +508,6 @@ class PharmacistService {
 
     // Generate order number
     const orderNumber = `DH${Date.now()}${Math.floor(Math.random() * 1000)}`
-
-    // Find customer
-    // customerId can be empty for anonymous guest in POS
-    const customer = orderData.customerId
-      ? await databaseService.users.findOne({ phoneNumber: orderData.customerId })
-      : null
-    const userId = customer ? customer._id : new ObjectId() // If customer not found, create temp ID
 
     const isInstore = orderData.deliveryMethod === ShippingMethod.InStore
 

@@ -5,7 +5,15 @@ export interface PrescriptionMedication {
   productName: string
   dosage: string
   quantity: number
+  unit?: string
   instructions: string
+  matchedName?: string
+  image?: string | null
+  activeIngredient?: string | null
+  confidence?: string
+  needsReview?: boolean
+  source?: string
+  reviewReason?: string
 }
 
 export interface PrescriptionType {
@@ -14,6 +22,12 @@ export interface PrescriptionType {
   customerId: ObjectId
 
   // Basic Information
+  patientName?: string
+  patientAge?: string
+  patientGender?: string
+  phoneNumber?: string
+  diagnosis?: string
+  specialNotes?: string
   doctorName: string
   hospitalName?: string
   prescriptionDate: Date
@@ -39,6 +53,12 @@ export interface PrescriptionType {
 
   // Notes added by the pharmacist
   pharmacistNotes?: string // Notes added by the pharmacist
+
+  // OCR metadata
+  ocrRawText?: string
+  ocrConfidence?: string
+  ocrExtractionMethod?: string
+  ocrQuality?: Record<string, unknown>
 }
 
 export default class Prescription {
@@ -47,6 +67,12 @@ export default class Prescription {
   customerId: ObjectId
 
   // Basic Information
+  patientName?: string
+  patientAge?: string
+  patientGender?: string
+  phoneNumber?: string
+  diagnosis?: string
+  specialNotes?: string
   doctorName: string
   hospitalName?: string
   prescriptionDate: Date
@@ -73,6 +99,12 @@ export default class Prescription {
   // Notes added by the pharmacist
   pharmacistNotes?: string
 
+  // OCR metadata
+  ocrRawText?: string
+  ocrConfidence?: string
+  ocrExtractionMethod?: string
+  ocrQuality?: Record<string, unknown>
+
   constructor(prescription: PrescriptionType) {
     const date = new Date()
 
@@ -80,6 +112,12 @@ export default class Prescription {
     this.prescriptionNumber = prescription.prescriptionNumber
     this.customerId = prescription.customerId
 
+    this.patientName = prescription.patientName
+    this.patientAge = prescription.patientAge
+    this.patientGender = prescription.patientGender
+    this.phoneNumber = prescription.phoneNumber
+    this.diagnosis = prescription.diagnosis
+    this.specialNotes = prescription.specialNotes
     this.doctorName = prescription.doctorName
     this.hospitalName = prescription.hospitalName
     this.prescriptionDate = prescription.prescriptionDate
@@ -93,6 +131,10 @@ export default class Prescription {
     this.verifiedAt = prescription.verifiedAt
     this.notes = prescription.notes
     this.pharmacistNotes = prescription.pharmacistNotes
+    this.ocrRawText = prescription.ocrRawText
+    this.ocrConfidence = prescription.ocrConfidence
+    this.ocrExtractionMethod = prescription.ocrExtractionMethod
+    this.ocrQuality = prescription.ocrQuality
 
     this.validUntil = prescription.validUntil
 
