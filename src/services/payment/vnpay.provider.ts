@@ -12,7 +12,34 @@ export class VNPayProvider implements PaymentProvider {
   private vnpUrl = process.env.VNP_URL
   private returnUrl = process.env.VNP_RETURN_URL
 
+  private getReturnUrl() {
+    const apiUrl = (process.env.API_URL || 'http://localhost:8000').replace(/\/$/, '')
+
+    if (process.env.NODE_ENV === 'production' && this.returnUrl?.includes('ngrok')) {
+      console.warn('[VNPay] Ignoring ngrok VNP_RETURN_URL in production. Falling back to API_URL/payment/vnpay-return.')
+      return `${apiUrl}/payment/vnpay-return`
+    }
+
+    return this.returnUrl || `${apiUrl}/payment/vnpay-return`
+  }
+
+  private assertConfigured() {
+    const missing = [
+      ['VNP_TMN_CODE', this.tmnCode],
+      ['VNP_HASH_SECRET', this.hashSecret],
+      ['VNP_URL', this.vnpUrl]
+    ]
+      .filter(([, value]) => !value)
+      .map(([name]) => name)
+
+    if (missing.length > 0) {
+      throw new Error(`VNPay is not configured. Missing: ${missing.join(', ')}`)
+    }
+  }
+
   async createPaymentUrl(order: Order, req?: any): Promise<string> {
+    this.assertConfigured()
+
     const date = new Date()
     const createDate = this.formatDate(date)
     const ipAddr = this.getIpAddress(req)
@@ -24,8 +51,7 @@ export class VNPayProvider implements PaymentProvider {
     const locale = 'vn'
     const currCode = 'VND'
 
-    const apiUrl = (process.env.API_URL || 'http://localhost:8000').replace(/\/$/, '')
-    const vnp_ReturnUrl = this.returnUrl || `${apiUrl}/payment/vnpay-return`
+    const vnp_ReturnUrl = this.getReturnUrl()
 
     let vnp_Params: any = {}
     vnp_Params['vnp_Version'] = '2.1.0'
@@ -51,13 +77,15 @@ export class VNPayProvider implements PaymentProvider {
     const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex')
     vnp_Params['vnp_SecureHash'] = signed
 
-    let vnpUrl = this.vnpUrl
+    let vnpUrl = this.vnpUrl as string
     vnpUrl += '?' + qs.stringify(vnp_Params, { encode: false })
 
-    return vnpUrl as string
+    return vnpUrl
   }
 
   async verifyReturn(params: any): Promise<PaymentResult> {
+    this.assertConfigured()
+
     const secureHash = params['vnp_SecureHash']
     const vnp_SecureHashType = params['vnp_SecureHashType']
 
