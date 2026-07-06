@@ -1,16 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ObjectId } from 'mongodb'
 import { PayOSProvider } from '~/services/payment/payos.provider'
 
 const mockCreatePaymentLink = vi.fn()
+const originalEnv = { ...process.env }
 
 describe('PayOSProvider', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     process.env.API_URL = 'https://api.medispace.test'
+    process.env.PAYOS_CLIENT_ID = 'test-client-id'
+    process.env.PAYOS_API_KEY = 'test-api-key'
+    process.env.PAYOS_CHECKSUM_KEY = 'test-checksum-key'
     mockCreatePaymentLink.mockImplementation(async (paymentData) => ({
       checkoutUrl: `https://payos.test/checkout/${paymentData.orderCode}`
     }))
+  })
+
+  afterEach(() => {
+    process.env = { ...originalEnv }
   })
 
   it('uses a fresh orderCode when retrying payment for the same order', async () => {
