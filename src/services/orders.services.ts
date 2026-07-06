@@ -625,9 +625,9 @@ class OrderService {
       }
     }
 
-    // Clear cart or remove selected items ONLY if NOT direct buy
-    // AND payment method is COD. For online payment, we clear items ONLY after successful payment (in return controller)
-    if (!isDirectBuy && paymentMethod === PaymentMethod.COD) {
+    // Once an order is created, its items are reserved in that order (and stock is deducted),
+    // so remove them from the cart even if an online payment remains pending or later fails.
+    if (!isDirectBuy) {
       if (selectedItems && selectedItems.length > 0) {
         // Remove only selected items from cart
         for (const item of selectedItems) {
@@ -639,8 +639,13 @@ class OrderService {
         })
       } else {
         // Clear entire cart
-        await cartService.clearCart(userId)
+        await cartService.clearCart(userId, sessionId)
       }
+
+      await databaseService.orders.updateOne(
+        { _id: result.insertedId, $or: [{ cartClearedAt: { $exists: false } }, { cartClearedAt: null }] },
+        { $set: { cartClearedAt: new Date(), updatedAt: new Date() } }
+      )
     }
 
     // Send order confirmation email only for COD orders immediately
