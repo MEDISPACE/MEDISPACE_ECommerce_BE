@@ -17,10 +17,14 @@ export class PayOSProvider implements PaymentProvider {
     )
   }
 
+  private generateOrderCode(): number {
+    return Date.now() * 1000 + Math.floor(Math.random() * 1000)
+  }
+
   async createPaymentUrl(order: Order, req?: any): Promise<string> {
-    // Generate a unique numeric orderCode
-    // Using timestamp + random part to ensure uniqueness and fit in integer limits
-    const orderCode = parseInt((order._id as any).toString().slice(-12), 16)
+    // PayOS requires a unique numeric orderCode for every payment link request.
+    // Retrying payment for the same pending order must create a fresh link.
+    const orderCode = this.generateOrderCode()
 
     const apiUrl = process.env.API_URL || 'http://localhost:8000'
 
