@@ -52,11 +52,6 @@ const productSchema = {
     { name: 'defaultUnit', type: 'string' as const, optional: true },
     { name: 'priceVariantsJson', type: 'string' as const, optional: true, index: false },
     { name: 'maxOrderQuantity', type: 'int32' as const },
-    { name: 'campaignId', type: 'string' as const, optional: true },
-    { name: 'campaignName', type: 'string' as const, optional: true },
-    { name: 'campaignBadgeText', type: 'string' as const, optional: true },
-    { name: 'campaignBadgeColor', type: 'string' as const, optional: true, index: false },
-    { name: 'campaignEndDate', type: 'int64' as const, optional: true },
     { name: 'searchTextNormalized', type: 'string' as const, optional: true },
     { name: 'rating', type: 'float' as const },
     { name: 'reviewCount', type: 'int32' as const },
@@ -235,11 +230,6 @@ function toProductDocument(product: any): Record<string, unknown> {
       }))
     ),
     maxOrderQuantity: product.maxOrderQuantity || 10,
-    campaignId: product.campaign?._id?.toString?.() || '',
-    campaignName: product.campaign?.name || '',
-    campaignBadgeText: product.campaign?.badgeText || '',
-    campaignBadgeColor: product.campaign?.badgeColor || '',
-    campaignEndDate: product.campaign?.endDate ? new Date(product.campaign.endDate).getTime() : undefined,
     searchTextNormalized: normalizeVietnamese(searchableText),
     rating: product.rating || 0,
     reviewCount: product.reviewCount || 0,
@@ -464,7 +454,7 @@ class TypesenseService {
   }
 
   private async loadProducts(): Promise<any[]> {
-    const products = await databaseService.products
+    return databaseService.products
       .aggregate([
         { $lookup: { from: process.env.DB_CATEGORIES_COLLECTION || 'categories', localField: 'categoryId', foreignField: '_id', as: 'category' } },
         { $lookup: { from: process.env.DB_BRANDS_COLLECTION || 'brands', localField: 'brandId', foreignField: '_id', as: 'brand' } },
@@ -472,9 +462,6 @@ class TypesenseService {
         { $addFields: { category: { $arrayElemAt: ['$category', 0] }, brand: { $arrayElemAt: ['$brand', 0] }, details: { $arrayElemAt: ['$details', 0] } } }
       ])
       .toArray()
-    const campaignModule = await import('./campaigns.services.js')
-    const campaignService = (campaignModule.default as any)?.default ?? campaignModule.default
-    return campaignService.enrichProductsWithCampaigns(products)
   }
 
   private async reconcileAll(): Promise<void> {
@@ -483,11 +470,6 @@ class TypesenseService {
     try {
       // A full source-of-truth rebuild supersedes stale in-memory operations.
       this.retryQueue = []
-      await Promise.all(
-        [PRODUCTS_COLLECTION, ARTICLES_COLLECTION, BRANDS_COLLECTION, CATEGORIES_COLLECTION].map((name) =>
-          client.collections(name).documents().delete({ filter_by: 'mongoId:!=__typesense_never__' })
-        )
-      )
       const articles = await databaseService.articles
         .aggregate([
           { $lookup: { from: process.env.DB_HEALTH_CATEGORIES_COLLECTION || 'healthCategories', localField: 'categoryId', foreignField: '_id', as: 'category' } },
@@ -499,6 +481,13 @@ class TypesenseService {
         databaseService.brands.find({}).toArray(),
         databaseService.categories.find({}).toArray()
       ])
+
+      await Promise.all(
+        [PRODUCTS_COLLECTION, ARTICLES_COLLECTION, BRANDS_COLLECTION, CATEGORIES_COLLECTION].map((name) =>
+          client.collections(name).documents().delete({ filter_by: 'mongoId:!=__typesense_never__' })
+        )
+      )
+
       await Promise.all([
         this.bulkIndexProducts(products),
         this.bulkIndexArticles(articles),
@@ -581,10 +570,7 @@ class TypesenseService {
 
   async indexProduct(product: any): Promise<void> {
     await this.runOrQueue(`indexProduct ${product?._id?.toString?.() || product?.mongoId || ''}`, async () => {
-      const campaignModule = await import('./campaigns.services.js')
-      const campaignService = (campaignModule.default as any)?.default ?? campaignModule.default
-      const enriched = await campaignService.enrichProductWithCampaign(product)
-      await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(enriched))
+      await client.collections(PRODUCTS_COLLECTION).documents().upsert(toProductDocument(product))
     })
   }
 
@@ -597,10 +583,7 @@ class TypesenseService {
   async bulkIndexProducts(products: any[]): Promise<void> {
     if (!products.length) return
     await this.runOrQueue(`bulkIndexProducts ${products.length}`, async () => {
-      const campaignModule = await import('./campaigns.services.js')
-      const campaignService = (campaignModule.default as any)?.default ?? campaignModule.default
-      const enriched = await campaignService.enrichProductsWithCampaigns(products)
-      const result = await client.collections(PRODUCTS_COLLECTION).documents().import(enriched.map(toProductDocument), { action: 'upsert' })
+      const result = await client.collections(PRODUCTS_COLLECTION).documents().import(products.map(toProductDocument), { action: 'upsert' })
       const failed = result.filter((r: any) => !r.success).length
       console.log(`[Typesense] Bulk indexed ${products.length - failed}/${products.length} products.`)
       if (failed > 0) throw new Error(`${failed} product documents failed to import`)
@@ -883,9 +866,9 @@ class TypesenseService {
       : '*'
 
     const publicIncludeFields =
-      'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients'
+      'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,activeIngredients'
     const drugDatabaseIncludeFields =
-      'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,campaignId,campaignName,campaignBadgeText,campaignBadgeColor,campaignEndDate,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt'
+      'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt'
 
     try {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({
