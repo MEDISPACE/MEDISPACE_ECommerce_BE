@@ -27,7 +27,7 @@ async function handlePostPaymentSuccess(orderId: ObjectId) {
         )
       }
       await databaseService.orders.updateOne(
-        { _id: orderId, cartClearedAt: { $exists: false } },
+        { _id: orderId, $or: [{ cartClearedAt: { $exists: false } }, { cartClearedAt: null }] },
         { $set: { cartClearedAt: new Date(), updatedAt: new Date() } }
       )
     } catch (error) {
@@ -39,7 +39,7 @@ async function handlePostPaymentSuccess(orderId: ObjectId) {
     try {
       await emailService.sendOrderConfirmationEmail(order.shippingAddress.email, order)
       await databaseService.orders.updateOne(
-        { _id: orderId, confirmationEmailSentAt: { $exists: false } },
+        { _id: orderId, $or: [{ confirmationEmailSentAt: { $exists: false } }, { confirmationEmailSentAt: null }] },
         { $set: { confirmationEmailSentAt: new Date(), updatedAt: new Date() } }
       )
     } catch (error) {
