@@ -8,19 +8,17 @@ import { generateSessionId } from '~/utils/crypto'
 import { CARTS_MESSAGES } from '~/constants/message'
 
 class CartService {
-  // Helper method to build cart query
-  private buildCartQuery(userId?: ObjectId, sessionId?: string) {
-    if (userId) {
-      return { userId }
-    } else if (sessionId) {
-      return { sessionId }
+  private getGuestCartQuery(sessionId: string) {
+    return {
+      sessionId,
+      $or: [{ userId: { $exists: false } }, { userId: null }]
     }
-    return null // For new guest users
   }
 
   // Get cart for user or guest
   async getCart(userId?: ObjectId, sessionId?: string) {
     let cart = null
+    let sessionIdForNewCart = sessionId
 
     // 1. Try to find cart by userId first
     if (userId) {
@@ -33,7 +31,7 @@ class CartService {
 
       // If user cart is empty or doesn't exist, check for session cart to merge
       if (sessionId) {
-        const sessionCart = await databaseService.carts.findOne({ sessionId })
+        const sessionCart = await databaseService.carts.findOne(this.getGuestCartQuery(sessionId))
 
         // If session cart exists and has items
         if (sessionCart && sessionCart.items.length > 0) {
@@ -57,14 +55,20 @@ class CartService {
 
     // 2. If no cart found yet, try by sessionId
     if (!cart && sessionId) {
-      cart = await databaseService.carts.findOne({ sessionId })
+      cart = await databaseService.carts.findOne(this.getGuestCartQuery(sessionId))
+      if (!cart && !userId) {
+        const staleUserCart = await databaseService.carts.findOne({ sessionId })
+        if (staleUserCart?.userId) {
+          sessionIdForNewCart = undefined
+        }
+      }
     }
 
     if (!cart) {
       // Create new cart
       const newCart = new Cart({
         ...(userId && { userId }),
-        ...(sessionId && { sessionId }),
+        ...(sessionIdForNewCart && { sessionId: sessionIdForNewCart }),
         items: [],
         itemCount: 0,
         uniqueProductCount: 0,
@@ -78,9 +82,9 @@ class CartService {
         status: 'active'
       })
 
-      if (!userId && !sessionId) {
+      if (!userId) {
         // Generate sessionId for new guest user
-        newCart.sessionId = generateSessionId()
+        newCart.sessionId = newCart.sessionId || generateSessionId()
       }
 
       // Convert to plain object and explicitly remove undefined/null fields
