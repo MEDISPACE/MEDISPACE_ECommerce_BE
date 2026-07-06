@@ -44,13 +44,14 @@ export const suggestController = async (req: Request, res: Response) => {
 // ─── GET /search/products?q=&page=&limit=&... ─────────────────────────────────
 export const searchProductsController = async (req: Request, res: Response) => {
   console.log('[SearchController] searchProductsController called with query:', req.query)
-  const { q, page, limit, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, minPrice, maxPrice, ratingMin, sortBy } =
+  const { q, page, limit, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, minPrice, maxPrice, ratingMin, sortBy, includeSubcategories } =
     req.query as Record<string, string>
   const effectivePriceMin = priceMin ?? minPrice
   const effectivePriceMax = priceMax ?? maxPrice
+  const shouldIncludeSubcategories = includeSubcategories === 'true'
 
   let categoryIds: string[] | undefined
-  if (categoryId && ObjectId.isValid(categoryId)) {
+  if (shouldIncludeSubcategories && categoryId && ObjectId.isValid(categoryId)) {
     const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryId) })
     if (category) {
       let fullPath = category.path
