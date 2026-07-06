@@ -377,13 +377,22 @@ class CategoriesService {
   }
 
   async updateProductCount(categoryId: ObjectId, increment: number) {
-    await databaseService.categories.updateOne(
-      { _id: categoryId },
-      { $inc: { productCount: increment }, $set: { updatedAt: new Date() } }
-    )
-    const updated = await databaseService.categories.findOne({ _id: categoryId })
-    if (updated) {
-      typesenseService.indexCategory(updated).catch(() => {})
+    const updatedAt = new Date()
+    let currentCategory = await databaseService.categories.findOne({ _id: categoryId })
+
+    while (currentCategory) {
+      await databaseService.categories.updateOne(
+        { _id: currentCategory._id },
+        { $inc: { productCount: increment }, $set: { updatedAt } }
+      )
+
+      const updated = await databaseService.categories.findOne({ _id: currentCategory._id })
+      if (updated) {
+        typesenseService.indexCategory(updated).catch(() => {})
+      }
+
+      if (!currentCategory.parentId) break
+      currentCategory = await databaseService.categories.findOne({ _id: currentCategory.parentId })
     }
   }
 }
