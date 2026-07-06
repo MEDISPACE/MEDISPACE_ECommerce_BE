@@ -46,6 +46,13 @@ const getRefreshTokenCookieOptions = (maxAge?: number): CookieOptions => {
   return options
 }
 
+const getCartSessionCookieOptions = (): CookieOptions => ({
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: 'lax',
+  path: '/'
+})
+
 export const registerController = async (
   req: Request<ParamsDictionary, unknown, RegisterReqBody>,
   res: Response,
@@ -105,6 +112,7 @@ export const logoutController = async (req: Request<ParamsDictionary, unknown, L
 
   // Clear refresh token cookie
   res.clearCookie('refreshToken', getRefreshTokenCookieOptions())
+  res.clearCookie('sessionId', getCartSessionCookieOptions())
 
   return res.json(result)
 }

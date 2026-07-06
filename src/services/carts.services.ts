@@ -11,7 +11,7 @@ class CartService {
   private getGuestCartQuery(sessionId: string) {
     return {
       sessionId,
-      $or: [{ userId: { $exists: false } }, { userId: null }]
+      userId: { $exists: false }
     }
   }
 
@@ -23,6 +23,7 @@ class CartService {
     // 1. Try to find cart by userId first
     if (userId) {
       const userCart = await databaseService.carts.findOne({ userId })
+      const sessionCart = sessionId ? await databaseService.carts.findOne(this.getGuestCartQuery(sessionId)) : null
 
       // If user cart exists and has items, return it
       if (userCart && userCart.items.length > 0) {
@@ -30,19 +31,18 @@ class CartService {
       }
 
       // If user cart is empty or doesn't exist, check for session cart to merge
-      if (sessionId) {
-        const sessionCart = await databaseService.carts.findOne(this.getGuestCartQuery(sessionId))
-
-        // If session cart exists and has items
-        if (sessionCart && sessionCart.items.length > 0) {
-          // If userCart existed (but was empty), delete it to avoid duplicates
+      if (sessionCart) {
+        if (sessionCart.items.length > 0) {
           if (userCart) {
             await databaseService.carts.deleteOne({ _id: userCart._id })
           }
 
-          // Assign session cart to user
           await databaseService.carts.updateOne({ _id: sessionCart._id }, { $set: { userId, updatedAt: new Date() } })
+          return { cart: { ...sessionCart, userId }, sessionId: sessionCart.sessionId }
+        }
 
+        if (!userCart) {
+          await databaseService.carts.updateOne({ _id: sessionCart._id }, { $set: { userId, updatedAt: new Date() } })
           return { cart: { ...sessionCart, userId }, sessionId: sessionCart.sessionId }
         }
       }
