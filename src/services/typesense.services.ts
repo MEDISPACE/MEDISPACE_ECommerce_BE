@@ -254,6 +254,48 @@ function normalizeVietnamese(value: string): string {
     .toLowerCase()
 }
 
+function getSearchTokens(value: string): string[] {
+  return Array.from(
+    new Set(
+      normalizeVietnamese(value)
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2)
+    )
+  )
+}
+
+function getProductSuggestMatchText(hit: any): string {
+  const doc = hit?.document || {}
+  return normalizeVietnamese([doc.name, doc.categoryName, doc.brandName, doc.activeIngredients].filter(Boolean).join(' '))
+}
+
+function isHighPrecisionProductSuggestHit(hit: any, queryTokens: string[]): boolean {
+  if (queryTokens.length < 3) return true
+
+  const info = hit?.text_match_info || {}
+  const droppedTokens = Number(info.num_tokens_dropped || 0)
+  if (droppedTokens === 0) return true
+
+  const strongTokens = queryTokens.filter((token) => token.length >= 3 && !['dau', 'ca'].includes(token))
+  if (strongTokens.length === 0) return droppedTokens <= 1
+
+  const matchText = getProductSuggestMatchText(hit)
+  return droppedTokens <= 1 && strongTokens.some((token) => matchText.includes(token))
+}
+
+function compareProductSuggestHits(a: any, b: any): number {
+  const aDropped = Number(a?.text_match_info?.num_tokens_dropped || 0)
+  const bDropped = Number(b?.text_match_info?.num_tokens_dropped || 0)
+  if (aDropped !== bDropped) return aDropped - bDropped
+
+  const aMatched = Number(a?.text_match_info?.tokens_matched || 0)
+  const bMatched = Number(b?.text_match_info?.tokens_matched || 0)
+  if (aMatched !== bMatched) return bMatched - aMatched
+
+  return Number(b?.text_match || 0) - Number(a?.text_match || 0)
+}
+
 function toArticleDocument(article: any): Record<string, unknown> {
   const mongoId = article._id?.toString() || ''
   return {
@@ -691,6 +733,12 @@ class TypesenseService {
 
   async suggest(q: string): Promise<any> {
     if (!this.isAvailable) return { products: [], brands: [], categories: [], articles: [] }
+    const trimmedQuery = q.trim()
+    const normalizedQuery = normalizeVietnamese(trimmedQuery)
+    const productQuery = normalizedQuery && normalizedQuery !== trimmedQuery.toLowerCase() ? `${trimmedQuery} ${normalizedQuery}` : trimmedQuery
+    const queryTokens = getSearchTokens(trimmedQuery)
+    const strictProductMatching = queryTokens.length >= 3
+    const productTypoCount = strictProductMatching ? 0 : 1
     try {
       // Two-stage product search:
       // Stage 1: match by name/sku/brandName → "exact concept" matches
@@ -702,28 +750,30 @@ class TypesenseService {
           // OTC (requiresPrescription=false=0) được ưu tiên hơn thuốc kê đơn
           {
             collection: PRODUCTS_COLLECTION,
-            q,
-            query_by: 'name,sku,brandName,dosageForm,strength',
-            query_by_weights: '4,3,3,1,1',
+            q: productQuery,
+            query_by: 'name,categoryName,sku,brandName,dosageForm,strength,searchTextNormalized',
+            query_by_weights: '8,7,4,3,1,1,4',
             filter_by: 'isActive:=true',
-            per_page: 5,
+            per_page: 8,
             include_fields: 'mongoId,name,slug,featuredImage,price,rating,brandName,categoryName,activeIngredients,requiresPrescription',
             sort_by: '_text_match:desc,requiresPrescription:asc,stockQuantity:desc',
-            num_typos: 2,
-            prefix: true
+            num_typos: productTypoCount,
+            prefix: true,
+            drop_tokens_threshold: strictProductMatching ? 0 : 1
           },
           // Products by active ingredient/indications (ingredient lookup)
           // OTC ưu tiên hơn kê đơn khi score text match bằng nhau
           {
             collection: PRODUCTS_COLLECTION,
-            q,
-            query_by: 'activeIngredients,indications,shortDescription',
-            query_by_weights: '4,2,1',
+            q: productQuery,
+            query_by: 'activeIngredients,categoryName,indications,shortDescription,searchTextNormalized',
+            query_by_weights: '7,6,3,1,4',
             filter_by: 'isActive:=true',
             per_page: 12,
             include_fields: 'mongoId,name,slug,featuredImage,price,rating,brandName,categoryName,activeIngredients,requiresPrescription',
             sort_by: '_text_match:desc,requiresPrescription:asc,stockQuantity:desc',
-            num_typos: 1
+            num_typos: productTypoCount,
+            drop_tokens_threshold: strictProductMatching ? 0 : 1
           },
           // Brands
           {
@@ -760,22 +810,15 @@ class TypesenseService {
         ]
       })) as any
 
-      // Merge products: name-matches first, then ingredient-matches, deduped by mongoId
+      // Merge products across search stages, then rank by Typesense match quality.
       const seen = new Set<string>()
       const nameHits = (results.results[0] as any).hits || []
       const ingredientHits = (results.results[1] as any).hits || []
 
       const productHits: any[] = []
-      for (const hit of nameHits) {
+      for (const hit of [...nameHits, ...ingredientHits].sort(compareProductSuggestHits)) {
         const id = hit.document.mongoId
-        if (!seen.has(id)) {
-          seen.add(id)
-          productHits.push(hit)
-        }
-      }
-      for (const hit of ingredientHits) {
-        const id = hit.document.mongoId
-        if (!seen.has(id)) {
+        if (!seen.has(id) && isHighPrecisionProductSuggestHit(hit, queryTokens)) {
           seen.add(id)
           productHits.push(hit)
           if (productHits.length >= 15) break // cap total at 15
@@ -864,6 +907,8 @@ class TypesenseService {
         ? `${q} ${normalizedQuery}`
         : q
       : '*'
+    const searchQueryTokens = getSearchTokens(q || '')
+    const strictSearchMatching = isTextSearch && searchQueryTokens.length >= 3
 
     const publicIncludeFields =
       'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,activeIngredients'
@@ -874,14 +919,16 @@ class TypesenseService {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({
         q: searchQuery,
         query_by: 'name,shortDescription,sku,activeIngredients,indications,categoryName,brandName,dosageForm,strength,barcode,searchTextNormalized',
+        query_by_weights: '10,2,4,7,4,9,3,1,1,4,5',
         filter_by: filters.join(' && '),
         facet_by: 'categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,manufacturer',
         include_fields: includeDrugDatabaseFields ? drugDatabaseIncludeFields : publicIncludeFields,
         sort_by: sortByStr,
         page,
         per_page: limit,
-        num_typos: 2,
-        prefix: true
+        num_typos: strictSearchMatching ? 1 : 2,
+        prefix: true,
+        drop_tokens_threshold: strictSearchMatching ? 0 : 1
       })
     } catch (err) {
       console.error('[Typesense] searchProducts error:', err)
