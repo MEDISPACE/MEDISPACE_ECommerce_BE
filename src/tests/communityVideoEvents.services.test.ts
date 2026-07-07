@@ -3,7 +3,7 @@ import { ObjectId } from 'mongodb'
 import { UserRole } from '~/constants/enum'
 
 const mockUsers = { findOne: vi.fn() }
-const mockCommunityRooms = { findOne: vi.fn() }
+const mockCommunityRooms = { findOne: vi.fn(), find: vi.fn() }
 const mockCommunityRoomMembers = { findOne: vi.fn(), find: vi.fn(), updateOne: vi.fn() }
 const mockCommunityVideoEvents = {
   findOne: vi.fn(),
@@ -95,6 +95,8 @@ describe('CommunityVideoEventsService functional rules', () => {
       email: 'member@medispace.local',
       avatar: 'avatar.png'
     })
+    mockCommunityRooms.findOne.mockImplementation(async (query: any) => ({ _id: query?._id || new ObjectId(), status: 'active', visibility: 'public' }))
+    mockCommunityRooms.find.mockReturnValue(cursor([]))
   })
 
   it('creates an event only for an active community room and normalizes optional fields', async () => {
@@ -166,11 +168,10 @@ describe('CommunityVideoEventsService functional rules', () => {
     })
   })
 
-  it('joinEvent requires live status and returns LiveKit payload with account display name', async () => {
+  it('joinEvent allows scheduled status and returns LiveKit payload with account display name', async () => {
     const userId = new ObjectId()
-    const event = makeEvent({ status: 'live' })
+    const event = makeEvent({ status: 'scheduled' })
     mockCommunityVideoEvents.findOne.mockResolvedValue(event)
-    mockCommunityRooms.findOne.mockResolvedValueOnce({ _id: event.roomId, status: 'active', visibility: 'public' })
     mockCommunityRoomMembers.findOne.mockResolvedValueOnce(null)
     mockCommunityRoomMembers.updateOne.mockResolvedValueOnce({ modifiedCount: 1, upsertedCount: 1 })
     mockCommunityVideoEventRegistrations.findOne.mockResolvedValue({ eventId: event._id, userId, status: 'registered' })
@@ -192,9 +193,8 @@ describe('CommunityVideoEventsService functional rules', () => {
 
   it('joinEvent allows attendee to enter by link without prior registration', async () => {
     const userId = new ObjectId()
-    const event = makeEvent({ status: 'live', registrationRequired: true })
+    const event = makeEvent({ status: 'scheduled', registrationRequired: true })
     mockCommunityVideoEvents.findOne.mockResolvedValue(event)
-    mockCommunityRooms.findOne.mockResolvedValueOnce({ _id: event.roomId, status: 'active', visibility: 'public' })
     mockCommunityRoomMembers.findOne.mockResolvedValueOnce(null)
     mockCommunityRoomMembers.updateOne.mockResolvedValueOnce({ modifiedCount: 1, upsertedCount: 1 })
     mockCommunityVideoEventRegistrations.findOne.mockResolvedValue(null)
@@ -212,24 +212,28 @@ describe('CommunityVideoEventsService functional rules', () => {
     )
   })
 
-  it('listEvents personalizes private visibility for authenticated room members without empty $and for anonymous users', async () => {
+  it('listEvents limits visible events by public rooms and member private rooms', async () => {
+    const publicRoomId = new ObjectId()
     mockCommunityVideoEvents.aggregate.mockReturnValue(cursor([]))
     mockCommunityVideoEvents.countDocuments.mockResolvedValue(0)
+    mockCommunityRooms.find.mockReturnValue(cursor([{ _id: publicRoomId }]))
 
     await communityVideoEventsService.listEvents({ page: 1, limit: 10 })
     const anonMatch = mockCommunityVideoEvents.aggregate.mock.calls[0][0][0].$match
-    expect(anonMatch.visibility).toBe('public')
-    expect(anonMatch.$and).toBeUndefined()
+    expect(anonMatch.roomId).toEqual({ $in: [publicRoomId] })
 
-    const roomId = new ObjectId()
-    mockCommunityRoomMembers.find.mockReturnValueOnce(cursor([{ roomId }]))
+    const privateRoomId = new ObjectId()
+    mockCommunityRoomMembers.find.mockReturnValueOnce(cursor([{ roomId: privateRoomId }]))
     await communityVideoEventsService.listEvents({
       viewer: { userId: new ObjectId(), role: UserRole.Customer },
       page: 1,
       limit: 10
     })
     const authedMatch = mockCommunityVideoEvents.aggregate.mock.calls[1][0][0].$match
-    expect(authedMatch.$and[0].$or).toContainEqual({ visibility: 'public' })
+    expect(authedMatch.roomId.$in.map((id: ObjectId) => id.toString())).toEqual([
+      publicRoomId.toString(),
+      privateRoomId.toString()
+    ])
   })
 
   it('sendDueReminders processes registration batches and marks event sentinel only when sends succeed', async () => {

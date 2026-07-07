@@ -3,16 +3,12 @@ import {
   getModerationAppealsController,
   getModerationActionsController,
   getModerationQueueController,
-  getAiModerationJobsController,
   moderateMessageActionController,
-  rerunAiModerationController,
-  retryAiModerationJobController,
   resolveModerationAppealController
 } from '~/controllers/adminModeration.controllers'
 import { adminRequired } from '~/middlewares/admin.middlewares'
 import {
   appealIdValidator,
-  aiJobIdValidator,
   messageIdValidator,
   moderationActionValidator,
   paginationValidator,
@@ -47,22 +43,6 @@ adminModerationRouter.get(
   wrapRequestHandler(getModerationAppealsController)
 )
 
-adminModerationRouter.get(
-  '/ai-jobs',
-  accessTokenValidator,
-  adminRequired,
-  paginationValidator,
-  wrapRequestHandler(getAiModerationJobsController)
-)
-
-adminModerationRouter.post(
-  '/ai-jobs/:jobId/retry',
-  accessTokenValidator,
-  adminRequired,
-  aiJobIdValidator,
-  wrapRequestHandler(retryAiModerationJobController)
-)
-
 adminModerationRouter.patch(
   '/appeals/:appealId',
   accessTokenValidator,
@@ -79,14 +59,6 @@ adminModerationRouter.patch(
   messageIdValidator,
   moderationActionValidator,
   wrapRequestHandler(moderateMessageActionController)
-)
-
-adminModerationRouter.post(
-  '/messages/:messageId/ai-review',
-  accessTokenValidator,
-  adminRequired,
-  messageIdValidator,
-  wrapRequestHandler(rerunAiModerationController)
 )
 
 export default adminModerationRouter

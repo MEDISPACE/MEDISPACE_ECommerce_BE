@@ -1,4 +1,13 @@
-export type ModerationCategory = 'pii' | 'spam' | 'toxic' | 'medical_harm' | 'user_report'
+export type ModerationCategory =
+  | 'pii'
+  | 'spam'
+  | 'toxic'
+  | 'medical_harm'
+  | 'unsafe_advice'
+  | 'self_harm'
+  | 'harassment'
+  | 'other'
+  | 'user_report'
 export type ModerationSeverity = 'low' | 'medium' | 'high' | 'critical'
 
 export interface ModerationResult {
@@ -8,7 +17,7 @@ export interface ModerationResult {
   reasons: string[]
 }
 
-const URL_REGEX = /(https?:\/\/\S+|www\.[^\s]+)/gi
+const URL_REGEX = /(https?:\/\/\S+|www\.[^\s]+|\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z]{2,})(?:\/[^\s]*)?)/gi
 const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
 
 // VN phone numbers (very rough): 0xxxxxxxxx or +84xxxxxxxxx
@@ -19,8 +28,38 @@ function countMatches(text: string, regex: RegExp): number {
   return m ? m.length : 0
 }
 
+function decodeHtmlEntities(text: string): string {
+  const namedEntities: Record<string, string> = {
+    nbsp: ' ',
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'"
+  }
+
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    const key = String(entity).toLowerCase()
+    if (key.startsWith('#x')) {
+      const codePoint = Number.parseInt(key.slice(2), 16)
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match
+    }
+    if (key.startsWith('#')) {
+      const codePoint = Number.parseInt(key.slice(1), 10)
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match
+    }
+    return namedEntities[key] ?? match
+  })
+}
+
 function normalize(text: string): string {
-  return (text || '').toLowerCase().trim()
+  return decodeHtmlEntities(text || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/p>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim()
 }
 
 export function moderateTextRuleBased(rawText: string): ModerationResult {
@@ -75,7 +114,7 @@ export function moderateTextRuleBased(rawText: string): ModerationResult {
   let severity: ModerationSeverity = 'low'
   let confidence: 'low' | 'medium' | 'high' = 'high'
 
-  if (categories.has('medical_harm')) {
+  if (categories.has('medical_harm') || categories.has('unsafe_advice')) {
     severity = 'high'
     confidence = 'medium'
   }
