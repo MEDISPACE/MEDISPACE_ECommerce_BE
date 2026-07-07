@@ -14,14 +14,12 @@ import {
 import {
   cancelAdminVideoEventController,
   createAdminVideoEventController,
-  endAdminVideoEventController,
   getVideoEventDetailController,
   kickAdminVideoEventParticipantController,
   listAdminVideoEventParticipantsController,
   listAdminVideoEventRegistrationsController,
   listVideoEventsController,
   muteAdminVideoEventParticipantController,
-  startAdminVideoEventController,
   updateAdminVideoEventController,
   updateAdminVideoEventRegistrationController
 } from '~/controllers/communityVideoEvents.controllers'
@@ -85,8 +83,6 @@ adminCommunityRouter.patch(
   updateVideoEventValidator,
   wrapRequestHandler(updateAdminVideoEventController)
 )
-adminCommunityRouter.post('/video-events/:eventId/start', eventIdValidator, wrapRequestHandler(startAdminVideoEventController))
-adminCommunityRouter.post('/video-events/:eventId/end', eventIdValidator, wrapRequestHandler(endAdminVideoEventController))
 adminCommunityRouter.post('/video-events/:eventId/cancel', eventIdValidator, wrapRequestHandler(cancelAdminVideoEventController))
 adminCommunityRouter.get(
   '/video-events/:eventId/participants',

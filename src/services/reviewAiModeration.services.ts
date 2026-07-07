@@ -76,8 +76,9 @@ function normalizeResult(raw: any, model: string, latencyMs: number): ReviewAiRe
     typeof raw?.shouldHide === 'boolean'
       ? raw.shouldHide
       : (severity === 'high' || severity === 'critical') && confidence >= 0.75
-  const requiresHumanReview =
-    typeof raw?.requiresHumanReview === 'boolean'
+  const requiresHumanReview = shouldHide
+    ? true
+    : typeof raw?.requiresHumanReview === 'boolean'
       ? raw.requiresHumanReview
       : severity === 'medium' || severity === 'high' || severity === 'critical'
   const suggestedAction =
@@ -101,6 +102,27 @@ function normalizeResult(raw: any, model: string, latencyMs: number): ReviewAiRe
     reviewedAt: new Date(),
     latencyMs
   }
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
+function moderationEndpointCandidates(baseUrl: string, path: 'chat/completions' | 'completions') {
+  const base = baseUrl.replace(/\/$/, '')
+  const withoutV1 = base.replace(/\/v1$/, '')
+  return uniqueValues([
+    base.endsWith('/v1') ? `${base}/${path}` : `${base}/v1/${path}`,
+    `${base}/${path}`,
+    `${withoutV1}/v1/${path}`
+  ])
+}
+
+function shouldTryNextEndpoint(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    return error.response?.status === 404 || error.code === 'ECONNABORTED'
+  }
+  return false
 }
 
 // ─── Mock mode (dùng cho dev/test — không cần LLM thật) ─────────────────────
@@ -188,48 +210,73 @@ class ReviewAiModerationService {
       return { ...mock, model: config.model, reviewedAt: new Date(), latencyMs: Date.now() - startedAt }
     }
 
-    // Gọi LLM thật qua OpenAI-compatible API
-    // Endpoint: baseUrl + /v1/chat/completions (OpenAI-compatible)
-    const response = await axios.post(
-      `${config.baseUrl}/v1/chat/completions`,
-      {
-        model: config.model,
-        temperature: 0,
-        max_tokens: 300,
-        messages: [
+    const systemPrompt =
+      'You are a product review content moderator for a Vietnamese medical e-commerce platform. ' +
+      'Always respond with valid JSON only. No markdown, no explanation outside JSON.'
+    const userPrompt = [
+      'Moderate the following product review. Return ONLY valid JSON with these exact fields:',
+      '- severity: one of ["low", "medium", "high", "critical"]',
+      '- categories: array, each item one of ["pii", "spam", "toxic", "medical_harm", "harassment", "unsafe_advice", "self_harm", "other"] — empty array if safe',
+      '- confidence: float 0.0-1.0',
+      '- shouldHide: boolean — true ONLY for dangerous medical advice, PII, self_harm, or critical toxic content',
+      '- requiresHumanReview: boolean — true for medium/high/critical severity',
+      '- reason: string, one sentence in English',
+      '- suggestedAction: one of ["none", "review", "hide"]',
+      'Example safe response: {"severity":"low","categories":[],"confidence":0.05,"shouldHide":false,"requiresHumanReview":false,"reason":"Safe review","suggestedAction":"none"}',
+      '',
+      `Review text: "${content}"`
+    ].join('\n')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
+    }
+    let rawContent = ''
+
+    for (const url of moderationEndpointCandidates(config.baseUrl, 'chat/completions')) {
+      try {
+        const response = await axios.post(
+          url,
           {
-            role: 'system',
-            content:
-              'You are a product review content moderator for a Vietnamese medical e-commerce platform. ' +
-              'Always respond with valid JSON only. No markdown, no explanation outside JSON.'
+            model: config.model,
+            temperature: 0,
+            max_tokens: 300,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ]
           },
-          {
-            role: 'user',
-            content: [
-              'Moderate the following product review. Return ONLY valid JSON with these exact fields:',
-              '- severity: one of ["low", "medium", "high", "critical"]',
-              '- categories: array, each item one of ["pii", "spam", "toxic", "medical_harm", "harassment", "unsafe_advice", "self_harm", "other"] — empty array if safe',
-              '- confidence: float 0.0-1.0',
-              '- shouldHide: boolean — true ONLY for dangerous medical advice, PII, self_harm, or critical toxic content',
-              '- requiresHumanReview: boolean — true for medium/high/critical severity',
-              '- reason: string, one sentence in English',
-              '- suggestedAction: one of ["none", "review", "hide"]',
-              '',
-              `Review text: "${content}"`
-            ].join('\n')
-          }
-        ]
-      },
-      {
-        timeout: config.timeoutMs,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
+          { timeout: config.timeoutMs, headers }
+        )
+        rawContent = response.data?.choices?.[0]?.message?.content || ''
+        if (!rawContent) continue
+        break
+      } catch (error) {
+        if (!shouldTryNextEndpoint(error)) throw error
+      }
+    }
+
+    if (!rawContent) {
+      for (const url of moderationEndpointCandidates(config.baseUrl, 'completions')) {
+        try {
+          const response = await axios.post(
+            url,
+            {
+              model: config.model,
+              temperature: 0,
+              max_tokens: 300,
+              prompt: `${systemPrompt}\n\n${userPrompt}\n\nJSON:`
+            },
+            { timeout: config.timeoutMs, headers }
+          )
+          rawContent = response.data?.choices?.[0]?.text || response.data?.choices?.[0]?.message?.content || ''
+          if (!rawContent) continue
+          break
+        } catch (error) {
+          if (!shouldTryNextEndpoint(error)) throw error
         }
       }
-    )
+    }
 
-    const rawContent = response.data?.choices?.[0]?.message?.content
     if (!rawContent) throw new Error('[ReviewAI] LLM returned empty response')
 
     const latencyMs = Date.now() - startedAt

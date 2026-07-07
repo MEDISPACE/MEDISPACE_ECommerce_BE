@@ -169,7 +169,7 @@ export const createThreadController = async (req: Request, res: Response, next: 
   try {
     const { userId } = req.decoded_authorization as TokenPayload
     const roomId = req.params.roomId as unknown as string
-    const { title, content, prefix, tags, isAnonymous, imageUrl } = req.body
+    const { title, content, prefix, isAnonymous, imageUrl } = req.body
 
     const result = await communityService.createThread({
       roomId: new ObjectId(roomId),
@@ -177,7 +177,6 @@ export const createThreadController = async (req: Request, res: Response, next: 
       title,
       content,
       prefix,
-      tags,
       isAnonymous,
       imageUrl
     })

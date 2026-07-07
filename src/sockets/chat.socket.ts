@@ -419,6 +419,83 @@ export const initChatSocket = (httpServer: HTTPServer) => {
       socket.leave(`community:video-event:${eventId}`)
     })
 
+    socket.on(
+      COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.SEND_MESSAGE,
+      async (
+        data: { eventId?: string; content?: string },
+        ack?: (payload: { ok: boolean; message?: any; error?: string }) => void
+      ) => {
+        try {
+          if (!socket.userId || !socket.userRole) {
+            ack?.({ ok: false, error: USERS_MESSAGES.UNAUTHENTICATED })
+            return
+          }
+          if (!data?.eventId || !ObjectId.isValid(data.eventId)) {
+            ack?.({ ok: false, error: 'eventId không hợp lệ' })
+            return
+          }
+          if (!checkSocketRateLimit(socket.userId)) {
+            ack?.({ ok: false, error: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng chờ một chút trước khi gửi tiếp.' })
+            return
+          }
+
+          const role = socket.userRole === 'admin'
+            ? UserRole.Admin
+            : socket.userRole === 'pharmacist'
+              ? UserRole.Pharmacist
+              : UserRole.Customer
+          const content = data.content?.trim() || ''
+          if (!content) {
+            ack?.({ ok: false, error: 'Tin nhắn không được để trống.' })
+            return
+          }
+          if (content.length > 2000) {
+            ack?.({ ok: false, error: 'Nội dung tin nhắn không được vượt quá 2000 ký tự.' })
+            return
+          }
+
+          const eventObjectId = new ObjectId(data.eventId)
+          const userObjectId = new ObjectId(socket.userId)
+          const event = await communityVideoEventAccessService.assertCanSubscribeRealtime(eventObjectId, {
+            userId: userObjectId,
+            role
+          })
+          const now = new Date()
+          const messageDoc = {
+            roomId: event.roomId as ObjectId,
+            videoEventId: eventObjectId,
+            senderId: userObjectId,
+            content,
+            status: 'visible',
+            moderated: {
+              autoHidden: false,
+              at: now,
+              severity: 'low',
+              categories: [],
+              confidence: 'low',
+              reasons: []
+            },
+            createdAt: now,
+            updatedAt: now
+          }
+          const insert = await databaseService.communityMessages.insertOne(messageDoc)
+          const sender = await databaseService.users.findOne(
+            { _id: userObjectId },
+            { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, avatar: 1, role: 1 } }
+          )
+          const message = {
+            ...messageDoc,
+            _id: insert.insertedId,
+            ...(sender ? { sender } : {})
+          }
+          io.to(`community:video-event:${data.eventId}`).emit('community:message:new', message)
+          ack?.({ ok: true, message })
+        } catch (error: any) {
+          ack?.({ ok: false, error: error?.message || 'Không thể gửi tin nhắn cuộc họp.' })
+        }
+      }
+    )
+
     // --- FIX 3.2: emit gọn lại – chỉ dùng room-based, bỏ fetchSockets loop ---
     socket.on(
       'message:send',
@@ -883,4 +960,3 @@ export const initChatSocket = (httpServer: HTTPServer) => {
 
   return io
 }
-

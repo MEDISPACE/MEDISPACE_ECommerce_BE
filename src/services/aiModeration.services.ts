@@ -64,6 +64,17 @@ const CATEGORY_VALUES: AiModerationCategory[] = [
 ]
 const SEVERITY_VALUES: AiModerationSeverity[] = ['low', 'medium', 'high', 'critical']
 
+const VIETNAMESE_REASON_BY_CATEGORY: Record<AiModerationCategory, string> = {
+  pii: 'nội dung có dấu hiệu chia sẻ thông tin cá nhân hoặc thông tin liên hệ',
+  spam: 'nội dung có dấu hiệu quảng cáo, mua bán thuốc hoặc dẫn tới nguồn bán hàng đáng ngờ',
+  toxic: 'nội dung có ngôn từ xúc phạm hoặc công kích người khác',
+  medical_harm: 'nội dung có thể gây hại cho sức khỏe hoặc khuyến khích xử trí y tế nguy hiểm',
+  harassment: 'nội dung có dấu hiệu quấy rối, miệt thị hoặc tấn công cá nhân',
+  unsafe_advice: 'nội dung đưa ra lời khuyên y tế không an toàn',
+  self_harm: 'nội dung có dấu hiệu tự hại hoặc khuyến khích tự hại',
+  other: 'nội dung cần được điều phối viên xem xét'
+}
+
 function asNumber(value: string | undefined, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
@@ -131,18 +142,36 @@ function pickJson(raw: string) {
   return candidate
 }
 
+function looksEnglish(text: string) {
+  return /\b(message|contains|commercial|medicine|explicit|self[-\s]?harm|encouragement|violating|website|private|wholesale|pricing|buying|suspicious|safe|review|rules?)\b/i.test(text)
+}
+
+function normalizeVietnameseReason(rawReason: string, categories: AiModerationCategory[], severity: AiModerationSeverity) {
+  const reason = rawReason.trim().slice(0, 500)
+  if (reason && !looksEnglish(reason)) return reason
+
+  if (severity === 'low' && categories.length === 0) return 'Nội dung an toàn, không phát hiện dấu hiệu vi phạm.'
+
+  const parts = uniqueValues(categories).map((category) => VIETNAMESE_REASON_BY_CATEGORY[category]).filter(Boolean)
+  if (parts.length === 0) return 'AI phát hiện nội dung cần được điều phối viên xem xét.'
+  return `AI phát hiện ${parts.join('; ')}.`
+}
+
 function normalizeResult(raw: any): AiModerationResult {
   const severity = SEVERITY_VALUES.includes(raw?.severity) ? raw.severity : 'low'
-  const categories = Array.isArray(raw?.categories)
-    ? raw.categories.filter((cat: string) => CATEGORY_VALUES.includes(cat as AiModerationCategory))
-    : []
+  const categories = uniqueValues(
+    Array.isArray(raw?.categories)
+      ? raw.categories.filter((cat: string) => CATEGORY_VALUES.includes(cat as AiModerationCategory))
+      : []
+  ) as AiModerationCategory[]
   const confidence = Math.max(0, Math.min(1, Number(raw?.confidence ?? 0)))
   const shouldHide =
     typeof raw?.shouldHide === 'boolean'
       ? raw.shouldHide
       : (severity === 'high' || severity === 'critical') && confidence >= 0.75
-  const requiresHumanReview =
-    typeof raw?.requiresHumanReview === 'boolean'
+  const requiresHumanReview = shouldHide
+    ? true
+    : typeof raw?.requiresHumanReview === 'boolean'
       ? raw.requiresHumanReview
       : severity === 'medium' || severity === 'high' || severity === 'critical'
   const suggestedAction =
@@ -154,15 +183,38 @@ function normalizeResult(raw: any): AiModerationResult {
           ? 'review'
           : 'none'
 
+  const normalizedCategories = categories.length > 0 ? categories : severity === 'low' ? [] : ['other']
+
   return {
     severity,
-    categories: categories.length > 0 ? categories : severity === 'low' ? [] : ['other'],
+    categories: normalizedCategories,
     confidence,
     shouldHide,
     requiresHumanReview,
-    reason: String(raw?.reason || '').trim().slice(0, 500) || 'AI moderation result',
+    reason: normalizeVietnameseReason(String(raw?.reason || ''), normalizedCategories, severity),
     suggestedAction
   }
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
+function moderationEndpointCandidates(baseUrl: string, path: 'chat/completions' | 'completions') {
+  const base = baseUrl.replace(/\/$/, '')
+  const withoutV1 = base.replace(/\/v1$/, '')
+  return uniqueValues([
+    base.endsWith('/v1') ? `${base}/${path}` : `${base}/v1/${path}`,
+    `${base}/${path}`,
+    `${withoutV1}/v1/${path}`
+  ])
+}
+
+function shouldTryNextEndpoint(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    return error.response?.status === 404 || error.code === 'ECONNABORTED'
+  }
+  return false
 }
 
 function emitRoom(event: string, roomId: ObjectId | string, payload: unknown) {
@@ -479,45 +531,84 @@ class AiModerationService {
     if (!config.configured) throw new Error('AI moderation is not configured')
     if (config.mockEnabled) return mockReview(content)
 
-    const response = await axios.post(
-      `${config.baseUrl}/chat/completions`,
-      {
-        model: config.model,
-        temperature: 0,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a strict but careful Vietnamese healthcare community moderator. Return only valid JSON. Do not add markdown.'
-          },
-          {
-            role: 'user',
-            content: [
-              'Review this community chat message for moderation.',
-              'Categories allowed: pii, spam, toxic, medical_harm, harassment, unsafe_advice, self_harm, other.',
-              'Severity allowed: low, medium, high, critical.',
-              'Only set shouldHide=true for high confidence harmful content, PII, self-harm, or dangerous medical advice.',
-              'Return JSON with keys: severity, categories, confidence, shouldHide, requiresHumanReview, reason, suggestedAction.',
-              `Rule-based signal: ${JSON.stringify(context?.ruleResult || null)}`,
-              `Room: ${context?.roomId || 'unknown'}`,
-              `Message: ${redactText(content)}`
-            ].join('\n')
-          }
-        ]
-      },
-      {
-        timeout: config.timeoutMs,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
-        }
-      }
-    )
+    const systemPrompt =
+      'You are a strict but careful Vietnamese healthcare community moderator. Return only valid JSON. Do not add markdown. The reason field must always be written in Vietnamese.'
+    const userPrompt = [
+      'Review this community chat message for moderation.',
+      'Categories allowed: pii, spam, toxic, medical_harm, harassment, unsafe_advice, self_harm, other.',
+      'Severity allowed: low, medium, high, critical.',
+      'Set shouldHide=true when the message contains PII/contact sharing, self-harm intent, dangerous medical advice, advice to delay/avoid emergency care for severe symptoms, prescription/drug misuse, overdose intent, or medicine-sale spam.',
+      'Use self_harm for intent to die, not wake up, overdose, or consume sleeping pills/medicine for self-harm.',
+      'Use medical_harm and unsafe_advice for advice that could endanger health, including telling someone with chest pain, breathing trouble, stroke symptoms, seizure, loss of consciousness, or heavy bleeding not to seek emergency care.',
+      'Use spam for commercial promotion, medicine-sale links/domains, wholesale pricing, inbox-for-price, or suspicious pharmacy sales.',
+      'Safe general health questions should be severity=low, shouldHide=false.',
+      'Return JSON with keys: severity, categories, confidence, shouldHide, requiresHumanReview, reason, suggestedAction.',
+      'The reason value must be one concise Vietnamese sentence for moderators. Never write reason in English.',
+      'Example safe response: {"severity":"low","categories":[],"confidence":0.05,"shouldHide":false,"requiresHumanReview":false,"reason":"Nội dung an toàn, không phát hiện dấu hiệu vi phạm.","suggestedAction":"none"}',
+      `Rule-based signal: ${JSON.stringify(context?.ruleResult || null)}`,
+      `Room: ${context?.roomId || 'unknown'}`,
+      `Message: ${redactText(content)}`
+    ].join('\n')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
+    }
+    let lastError: unknown
 
-    const rawContent = response.data?.choices?.[0]?.message?.content
+    for (const url of moderationEndpointCandidates(config.baseUrl, 'chat/completions')) {
+      try {
+        const response = await axios.post(
+          url,
+          {
+            model: config.model,
+            temperature: 0,
+            max_tokens: 350,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ]
+          },
+          { timeout: config.timeoutMs, headers }
+        )
+        const rawContent = response.data?.choices?.[0]?.message?.content
+        if (!rawContent) continue
+        return normalizeResult(JSON.parse(pickJson(rawContent)))
+      } catch (error) {
+        lastError = error
+        if (!shouldTryNextEndpoint(error)) throw error
+      }
+    }
+
+    let rawContent = ''
+    for (const url of moderationEndpointCandidates(config.baseUrl, 'completions')) {
+      try {
+        const response = await axios.post(
+          url,
+          {
+            model: config.model,
+            temperature: 0,
+            max_tokens: 350,
+            prompt: `${systemPrompt}\n\n${userPrompt}\n\nJSON:`
+          },
+          { timeout: config.timeoutMs, headers }
+        )
+        rawContent = response.data?.choices?.[0]?.text || response.data?.choices?.[0]?.message?.content || ''
+        if (!rawContent) continue
+        break
+      } catch (error) {
+        lastError = error
+        if (!shouldTryNextEndpoint(error)) throw error
+      }
+    }
+
     if (!rawContent) throw new Error('AI moderation returned an empty response')
 
-    return normalizeResult(JSON.parse(pickJson(rawContent)))
+    try {
+      return normalizeResult(JSON.parse(pickJson(rawContent)))
+    } catch (error) {
+      if (lastError) throw lastError
+      throw error
+    }
   }
 
   private async applyResult(params: { job: any; message: any; aiResult: AiModerationResult; latencyMs: number }) {
@@ -526,7 +617,7 @@ class AiModerationService {
     const now = new Date()
     const shouldAutoHide =
       aiResult.shouldHide &&
-      (aiResult.severity === 'high' || aiResult.severity === 'critical') &&
+      aiResult.severity !== 'low' &&
       aiResult.confidence >= config.autoHideConfidence
     const shouldQueue =
       shouldAutoHide ||
@@ -555,6 +646,24 @@ class AiModerationService {
       }
     )
 
+    const aiModerationPayload = {
+      ...aiResult,
+      model: config.model,
+      promptVersion: PROMPT_VERSION,
+      reviewedAt: now,
+      latencyMs
+    }
+
+    await databaseService.moderationFindings.updateOne(
+      { messageId: message._id },
+      {
+        $set: {
+          ai: aiModerationPayload,
+          updatedAt: now
+        }
+      }
+    )
+
     if (!shouldQueue) {
       return { queued: false, autoHidden: false }
     }
@@ -576,13 +685,7 @@ class AiModerationService {
           categories: aiResult.categories,
           confidence: aiResult.confidence,
           reasons: [`AI: ${aiResult.reason}`],
-          ai: {
-            ...aiResult,
-            model: config.model,
-            promptVersion: PROMPT_VERSION,
-            reviewedAt: now,
-            latencyMs
-          },
+          ai: aiModerationPayload,
           updatedAt: now
         }
       },

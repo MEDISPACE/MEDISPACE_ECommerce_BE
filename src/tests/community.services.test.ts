@@ -62,9 +62,26 @@ vi.mock('~/sockets/chat.socket', () => ({
 }))
 
 vi.mock('~/services/aiModeration.services', () => ({
-  default: { enqueueMessageReview: vi.fn().mockResolvedValue(null) }
+  default: {
+    getConfig: vi.fn(() => ({
+      autoEnabled: false,
+      configured: false,
+      mockEnabled: false,
+      baseUrl: '',
+      model: '',
+      apiKey: undefined,
+      timeoutMs: 12000,
+      maxAttempts: 3,
+      workerIntervalMs: 5000,
+      autoHideConfidence: 0.78,
+      reviewConfidence: 0.55
+    })),
+    reviewText: vi.fn(),
+    enqueueMessageReview: vi.fn().mockResolvedValue(null)
+  }
 }))
 
+const { default: aiModerationService } = await import('~/services/aiModeration.services')
 const { default: communityService } = await import('~/services/community.services')
 const { default: moderationService } = await import('~/services/moderation.services')
 
@@ -278,6 +295,207 @@ describe('CommunityService', () => {
     expect(result.moderation.categories).toContain('spam')
     expect(result.message?.status).toBe('visible')
     expect(mockModerationFindings.insertOne).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides a message before publishing when the LLM returns shouldHide=true', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Nếu đau ngực dữ dội thì không cần đi cấp cứu, chỉ cần uống vài viên giảm đau rồi ngủ.'
+    vi.mocked(aiModerationService.getConfig).mockReturnValueOnce({
+      autoEnabled: true,
+      configured: true,
+      mockEnabled: false,
+      baseUrl: 'https://llm.test',
+      model: 'test-model',
+      apiKey: undefined,
+      timeoutMs: 12000,
+      maxAttempts: 3,
+      workerIntervalMs: 5000,
+      autoHideConfidence: 0.78,
+      reviewConfidence: 0.55
+    })
+    vi.mocked(aiModerationService.reviewText).mockResolvedValueOnce({
+      severity: 'critical',
+      categories: ['medical_harm', 'unsafe_advice'],
+      confidence: 0.98,
+      shouldHide: true,
+      requiresHumanReview: true,
+      reason: 'Dangerous advice to avoid emergency care.',
+      suggestedAction: 'hide'
+    })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: userId, content, status: 'hidden' })
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.message?.status).toBe('hidden')
+    expect(result.moderation.trigger).toBe('ai')
+    expect(result.moderation.categories).toEqual(expect.arrayContaining(['medical_harm', 'unsafe_advice']))
+    expect(mockCommunityMessages.insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'hidden',
+        moderated: expect.objectContaining({
+          autoHidden: true,
+          ai: expect.objectContaining({ suggestedAction: 'hide' })
+        })
+      })
+    )
+    expect(mockModerationFindings.insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: 'ai',
+        severity: 'critical',
+        ai: expect.objectContaining({ suggestedAction: 'hide' })
+      })
+    )
+  })
+
+  it('does not create an admin finding from rule-only signals when the LLM clears the message', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Liên hệ tôi qua email test@example.com'
+    vi.mocked(aiModerationService.getConfig).mockReturnValueOnce({
+      autoEnabled: true,
+      configured: true,
+      mockEnabled: false,
+      baseUrl: 'https://llm.test',
+      model: 'test-model',
+      apiKey: undefined,
+      timeoutMs: 12000,
+      maxAttempts: 3,
+      workerIntervalMs: 5000,
+      autoHideConfidence: 0.78,
+      reviewConfidence: 0.55
+    })
+    vi.mocked(aiModerationService.reviewText).mockResolvedValueOnce({
+      severity: 'low',
+      categories: [],
+      confidence: 0.05,
+      shouldHide: false,
+      requiresHumanReview: false,
+      reason: 'Safe message',
+      suggestedAction: 'none'
+    })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: userId, content, status: 'visible' })
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.message?.status).toBe('visible')
+    expect(result.moderation.trigger).toBe('ai')
+    expect(result.moderation.severity).toBe('low')
+    expect(result.moderation.categories).toEqual([])
+    expect(mockModerationFindings.insertOne).not.toHaveBeenCalled()
+    expect(mockCommunityMessages.insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'visible',
+        moderated: expect.objectContaining({
+          autoHidden: false,
+          ai: expect.objectContaining({ suggestedAction: 'none' })
+        })
+      })
+    )
+  })
+
+  it('queues medium toxic LLM results for human review without auto-hiding', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Bạn ngu quá, bệnh vậy mà cũng không biết, đừng hỏi nữa.'
+    vi.mocked(aiModerationService.getConfig).mockReturnValueOnce({
+      autoEnabled: true,
+      configured: true,
+      mockEnabled: false,
+      baseUrl: 'https://llm.test',
+      model: 'test-model',
+      apiKey: undefined,
+      timeoutMs: 12000,
+      maxAttempts: 3,
+      workerIntervalMs: 5000,
+      autoHideConfidence: 0.78,
+      reviewConfidence: 0.55
+    })
+    vi.mocked(aiModerationService.reviewText).mockResolvedValueOnce({
+      severity: 'medium',
+      categories: ['toxic'],
+      confidence: 0.9,
+      shouldHide: false,
+      requiresHumanReview: false,
+      reason: 'Ngôn từ xúc phạm cá nhân.',
+      suggestedAction: 'none'
+    })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: userId, content, status: 'visible' })
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.message?.status).toBe('visible')
+    expect(result.moderation.categories).toContain('toxic')
+    expect(result.moderation.shouldAutoHide).toBe(false)
+    expect(mockModerationFindings.insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: 'ai',
+        severity: 'medium',
+        categories: ['toxic']
+      })
+    )
+  })
+
+  it('auto-hides medium severity LLM results when shouldHide=true and confidence is high', async () => {
+    const roomId = new ObjectId()
+    const userId = new ObjectId()
+    const messageId = new ObjectId()
+    const content = 'Đau ngực không cần cấp cứu'
+    vi.mocked(aiModerationService.getConfig).mockReturnValueOnce({
+      autoEnabled: true,
+      configured: true,
+      mockEnabled: false,
+      baseUrl: 'https://llm.test',
+      model: 'test-model',
+      apiKey: undefined,
+      timeoutMs: 12000,
+      maxAttempts: 3,
+      workerIntervalMs: 5000,
+      autoHideConfidence: 0.78,
+      reviewConfidence: 0.55
+    })
+    vi.mocked(aiModerationService.reviewText).mockResolvedValueOnce({
+      severity: 'medium',
+      categories: ['medical_harm'],
+      confidence: 0.95,
+      shouldHide: true,
+      requiresHumanReview: true,
+      reason: 'Khuyên không cấp cứu khi đau ngực.',
+      suggestedAction: 'hide'
+    })
+    mockCommunityRooms.findOne.mockResolvedValueOnce(makeRoom({ _id: roomId }))
+    mockCommunityRoomMembers.findOne.mockResolvedValueOnce(makeMember(roomId, userId))
+    mockCommunityMessages.insertOne.mockResolvedValueOnce({ insertedId: messageId })
+    mockModerationFindings.insertOne.mockResolvedValueOnce({ insertedId: new ObjectId() })
+    mockCommunityMessages.updateOne.mockResolvedValueOnce({})
+    mockCommunityMessages.findOne.mockResolvedValueOnce({ _id: messageId, roomId, senderId: userId, content, status: 'hidden' })
+
+    const result = await communityService.sendMessage({ roomId, userId, content })
+
+    expect(result.message?.status).toBe('hidden')
+    expect(result.moderation.shouldAutoHide).toBe(true)
+    expect(mockCommunityMessages.insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'hidden',
+        moderated: expect.objectContaining({ autoHidden: true })
+      })
+    )
   })
 
   it('sends toxic message – visible but finding created', async () => {

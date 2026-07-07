@@ -43,6 +43,13 @@ services:
       REVIEW_AI_MOCK: "true"
       REVIEW_AI_HIDE_CONFIDENCE: "0.78"
       REVIEW_AI_REVIEW_CONFIDENCE: "0.55"
+      # Community AI Moderation
+      # Dùng LLM thật để pre-check thread/reply/message trước khi public.
+      AI_MODERATION_ENABLED: "true"
+      AI_MODERATION_MOCK: "false"
+      AI_MODERATION_HIDE_CONFIDENCE: "0.78"
+      AI_MODERATION_REVIEW_CONFIDENCE: "0.55"
+      AI_MODERATION_TIMEOUT_MS: "12000"
       # Kế thừa CUSTOM_LLM_BASE_URL và CUSTOM_LLM_MODEL từ .env (env_file)
       # → https://llm.datateam.space / gemma-4-e4b-it.gguf
     volumes:

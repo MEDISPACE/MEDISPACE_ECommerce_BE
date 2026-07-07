@@ -155,23 +155,6 @@ export const appealIdValidator = validate(
   )
 )
 
-export const aiJobIdValidator = validate(
-  checkSchema(
-    {
-      jobId: {
-        in: ['params'],
-        notEmpty: { errorMessage: 'jobId là bắt buộc' },
-        custom: {
-          options: (value) => {
-            if (!ObjectId.isValid(value)) throw new Error('jobId không hợp lệ')
-            return true
-          }
-        }
-      }
-    },
-    ['params']
-  )
-)
 
 export const userIdParamValidator = validate(
   checkSchema(
@@ -206,11 +189,15 @@ export const createRoomValidator = validate(
         optional: true,
         isString: { errorMessage: 'slug phải là chuỗi' },
         trim: true,
-        isLength: { options: { min: 2, max: 80 }, errorMessage: 'slug độ dài 2-80 ký tự' }
+        isLength: { options: { min: 2, max: 80 }, errorMessage: 'slug độ dài 2-80 ký tự' },
+        matches: {
+          options: [/^[a-z0-9]+(?:-[a-z0-9]+)*$/],
+          errorMessage: 'slug chỉ dùng chữ thường, số và dấu gạch ngang'
+        }
       },
       visibility: {
         in: ['body'],
-        notEmpty: { errorMessage: 'visibility là bắt buộc' },
+        optional: true,
         isIn: { options: [['public', 'private']], errorMessage: 'visibility chỉ nhận public|private' }
       },
       diseaseKey: {
@@ -300,7 +287,11 @@ export const updateRoomValidator = validate(
         optional: true,
         isString: { errorMessage: 'slug phải là chuỗi' },
         trim: true,
-        isLength: { options: { min: 2, max: 80 }, errorMessage: 'slug độ dài 2-80 ký tự' }
+        isLength: { options: { min: 2, max: 80 }, errorMessage: 'slug độ dài 2-80 ký tự' },
+        matches: {
+          options: [/^[a-z0-9]+(?:-[a-z0-9]+)*$/],
+          errorMessage: 'slug chỉ dùng chữ thường, số và dấu gạch ngang'
+        }
       },
       visibility: {
         in: ['body'],
@@ -944,11 +935,6 @@ export const createVideoEventValidator = validate(
         trim: true,
         isLength: { options: { min: 1, max: 3000 }, errorMessage: 'agenda tối đa 3000 ký tự' }
       },
-      visibility: {
-        in: ['body'],
-        notEmpty: { errorMessage: 'visibility là bắt buộc' },
-        isIn: { options: [['public', 'private']], errorMessage: 'visibility chỉ nhận public|private' }
-      },
       status: {
         in: ['body'],
         optional: true,
@@ -1007,11 +993,6 @@ export const updateVideoEventValidator = validate(
         isString: { errorMessage: 'agenda phải là chuỗi' },
         trim: true,
         isLength: { options: { min: 1, max: 3000 }, errorMessage: 'agenda tối đa 3000 ký tự' }
-      },
-      visibility: {
-        in: ['body'],
-        optional: true,
-        isIn: { options: [['public', 'private']], errorMessage: 'visibility chỉ nhận public|private' }
       },
       status: {
         in: ['body'],
