@@ -47,6 +47,7 @@ export interface UpdateProductReqBody {
   shortDescription?: string
   categoryId?: string
   brandId?: string
+  brandIds?: string
   priceVariants?: PriceVariantReqBody[]
   stockQuantity?: number
   maxOrderQuantity?: number

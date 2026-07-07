@@ -844,6 +844,7 @@ class TypesenseService {
     categoryId?: string
     categoryIds?: string[]
     brandId?: string
+    brandIds?: string[]
     requiresPrescription?: boolean
     inStock?: boolean
     priceMin?: number
@@ -862,6 +863,7 @@ class TypesenseService {
       categoryId,
       categoryIds,
       brandId,
+      brandIds,
       requiresPrescription,
       inStock,
       priceMin,
@@ -879,7 +881,8 @@ class TypesenseService {
     const filters: string[] = ['isActive:=true']
     if (categoryIds?.length) filters.push(`categoryId:=[${categoryIds.join(',')}]`)
     else if (categoryId) filters.push(`categoryId:=${categoryId}`)
-    if (brandId) filters.push(`brandId:=${brandId}`)
+    if (brandIds?.length) filters.push(`brandId:=[${brandIds.join(',')}]`)
+    else if (brandId) filters.push(`brandId:=${brandId}`)
     if (reqPrescription !== undefined) filters.push(`requiresPrescription:=${reqPrescription}`)
     if (inStock) filters.push('inStock:=true')
     if (priceMin !== undefined && priceMax !== undefined) filters.push(`price:[${priceMin}..${priceMax}]`)
