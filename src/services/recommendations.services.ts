@@ -197,6 +197,69 @@ async function enrichProductIds(
   return limit === undefined ? enriched : enriched.slice(0, limit)
 }
 
+const productObjectId = (product: any) => product?._id?.toString?.() || String(product?._id || '')
+
+async function getBackfillCandidates(
+  needed: number,
+  excludedProductIds: string[] = [],
+  categoryId?: string
+): Promise<RecommendationCandidate[]> {
+  if (needed <= 0) return []
+  try {
+    const excludedObjectIds = excludedProductIds.filter(isValidObjectId).map((id) => new ObjectId(id))
+    const filter: Record<string, unknown> = {
+      isActive: true,
+      stockQuantity: { $gt: 0 },
+      requiresPrescription: { $ne: true }
+    }
+    if (excludedObjectIds.length > 0) filter._id = { $nin: excludedObjectIds }
+    if (categoryId && isValidObjectId(categoryId)) filter.categoryId = new ObjectId(categoryId)
+
+    const products = await databaseService.products
+      .find(filter)
+      .sort({ rating: -1, reviewCount: -1 })
+      .limit(needed * CANDIDATE_POOL_MULTIPLIER)
+      .project({ _id: 1 })
+      .toArray()
+
+    return products.map((product, index) => ({
+      productId: productObjectId(product),
+      score: Math.max(0, 0.05 - index * 0.001),
+      reason: 'Catalog backfill after recommendation policy filtering',
+      evidence: ['catalog_backfill']
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function enrichAndBackfill(
+  rawCandidates: Array<string | RecommendationCandidate>,
+  limit: number,
+  options: RecommendationPolicyContext = {},
+  backfillCategoryId?: string
+): Promise<any[]> {
+  const enriched = await enrichProductIds(rawCandidates, undefined, options)
+  if (enriched.length >= limit) return enriched.slice(0, limit)
+
+  const excluded = new Set<string>([
+    ...(options.excludedProductIds || []),
+    ...normalizeCandidates(rawCandidates).map((candidate) => candidate.productId),
+    ...enriched.map(productObjectId)
+  ].filter(Boolean))
+  const backfillCandidates = await getBackfillCandidates(limit - enriched.length, [...excluded], backfillCategoryId)
+  const backfilled = await enrichProductIds(backfillCandidates, undefined, options)
+  const seen = new Set<string>()
+  return [...enriched, ...backfilled]
+    .filter((product) => {
+      const id = productObjectId(product)
+      if (!id || seen.has(id)) return false
+      seen.add(id)
+      return true
+    })
+    .slice(0, limit)
+}
+
 /**
  * Fallback: lấy sản phẩm bán chạy theo rating khi ML service down.
  */
@@ -266,7 +329,7 @@ class RecommendationsService {
       return recommendationResult('fallback_category', fallback)
     }
 
-    const enriched = await enrichProductIds(data.products, limit)
+    const enriched = await enrichAndBackfill(data.products, limit)
     return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
@@ -288,7 +351,7 @@ class RecommendationsService {
       return recommendationResult('fallback_empty', [])
     }
 
-    const enriched = await enrichProductIds(data.products, limit)
+    const enriched = await enrichAndBackfill(data.products, limit)
     return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
@@ -301,7 +364,7 @@ class RecommendationsService {
       return recommendationResult('fallback_invalid_category', [])
     }
     const cacheKey = `recommendations:trending:${categoryId || 'all'}:${limit}`
-    return cacheService.getOrSet(cacheKey, async () => {
+    const payload = await cacheService.getOrSet(cacheKey, async () => {
       const poolLimit = Math.min(limit * CANDIDATE_POOL_MULTIPLIER, 60)
       const query = categoryId ? `?category_id=${categoryId}&limit=${poolLimit}` : `?limit=${poolLimit}`
       const data = await callML<MLRecommendationResponse>(`/recommend/trending${query}`)
@@ -322,12 +385,13 @@ class RecommendationsService {
             rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
           })
           .toArray()
-        return recommendationResult('fallback_rating', fallback)
+        return { algorithm: 'fallback_rating', products: fallback, modelVersion: DEFAULT_MODEL_VERSION }
       }
 
-      const enriched = await enrichProductIds(data.products, limit)
-      return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
+      const enriched = await enrichAndBackfill(data.products, limit, {}, categoryId)
+      return { algorithm: data.algorithm, products: enriched, modelVersion: data.model_version }
     }, 300) // 5 phút
+    return recommendationResult(payload.algorithm, payload.products, { modelVersion: payload.modelVersion })
   }
 
   /**
@@ -350,7 +414,7 @@ class RecommendationsService {
       return recommendationResult('fallback_rating', fallback)
     }
 
-    const enriched = await enrichProductIds(data.products, limit)
+    const enriched = await enrichAndBackfill(data.products, limit)
     return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
@@ -379,7 +443,7 @@ class RecommendationsService {
       return recommendationResult('fallback_empty', [])
     }
 
-    const enriched = await enrichProductIds(data.products, limit, { excludedProductIds: validIds })
+    const enriched = await enrichAndBackfill(data.products, limit, { excludedProductIds: validIds })
     return recommendationResult(data.algorithm, enriched, { modelVersion: data.model_version })
   }
 
@@ -425,7 +489,7 @@ class RecommendationsService {
       return recommendationResult('fallback_empty', [])
     }
 
-    const enriched = await enrichProductIds(data.products, limit, {
+    const enriched = await enrichAndBackfill(data.products, limit, {
       audience: 'pharmacist',
       allergies,
       chronicDiseases,
