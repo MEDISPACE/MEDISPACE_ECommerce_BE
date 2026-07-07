@@ -108,6 +108,14 @@ class ProductsService {
     return brand
   }
 
+  private parseObjectIdList(value?: string): ObjectId[] {
+    return (value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => ObjectId.isValid(item))
+      .map((item) => new ObjectId(item))
+  }
+
   // Create product
   async createProduct(payload: CreateProductReqBody, createdBy: ObjectId) {
     // Validate category and brand
@@ -233,6 +241,7 @@ class ProductsService {
           categoryId: query.categoryId,
           categoryIds,
           brandId: query.brandId,
+          brandIds: this.parseObjectIdList(query.brandIds).map((id) => id.toString()),
           requiresPrescription: query.requiresPrescription === 'true' ? true : query.requiresPrescription === 'false' ? false : undefined,
           inStock: query.inStock === 'true',
           priceMin: query.minPrice ? parseFloat(query.minPrice) : undefined,
@@ -384,7 +393,10 @@ class ProductsService {
       }
     }
 
-    if (query.brandId) {
+    const brandIds = this.parseObjectIdList(query.brandIds)
+    if (brandIds.length > 0) {
+      filter.brandId = { $in: brandIds }
+    } else if (query.brandId) {
       filter.brandId = new ObjectId(query.brandId)
     }
 

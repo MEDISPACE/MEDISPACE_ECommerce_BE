@@ -5,6 +5,16 @@ import databaseService from '~/services/database.services'
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+const parseIdList = (value: unknown): string[] => {
+  const values = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  return values.map((item) => String(item).trim()).filter((item) => item && ObjectId.isValid(item))
+}
+
+const firstQueryValue = (value: unknown): string | undefined => {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : undefined
+  return typeof value === 'string' ? value : undefined
+}
+
 function toSearchProductDocument(product: any) {
   const defaultVariant = product.priceVariants?.find((variant: any) => variant.isDefault) || product.priceVariants?.[0]
   const mongoId = product._id?.toString?.() || product.mongoId || ''
@@ -44,15 +54,25 @@ export const suggestController = async (req: Request, res: Response) => {
 // ─── GET /search/products?q=&page=&limit=&... ─────────────────────────────────
 export const searchProductsController = async (req: Request, res: Response) => {
   console.log('[SearchController] searchProductsController called with query:', req.query)
-  const { q, page, limit, categoryId, brandId, requiresPrescription, inStock, priceMin, priceMax, minPrice, maxPrice, ratingMin, sortBy, includeSubcategories } =
-    req.query as Record<string, string>
-  const effectivePriceMin = priceMin ?? minPrice
-  const effectivePriceMax = priceMax ?? maxPrice
-  const shouldIncludeSubcategories = includeSubcategories === 'true'
+  const { q, page, limit, categoryId, brandId, brandIds, requiresPrescription, inStock, priceMin, priceMax, minPrice, maxPrice, ratingMin, sortBy, includeSubcategories } =
+    req.query as Record<string, string | string[]>
+  const qValue = firstQueryValue(q)
+  const pageValue = firstQueryValue(page)
+  const limitValue = firstQueryValue(limit)
+  const categoryIdValue = firstQueryValue(categoryId)
+  const brandIdValue = firstQueryValue(brandId)
+  const requiresPrescriptionValue = firstQueryValue(requiresPrescription)
+  const inStockValue = firstQueryValue(inStock)
+  const effectivePriceMin = firstQueryValue(priceMin) ?? firstQueryValue(minPrice)
+  const effectivePriceMax = firstQueryValue(priceMax) ?? firstQueryValue(maxPrice)
+  const ratingMinValue = firstQueryValue(ratingMin)
+  const sortByValue = firstQueryValue(sortBy)
+  const shouldIncludeSubcategories = firstQueryValue(includeSubcategories) === 'true'
+  const selectedBrandIds = parseIdList(brandIds)
 
   let categoryIds: string[] | undefined
-  if (shouldIncludeSubcategories && categoryId && ObjectId.isValid(categoryId)) {
-    const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryId) })
+  if (shouldIncludeSubcategories && categoryIdValue && ObjectId.isValid(categoryIdValue)) {
+    const category = await databaseService.categories.findOne({ _id: new ObjectId(categoryIdValue) })
     if (category) {
       let fullPath = category.path
       if (!fullPath.startsWith('/')) {
@@ -73,18 +93,19 @@ export const searchProductsController = async (req: Request, res: Response) => {
   }
 
   const params = {
-    q: q || '*',
-    page: Math.max(1, parseInt(page) || 1),
-    limit: Math.min(100, Math.max(1, parseInt(limit) || 20)),
-    categoryId,
+    q: qValue || '*',
+    page: Math.max(1, parseInt(pageValue || '1') || 1),
+    limit: Math.min(100, Math.max(1, parseInt(limitValue || '20') || 20)),
+    categoryId: categoryIdValue,
     categoryIds,
-    brandId,
-    requiresPrescription: requiresPrescription === 'true' ? true : requiresPrescription === 'false' ? false : undefined,
-    inStock: inStock === 'true' ? true : undefined,
+    brandId: brandIdValue,
+    brandIds: selectedBrandIds,
+    requiresPrescription: requiresPrescriptionValue === 'true' ? true : requiresPrescriptionValue === 'false' ? false : undefined,
+    inStock: inStockValue === 'true' ? true : undefined,
     priceMin: effectivePriceMin ? parseFloat(effectivePriceMin) : undefined,
     priceMax: effectivePriceMax ? parseFloat(effectivePriceMax) : undefined,
-    ratingMin: ratingMin ? parseFloat(ratingMin) : undefined,
-    sortBy
+    ratingMin: ratingMinValue ? parseFloat(ratingMinValue) : undefined,
+    sortBy: sortByValue
   }
 
   const tsResult = await typesenseService.searchProducts(params)
@@ -92,8 +113,8 @@ export const searchProductsController = async (req: Request, res: Response) => {
   // Typesense unavailable → fall back to MongoDB (với đầy đủ filters)
   if (!tsResult) {
     const mongoFilter: Record<string, unknown> = { isActive: true }
-    if (q && q !== '*') {
-      const safeQuery = escapeRegex(q)
+    if (qValue && qValue !== '*') {
+      const safeQuery = escapeRegex(qValue)
       const detailProductIds = await databaseService.productDetails
         .find(
           {
@@ -116,22 +137,24 @@ export const searchProductsController = async (req: Request, res: Response) => {
     }
     if (categoryIds?.length) {
       mongoFilter.categoryId = { $in: categoryIds.map((id) => new ObjectId(id)) }
-    } else if (categoryId && ObjectId.isValid(categoryId)) {
-      mongoFilter.categoryId = new ObjectId(categoryId)
+    } else if (categoryIdValue && ObjectId.isValid(categoryIdValue)) {
+      mongoFilter.categoryId = new ObjectId(categoryIdValue)
     }
-    if (brandId) {
+    if (selectedBrandIds.length > 0) {
+      mongoFilter.brandId = { $in: selectedBrandIds.map((id) => new ObjectId(id)) }
+    } else if (brandIdValue) {
       try {
-        mongoFilter.brandId = new ObjectId(brandId)
+        mongoFilter.brandId = new ObjectId(brandIdValue)
       } catch {
         // Ignore invalid brand id in fallback mode.
       }
     }
     if (params.requiresPrescription !== undefined) {
       mongoFilter.requiresPrescription = params.requiresPrescription
-    } else if (params.priceMin !== undefined || params.priceMax !== undefined || sortBy === 'price_asc' || sortBy === 'price_desc') {
+    } else if (params.priceMin !== undefined || params.priceMax !== undefined || sortByValue === 'price_asc' || sortByValue === 'price_desc') {
       mongoFilter.requiresPrescription = false
     }
-    if (inStock === 'true') {
+    if (inStockValue === 'true') {
       mongoFilter.stockQuantity = { $gt: 0 }
     }
     if (params.priceMin !== undefined || params.priceMax !== undefined) {
