@@ -13,10 +13,10 @@ import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import orderService from './orders.services'
 import { canAccessPatientPhi } from '~/middlewares/patientPhi.middlewares'
-import ghnService from './ghn.services'
 import paymentService from './payment.services'
 import typesenseService from './typesense.services'
 import cacheService from './cache.services'
+import shippingService from './shipping.services'
 
 const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
@@ -411,7 +411,7 @@ class PharmacistService {
     if (isDelivery) {
       const validDeliveryMethod =
         [ShippingMethod.Standard, ShippingMethod.Fast, ShippingMethod.Express].includes(deliveryMethod as ShippingMethod) ||
-        /^ghn:\d+$/.test(deliveryMethod)
+        /^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(deliveryMethod)
       if (!validDeliveryMethod) {
         throw new ErrorWithStatus({ message: 'Invalid delivery method', status: HTTP_STATUS.BAD_REQUEST })
       }
@@ -435,28 +435,41 @@ class PharmacistService {
     return 1000
   }
 
-  private async calculatePharmacistShippingFee(deliveryMethod: string, shippingAddress: any, stockDeductions: Array<{ quantity: number }>) {
+  private async calculatePharmacistShippingFee(
+    deliveryMethod: string,
+    paymentMethod: string,
+    shippingAddress: any,
+    stockDeductions: Array<{ quantity: number }>,
+    orderValue: number
+  ) {
     if (deliveryMethod === ShippingMethod.InStore) return 0
 
     this.validateShippingAddressForDelivery(shippingAddress)
 
-    if (deliveryMethod.startsWith('ghn:')) {
-      const serviceId = Number(deliveryMethod.split(':')[1])
-      if (!Number.isFinite(serviceId) || serviceId <= 0) {
-        throw new ErrorWithStatus({ message: 'Invalid GHN service selected', status: HTTP_STATUS.BAD_REQUEST })
+    if (/^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(deliveryMethod)) {
+      const rate = await shippingService.calculateRate(
+        {
+          toAddress: shippingAddress.address,
+          toWard: shippingAddress.ward,
+          toDistrict: shippingAddress.district,
+          toProvince: shippingAddress.province,
+          toDistrictId: Number(shippingAddress.districtId),
+          toWardCode: shippingAddress.wardCode,
+          weight: this.estimatePackageWeight(stockDeductions),
+          orderValue
+        },
+        deliveryMethod
+      )
+
+      if (!rate || !Number.isFinite(rate.price) || rate.price < 0) {
+        throw new ErrorWithStatus({ message: 'Unable to calculate selected shipping fee', status: HTTP_STATUS.BAD_REQUEST })
       }
 
-      const fee = await ghnService.calculateFee({
-        to_district_id: Number(shippingAddress.districtId),
-        to_ward_code: shippingAddress.wardCode,
-        weight: this.estimatePackageWeight(stockDeductions),
-        service_id: serviceId
-      })
-      const total = Number(fee?.total)
-      if (!Number.isFinite(total) || total < 0) {
-        throw new ErrorWithStatus({ message: 'Unable to calculate GHN shipping fee', status: HTTP_STATUS.BAD_REQUEST })
+      if (paymentMethod === PaymentMethod.COD && rate.supportsCod === false) {
+        throw new ErrorWithStatus({ message: 'Selected shipping method does not support COD', status: HTTP_STATUS.BAD_REQUEST })
       }
-      return total
+
+      return rate.price
     }
 
     const deliveryFees: Record<string, number> = {
@@ -1104,7 +1117,13 @@ class PharmacistService {
       })
     }
 
-    const shippingFee = await this.calculatePharmacistShippingFee(orderData.deliveryMethod, orderData.shippingAddress, stockDeductions)
+    const shippingFee = await this.calculatePharmacistShippingFee(
+      orderData.deliveryMethod,
+      orderData.paymentMethod,
+      orderData.shippingAddress,
+      stockDeductions,
+      subtotal
+    )
 
     // Prices already include VAT, so pharmacist-created orders do not add VAT again.
     const taxAmount = 0
@@ -1114,8 +1133,7 @@ class PharmacistService {
     // Generate order number
     const orderNumber = await this.generateUniquePharmacistOrderNumber()
 
-    // Find customer. customerId is currently supplied as phone/search value from the POS UI.
-    const customer = orderData.customerId ? await this.findUniqueCustomerByPhone(orderData.customerId) : null
+    const customer = orderData.customerId ? await this.resolveCustomerForPharmacistOrder(orderData.customerId) : null
     if (prescription && !prescription.customerId) {
       throw new ErrorWithStatus({ message: 'Prescription is not linked to a customer account', status: HTTP_STATUS.BAD_REQUEST })
     }
@@ -1346,6 +1364,18 @@ class PharmacistService {
       })
     }
     return customers[0] || null
+  }
+
+  private async resolveCustomerForPharmacistOrder(customerIdOrPhone: string) {
+    if (ObjectId.isValid(customerIdOrPhone)) {
+      const customer = await databaseService.users.findOne({ _id: new ObjectId(customerIdOrPhone), role: UserRole.Customer })
+      if (!customer) {
+        throw new ErrorWithStatus({ message: 'Customer not found', status: HTTP_STATUS.NOT_FOUND })
+      }
+      return customer
+    }
+
+    return this.findUniqueCustomerByPhone(customerIdOrPhone)
   }
 
   private async generateUniquePharmacistOrderNumber() {

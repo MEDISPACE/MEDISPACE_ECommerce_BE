@@ -10,7 +10,7 @@ class ShippingService {
     ahamove: new AhamoveShippingProvider()
   }
 
-  private parseMethod(shippingMethod?: string) {
+  private parseMethod(shippingMethod?: string): { provider: ShippingProviderCode; serviceCode?: string } {
     if (!shippingMethod) return { provider: 'ghn' as ShippingProviderCode, serviceCode: undefined }
 
     const [provider, serviceCode] = shippingMethod.split(':')
