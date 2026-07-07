@@ -13,6 +13,7 @@ const mockCommunityMessages = {
 }
 
 const mockModerationFindings = {
+  updateOne: vi.fn(),
   findOneAndUpdate: vi.fn()
 }
 
@@ -38,7 +39,7 @@ const { default: aiModerationService, redactText } = await import('~/services/ai
 
 describe('AiModerationService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     delete process.env.AI_MODERATION_ENABLED
     delete process.env.AI_MODERATION_BASE_URL
     delete process.env.AI_MODERATION_MODEL
@@ -158,6 +159,17 @@ describe('AiModerationService', () => {
       }),
       { upsert: true, returnDocument: 'after' }
     )
+    expect(mockModerationFindings.updateOne).toHaveBeenCalledWith(
+      { messageId },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          ai: expect.objectContaining({
+            suggestedAction: 'hide',
+            reason: 'Dangerous medication dosage advice'
+          })
+        })
+      })
+    )
   })
 
   it('[ai-review] mock returns medium severity, shouldHide=false, suggestedAction=review', async () => {
@@ -230,6 +242,17 @@ describe('AiModerationService', () => {
       expect.objectContaining({ $set: expect.objectContaining({ status: 'hidden' }) })
     )
     expect(mockModerationFindings.findOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockModerationFindings.updateOne).toHaveBeenCalledWith(
+      { messageId },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          ai: expect.objectContaining({
+            suggestedAction: 'none',
+            reason: 'Benign health question'
+          })
+        })
+      })
+    )
   })
 
   it('AI result above review threshold only → queued=true but autoHidden=false', async () => {
@@ -271,6 +294,17 @@ describe('AiModerationService', () => {
 
     expect(result?.applied).toMatchObject({ queued: true, autoHidden: false })
     expect(mockModerationFindings.findOneAndUpdate).toHaveBeenCalledTimes(1)
+    expect(mockModerationFindings.updateOne).toHaveBeenCalledWith(
+      { messageId },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          ai: expect.objectContaining({
+            suggestedAction: 'review',
+            reason: expect.stringContaining('AI phát hiện')
+          })
+        })
+      })
+    )
     // Message should NOT have been hidden
     expect(mockCommunityMessages.updateOne).not.toHaveBeenCalledWith(
       expect.anything(),

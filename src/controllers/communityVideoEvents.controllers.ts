@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { ObjectId } from 'mongodb'
 import { TokenPayload } from '~/models/requests/User.request'
+import communityService from '~/services/community.services'
 import communityVideoEventsService from '~/services/communityVideoEvents.services'
 import liveKitService from '~/services/livekit.services'
 
@@ -17,12 +18,11 @@ function paramString(value: string | string[] | undefined) {
 
 export const listVideoEventsController = async (req: Request, res: Response) => {
   const ctx = authContext(req)
-  const { roomId, status, visibility, search, upcomingOnly } = req.query as Record<string, any>
+  const { roomId, status, search, upcomingOnly } = req.query as Record<string, any>
   const result = await communityVideoEventsService.listEvents({
     viewer: ctx,
     roomId: typeof roomId === 'string' && ObjectId.isValid(roomId) ? new ObjectId(roomId) : undefined,
     status: ['draft', 'scheduled', 'live', 'ended', 'cancelled'].includes(status) ? status : undefined,
-    visibility: visibility === 'public' || visibility === 'private' ? visibility : undefined,
     search: typeof search === 'string' ? search : undefined,
     upcomingOnly: upcomingOnly === 'true',
     page: Number(req.query.page || 1),
@@ -70,6 +70,35 @@ export const joinVideoEventController = async (req: Request, res: Response) => {
   return res.status(200).json({ message: 'OK', data: payload })
 }
 
+export const listVideoEventMessagesController = async (req: Request, res: Response) => {
+  const { userId, role } = req.decoded_authorization as TokenPayload
+  const eventId = new ObjectId(paramString(req.params.eventId))
+  const event = await communityVideoEventsService.getEventDetail(eventId, authContext(req))
+  const result = await communityService.listMessages({
+    roomId: event.roomId,
+    videoEventId: eventId,
+    userId: new ObjectId(userId),
+    role,
+    page: Number(req.query.page || 1),
+    limit: Number(req.query.limit || 20),
+    q: typeof req.query.q === 'string' ? req.query.q.trim() : undefined
+  })
+  return res.status(200).json({ message: 'OK', data: result })
+}
+
+export const sendVideoEventMessageController = async (req: Request, res: Response) => {
+  const { userId, role } = req.decoded_authorization as TokenPayload
+  const eventId = new ObjectId(paramString(req.params.eventId))
+  const { content } = req.body
+  const result = await communityService.sendVideoEventChatMessage({
+    eventId,
+    userId: new ObjectId(userId),
+    role,
+    content
+  })
+  return res.status(201).json({ message: 'Gửi tin nhắn cuộc họp thành công', data: result })
+}
+
 export const createAdminVideoEventController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
   const {
@@ -77,7 +106,6 @@ export const createAdminVideoEventController = async (req: Request, res: Respons
     title,
     description,
     agenda,
-    visibility,
     status,
     scheduledStartAt,
     scheduledEndAt,
@@ -96,7 +124,6 @@ export const createAdminVideoEventController = async (req: Request, res: Respons
     title,
     description,
     agenda,
-    visibility,
     status,
     scheduledStartAt,
     scheduledEndAt,
@@ -119,7 +146,6 @@ export const updateAdminVideoEventController = async (req: Request, res: Respons
     title,
     description,
     agenda,
-    visibility,
     status,
     scheduledStartAt,
     scheduledEndAt,
@@ -139,7 +165,6 @@ export const updateAdminVideoEventController = async (req: Request, res: Respons
       title,
       description,
       agenda,
-      visibility,
       status,
       scheduledStartAt,
       scheduledEndAt,
@@ -156,16 +181,6 @@ export const updateAdminVideoEventController = async (req: Request, res: Respons
     authContext(req) || {}
   )
   return res.status(200).json({ message: 'Cập nhật hội thảo thành công', data: event })
-}
-
-export const startAdminVideoEventController = async (req: Request, res: Response) => {
-  const event = await communityVideoEventsService.startEvent(new ObjectId(paramString(req.params.eventId)), authContext(req) || {})
-  return res.status(200).json({ message: 'Hội thảo đã bắt đầu', data: event })
-}
-
-export const endAdminVideoEventController = async (req: Request, res: Response) => {
-  const event = await communityVideoEventsService.endEvent(new ObjectId(paramString(req.params.eventId)), authContext(req) || {})
-  return res.status(200).json({ message: 'Hội thảo đã kết thúc', data: event })
 }
 
 export const cancelAdminVideoEventController = async (req: Request, res: Response) => {

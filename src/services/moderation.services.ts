@@ -54,7 +54,11 @@ class ModerationService {
     const skip = (params.page - 1) * params.limit
     const match: any = { status: 'open' as FindingStatus }
     if (params.severity) match.severity = params.severity
-    if (params.trigger) match.trigger = params.trigger
+    if (params.trigger === 'user_report') {
+      match.$or = [{ trigger: 'user_report' }, { categories: 'user_report' }, { reportCount: { $gt: 0 } }]
+    } else if (params.trigger) {
+      match.trigger = params.trigger
+    }
 
     const pipeline: any[] = [
       { $match: match },
@@ -67,6 +71,15 @@ class ModerationService {
         }
       },
       { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_THREADS_COLLECTION || 'communityThreads',
+          localField: 'message.threadId',
+          foreignField: '_id',
+          as: 'thread'
+        }
+      },
+      { $unwind: { path: '$thread', preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
           from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
@@ -87,6 +100,7 @@ class ModerationService {
             { 'room.name': regex },
             { 'room.slug': regex },
             { 'room.diseaseKey': regex },
+            { 'thread.title': regex },
             { 'message.content': regex },
             { categories: regex },
             { reasons: regex }
@@ -107,7 +121,8 @@ class ModerationService {
               messageId: 1,
               senderId: 1,
               room: { name: 1, slug: 1, visibility: 1, diseaseKey: 1 },
-              message: { _id: 1, content: 1, senderId: 1, status: 1, createdAt: 1 },
+              thread: { _id: 1, title: 1, status: 1, slug: 1, starterMessageId: 1 },
+              message: { _id: 1, content: 1, senderId: 1, status: 1, createdAt: 1, isThreadStarter: 1, threadId: 1 },
               severity: 1,
               categories: 1,
               confidence: 1,
@@ -294,6 +309,7 @@ class ModerationService {
     action?: string
     dateFrom?: Date
     dateTo?: Date
+    search?: string
   }) {
     const skip = (params.page - 1) * params.limit
     const query: any = {}
@@ -307,31 +323,85 @@ class ModerationService {
       if (params.dateTo) query.createdAt.$lte = params.dateTo
     }
 
-    const [items, total] = await Promise.all([
-      databaseService.moderationActions
-        .aggregate([
-          { $match: query },
+    const pipeline: any[] = [
+      { $match: query },
+      {
+        $lookup: {
+          from: process.env.USERS_COLLECTION || 'users',
+          localField: 'performedBy',
+          foreignField: '_id',
+          as: 'performedByUser'
+        }
+      },
+      { $unwind: { path: '$performedByUser', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.USERS_COLLECTION || 'users',
+          localField: 'targetUserId',
+          foreignField: '_id',
+          as: 'targetUser'
+        }
+      },
+      { $unwind: { path: '$targetUser', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_MESSAGES_COLLECTION || 'communityMessages',
+          localField: 'messageId',
+          foreignField: '_id',
+          as: 'message'
+        }
+      },
+      { $unwind: { path: '$message', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_THREADS_COLLECTION || 'communityThreads',
+          localField: 'message.threadId',
+          foreignField: '_id',
+          as: 'thread'
+        }
+      },
+      { $unwind: { path: '$thread', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_ROOMS_COLLECTION || 'communityRooms',
+          localField: 'roomId',
+          foreignField: '_id',
+          as: 'room'
+        }
+      },
+      { $unwind: { path: '$room', preserveNullAndEmptyArrays: true } }
+    ]
+
+    const search = params.search?.trim()
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), 'i')
+      pipeline.push({
+        $match: {
+          $or: [
+            { action: regex },
+            { notes: regex },
+            { previousMessageStatus: regex },
+            { 'room.name': regex },
+            { 'room.slug': regex },
+            { 'thread.title': regex },
+            { 'thread.slug': regex },
+            { 'performedByUser.firstName': regex },
+            { 'performedByUser.lastName': regex },
+            { 'performedByUser.email': regex },
+            { 'targetUser.firstName': regex },
+            { 'targetUser.lastName': regex },
+            { 'targetUser.email': regex }
+          ]
+        }
+      })
+    }
+
+    pipeline.push({
+      $facet: {
+        items: [
           { $sort: { createdAt: -1 } },
           { $skip: skip },
           { $limit: params.limit },
-          {
-            $lookup: {
-              from: process.env.USERS_COLLECTION || 'users',
-              localField: 'performedBy',
-              foreignField: '_id',
-              as: 'performedByUser'
-            }
-          },
-          { $unwind: { path: '$performedByUser', preserveNullAndEmptyArrays: true } },
-          {
-            $lookup: {
-              from: process.env.USERS_COLLECTION || 'users',
-              localField: 'targetUserId',
-              foreignField: '_id',
-              as: 'targetUser'
-            }
-          },
-          { $unwind: { path: '$targetUser', preserveNullAndEmptyArrays: true } },
           {
             $project: {
               roomId: 1,
@@ -343,14 +413,20 @@ class ModerationService {
               durationMinutes: 1,
               previousMessageStatus: 1,
               createdAt: 1,
+              room: { _id: 1, name: 1, slug: 1 },
+              thread: { _id: 1, title: 1, slug: 1, status: 1 },
               performedByUser: { _id: 1, firstName: 1, lastName: 1, avatar: 1, role: 1 },
               targetUser: { _id: 1, firstName: 1, lastName: 1, avatar: 1, role: 1, email: 1 }
             }
           }
-        ])
-        .toArray(),
-      databaseService.moderationActions.countDocuments(query)
-    ])
+        ],
+        total: [{ $count: 'count' }]
+      }
+    })
+
+    const [result] = await databaseService.moderationActions.aggregate(pipeline).toArray()
+    const items = result?.items || []
+    const total = result?.total?.[0]?.count || 0
 
     return { items, page: params.page, limit: params.limit, total }
   }
