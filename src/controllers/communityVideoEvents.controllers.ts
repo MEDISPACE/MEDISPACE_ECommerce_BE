@@ -18,13 +18,14 @@ function paramString(value: string | string[] | undefined) {
 
 export const listVideoEventsController = async (req: Request, res: Response) => {
   const ctx = authContext(req)
-  const { roomId, status, search, upcomingOnly } = req.query as Record<string, any>
+  const { roomId, status, search, upcomingOnly, sort } = req.query as Record<string, any>
   const result = await communityVideoEventsService.listEvents({
     viewer: ctx,
     roomId: typeof roomId === 'string' && ObjectId.isValid(roomId) ? new ObjectId(roomId) : undefined,
     status: ['draft', 'scheduled', 'live', 'ended', 'cancelled'].includes(status) ? status : undefined,
     search: typeof search === 'string' ? search : undefined,
     upcomingOnly: upcomingOnly === 'true',
+    sort: ['scheduled_asc', 'created_desc'].includes(sort) ? sort : undefined,
     page: Number(req.query.page || 1),
     limit: Number(req.query.limit || 20)
   })
