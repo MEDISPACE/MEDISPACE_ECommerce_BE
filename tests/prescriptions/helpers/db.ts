@@ -63,6 +63,7 @@ export async function cleanPrescriptionTestDb(harness: PrescriptionTestDb) {
 }
 
 export async function seedPrescriptionTestDb(harness: PrescriptionTestDb, overrides: { prescriptions?: any[]; users?: any[]; products?: any[] } = {}) {
+  await cleanPrescriptionTestDb(harness)
   await harness.users.insertMany(overrides.users || [makeCustomer(), ...Object.values(pharmacistFixtures)])
   await harness.products.insertMany(overrides.products || Object.values(productFixtures))
   if (overrides.prescriptions?.length) await harness.prescriptions.insertMany(overrides.prescriptions)

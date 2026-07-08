@@ -392,20 +392,82 @@ class PharmacistService {
     return snapshot
   }
 
+  private getPharmacistOrderScope(pharmacistId: ObjectId) {
+    const unassignedOrderClause = {
+      $and: [
+        { $or: [{ assignedPharmacistId: { $exists: false } }, { assignedPharmacistId: null }] },
+        { $or: [{ createdBy: { $exists: false } }, { createdBy: null }] },
+        { orderStatus: { $nin: [OrderStatus.Delivered, OrderStatus.Cancelled, OrderStatus.Returned] } }
+      ]
+    }
+
+    return {
+      $or: [
+        { createdBy: pharmacistId },
+        { assignedPharmacistId: pharmacistId },
+        unassignedOrderClause
+      ]
+    }
+  }
+
+  private async claimOrderForPharmacist(orderId: ObjectId, pharmacistId: ObjectId) {
+    const now = new Date()
+    return databaseService.orders.findOneAndUpdate(
+      {
+        _id: orderId,
+        $or: [
+          { createdBy: pharmacistId },
+          { assignedPharmacistId: pharmacistId },
+          {
+            $and: [
+              { $or: [{ assignedPharmacistId: { $exists: false } }, { assignedPharmacistId: null }] },
+              { $or: [{ createdBy: { $exists: false } }, { createdBy: null }] },
+              { orderStatus: { $nin: [OrderStatus.Delivered, OrderStatus.Cancelled, OrderStatus.Returned] } }
+            ]
+          }
+        ]
+      },
+      {
+        $set: {
+          assignedPharmacistId: pharmacistId,
+          assignedAt: now,
+          updatedAt: now
+        }
+      },
+      { returnDocument: 'after' }
+    )
+  }
+
+  private async assertPharmacistCanAccessOrder(orderId: ObjectId, pharmacistId: ObjectId) {
+    const order = await databaseService.orders.findOne({
+      _id: orderId,
+      ...this.getPharmacistOrderScope(pharmacistId)
+    })
+
+    if (!order) {
+      throw new ErrorWithStatus({
+        message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    return order
+  }
+
   private assertValidPharmacistOrderMethod(deliveryMethod: string, paymentMethod: string) {
     if (!deliveryMethod || typeof deliveryMethod !== 'string') {
-      throw new ErrorWithStatus({ message: 'Delivery method is required', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Vui lòng chọn hình thức nhận hàng.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     if (!Object.values(PaymentMethod).includes(paymentMethod as PaymentMethod)) {
-      throw new ErrorWithStatus({ message: 'Invalid payment method', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Phương thức thanh toán không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     const isInstore = deliveryMethod === ShippingMethod.InStore
     const isDelivery = !isInstore
 
     if (isInstore && !IN_STORE_PAYMENT_METHODS.has(paymentMethod)) {
-      throw new ErrorWithStatus({ message: 'Payment method is not allowed for in-store orders', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Phương thức thanh toán này không áp dụng cho đơn nhận tại quầy.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     if (isDelivery) {
@@ -413,20 +475,20 @@ class PharmacistService {
         [ShippingMethod.Standard, ShippingMethod.Fast, ShippingMethod.Express].includes(deliveryMethod as ShippingMethod) ||
         /^(ghn|ghtk|ahamove):[A-Za-z0-9_-]+$/.test(deliveryMethod)
       if (!validDeliveryMethod) {
-        throw new ErrorWithStatus({ message: 'Invalid delivery method', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: 'Hình thức giao hàng không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
       }
       if (!DELIVERY_PAYMENT_METHODS.has(paymentMethod)) {
-        throw new ErrorWithStatus({ message: 'Payment method is not allowed for delivery orders', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: 'Phương thức thanh toán này không áp dụng cho đơn giao hàng.', status: HTTP_STATUS.BAD_REQUEST })
       }
     }
   }
 
   private validateShippingAddressForDelivery(shippingAddress: any) {
     if (!shippingAddress?.address || !shippingAddress?.province || !shippingAddress?.district || !shippingAddress?.ward) {
-      throw new ErrorWithStatus({ message: 'Complete delivery address is required', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Vui lòng nhập đầy đủ địa chỉ giao hàng.', status: HTTP_STATUS.BAD_REQUEST })
     }
     if (!Number.isFinite(Number(shippingAddress.districtId)) || !shippingAddress.wardCode) {
-      throw new ErrorWithStatus({ message: 'GHN district and ward are required for delivery orders', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Vui lòng chọn đầy đủ quận/huyện và phường/xã để tính phí giao hàng.', status: HTTP_STATUS.BAD_REQUEST })
     }
   }
 
@@ -462,11 +524,11 @@ class PharmacistService {
       )
 
       if (!rate || !Number.isFinite(rate.price) || rate.price < 0) {
-        throw new ErrorWithStatus({ message: 'Unable to calculate selected shipping fee', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Không thể tính phí vận chuyển đã chọn. Vui lòng kiểm tra lại địa chỉ giao hàng.', status: HTTP_STATUS.BAD_REQUEST })
       }
 
       if (paymentMethod === PaymentMethod.COD && rate.supportsCod === false) {
-        throw new ErrorWithStatus({ message: 'Selected shipping method does not support COD', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: 'Đơn vị vận chuyển đã chọn không hỗ trợ thanh toán COD.', status: HTTP_STATUS.BAD_REQUEST })
       }
 
       return rate.price
@@ -795,7 +857,7 @@ class PharmacistService {
       const match = ObjectId.isValid(productId) ? { _id: new ObjectId(productId) } : { slug: productId }
       const products = await databaseService.products.aggregate(this.buildDrugDatabasePipeline(match, undefined, { _id: 1 })).toArray()
       if (!products.length) {
-        throw new ErrorWithStatus({ message: 'Product not found', status: HTTP_STATUS.NOT_FOUND })
+        throw new ErrorWithStatus({ message: 'Không tìm thấy sản phẩm.', status: HTTP_STATUS.NOT_FOUND })
       }
       return this.mapDrugDatabaseProduct(products[0])
     }, DRUG_DATABASE_CACHE_TTL_SECONDS)
@@ -1043,12 +1105,12 @@ class PharmacistService {
 
     for (const item of orderData.items) {
       if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
-        throw new ErrorWithStatus({ message: 'Order item quantity must be a positive integer', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: 'Số lượng sản phẩm phải là số nguyên dương.', status: HTTP_STATUS.BAD_REQUEST })
       }
 
       if (!ObjectId.isValid(item.productId)) {
         throw new ErrorWithStatus({
-          message: `Invalid product ID: ${item.productId}`,
+          message: `Mã sản phẩm không hợp lệ: ${item.productId}`,
           status: HTTP_STATUS.BAD_REQUEST
         })
       }
@@ -1057,7 +1119,7 @@ class PharmacistService {
 
       if (!product) {
         throw new ErrorWithStatus({
-          message: `Product not found: ${item.productId}`,
+          message: `Không tìm thấy sản phẩm: ${item.productId}`,
           status: HTTP_STATUS.NOT_FOUND
         })
       }
@@ -1076,17 +1138,17 @@ class PharmacistService {
         product.priceVariants?.[0]
       const unitPrice = variant?.price || 0
       if (!variant || !Number.isFinite(unitPrice) || unitPrice < 0) {
-        throw new ErrorWithStatus({ message: `Invalid price variant for product: ${product.name}`, status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: `Đơn vị bán của sản phẩm không hợp lệ: ${product.name}`, status: HTTP_STATUS.BAD_REQUEST })
       }
       const quantityPerUnit = Number(variant?.quantityPerUnit ?? 1)
       if (!Number.isFinite(quantityPerUnit) || quantityPerUnit <= 0) {
-        throw new ErrorWithStatus({ message: `Invalid stock unit conversion for product: ${product.name}`, status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: `Quy đổi tồn kho của sản phẩm chưa hợp lệ: ${product.name}`, status: HTTP_STATUS.BAD_REQUEST })
       }
       const requiredStock = item.quantity * quantityPerUnit
 
       if (product.stockQuantity < requiredStock) {
         throw new ErrorWithStatus({
-          message: `Insufficient stock for product: ${product.name}`,
+          message: `Sản phẩm không đủ tồn kho: ${product.name}`,
           status: HTTP_STATUS.BAD_REQUEST
         })
       }
@@ -1135,11 +1197,11 @@ class PharmacistService {
 
     const customer = orderData.customerId ? await this.resolveCustomerForPharmacistOrder(orderData.customerId) : null
     if (prescription && !prescription.customerId) {
-      throw new ErrorWithStatus({ message: 'Prescription is not linked to a customer account', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Đơn thuốc chưa liên kết với tài khoản khách hàng.', status: HTTP_STATUS.BAD_REQUEST })
     }
     if (prescription && customer && prescription.customerId.toString() !== customer._id?.toString()) {
       throw new ErrorWithStatus({
-        message: 'Prescription does not belong to the selected customer',
+        message: 'Đơn thuốc không thuộc khách hàng đã chọn.',
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
@@ -1147,7 +1209,7 @@ class PharmacistService {
     const guestCustomer = !prescription && !customer ? await this.createGuestCustomerForPharmacistOrder(orderNumber, orderData.shippingAddress, pharmacistId) : null
     const userId = prescription?.customerId || customer?._id || guestCustomer?._id
     if (!userId) {
-      throw new ErrorWithStatus({ message: 'Unable to resolve customer for pharmacist order', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Không thể xác định khách hàng cho đơn hàng. Vui lòng kiểm tra lại thông tin khách hàng.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     const isInstore = orderData.deliveryMethod === ShippingMethod.InStore
@@ -1196,7 +1258,7 @@ class PharmacistService {
           const existingOrder = await databaseService.orders.findOne({ prescriptionId: prescription._id }, { session })
           if (existingOrder) {
             throw new ErrorWithStatus({
-              message: 'An order has already been created for this prescription',
+              message: 'Đơn thuốc này đã được dùng để tạo đơn hàng trước đó.',
               status: HTTP_STATUS.CONFLICT
             })
           }
@@ -1213,7 +1275,7 @@ class PharmacistService {
 
           if (stockResult.modifiedCount !== 1) {
             throw new ErrorWithStatus({
-              message: `Insufficient stock for product: ${deduction.productName}`,
+              message: `Sản phẩm không đủ tồn kho: ${deduction.productName}`,
               status: HTTP_STATUS.BAD_REQUEST
             })
           }
@@ -1225,8 +1287,8 @@ class PharmacistService {
       if (error?.code === 11000) {
         throw new ErrorWithStatus({
           message: error?.keyPattern?.prescriptionId
-            ? 'An order has already been created for this prescription'
-            : 'Duplicate order number. Please retry order creation.',
+            ? 'Đơn thuốc này đã được dùng để tạo đơn hàng trước đó.'
+            : 'Mã đơn hàng bị trùng. Vui lòng thử tạo lại đơn.',
           status: HTTP_STATUS.CONFLICT
         })
       }
@@ -1279,7 +1341,7 @@ class PharmacistService {
     if (!prescriptionId) return null
 
     if (!ObjectId.isValid(prescriptionId)) {
-      throw new ErrorWithStatus({ message: 'Invalid prescription ID', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({ message: 'Mã đơn thuốc không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
     const prescription = await databaseService.prescriptions.findOne({ _id: new ObjectId(prescriptionId) })
@@ -1404,6 +1466,7 @@ class PharmacistService {
 
   // Get orders list for pharmacist with filters
   async getOrders(filters: {
+    pharmacistId: ObjectId
     page?: number
     limit?: number
     status?: string
@@ -1415,11 +1478,12 @@ class PharmacistService {
     const skip = (page - 1) * limit
 
     const query: Record<string, unknown> = {}
+    const andConditions: Record<string, unknown>[] = [this.getPharmacistOrderScope(filters.pharmacistId)]
 
     // Filter by order status
     if (filters.status) {
       if (!ORDER_STATUSES.has(filters.status as OrderStatus)) {
-        throw new ErrorWithStatus({ message: 'Invalid order status filter', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: 'Bộ lọc trạng thái đơn hàng không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
       }
       query.orderStatus = filters.status
     }
@@ -1427,7 +1491,7 @@ class PharmacistService {
     // Filter by payment status
     if (filters.paymentStatus) {
       if (!PAYMENT_STATUSES.has(filters.paymentStatus)) {
-        throw new ErrorWithStatus({ message: 'Invalid payment status filter', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({ message: 'Bộ lọc trạng thái thanh toán không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
       }
       query.paymentStatus = filters.paymentStatus
     }
@@ -1435,13 +1499,17 @@ class PharmacistService {
     // Search by order number or customer info
     if (filters.search) {
       const safeSearch = escapeRegex(filters.search.trim())
-      query.$or = [
-        { orderNumber: { $regex: safeSearch, $options: 'i' } },
-        { 'shippingAddress.firstName': { $regex: safeSearch, $options: 'i' } },
-        { 'shippingAddress.lastName': { $regex: safeSearch, $options: 'i' } },
-        { 'shippingAddress.phone': { $regex: safeSearch, $options: 'i' } }
-      ]
+      andConditions.push({
+        $or: [
+          { orderNumber: { $regex: safeSearch, $options: 'i' } },
+          { 'shippingAddress.firstName': { $regex: safeSearch, $options: 'i' } },
+          { 'shippingAddress.lastName': { $regex: safeSearch, $options: 'i' } },
+          { 'shippingAddress.phone': { $regex: safeSearch, $options: 'i' } }
+        ]
+      })
     }
+
+    query.$and = andConditions
 
     const [orders, totalOrders] = await Promise.all([
       databaseService.orders.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
@@ -1460,7 +1528,7 @@ class PharmacistService {
   }
 
   // Get order details by ID
-  async getOrderById(orderId: string) {
+  async getOrderById(orderId: string, pharmacistId: ObjectId) {
     if (!ObjectId.isValid(orderId)) {
       throw new ErrorWithStatus({
         message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
@@ -1470,14 +1538,7 @@ class PharmacistService {
 
     const orderObjectId = new ObjectId(orderId)
 
-    const order = await databaseService.orders.findOne({ _id: orderObjectId })
-
-    if (!order) {
-      throw new ErrorWithStatus({
-        message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
-        status: HTTP_STATUS.NOT_FOUND
-      })
-    }
+    const order = await this.assertPharmacistCanAccessOrder(orderObjectId, pharmacistId)
 
     // Get customer info
     const customer = await databaseService.users.findOne({ _id: order.userId })
@@ -1496,8 +1557,51 @@ class PharmacistService {
   }
 
   // Update order status
-  async updateOrderStatus(orderId: string, newStatus: string, trackingNumber?: string, notes?: string) {
-    const result = await orderService.updateOrderStatus(new ObjectId(orderId), newStatus, trackingNumber, notes)
+  async updateOrderStatus(
+    orderId: string,
+    pharmacistId: ObjectId,
+    newStatus?: string,
+    trackingNumber?: string,
+    notes?: string,
+    paymentStatus?: string
+  ) {
+    if (!ObjectId.isValid(orderId)) {
+      throw new ErrorWithStatus({
+        message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+    const orderObjectId = new ObjectId(orderId)
+    const claimedOrder = await this.claimOrderForPharmacist(orderObjectId, pharmacistId)
+    if (!claimedOrder) {
+      throw new ErrorWithStatus({
+        message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    if (newStatus && !ORDER_STATUSES.has(newStatus as OrderStatus)) {
+      throw new ErrorWithStatus({ message: 'Trạng thái đơn hàng không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (paymentStatus && !PAYMENT_STATUSES.has(paymentStatus)) {
+      throw new ErrorWithStatus({ message: 'Trạng thái thanh toán không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (!newStatus && !paymentStatus) {
+      throw new ErrorWithStatus({ message: 'Vui lòng chọn trạng thái cần cập nhật.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (paymentStatus) {
+      await orderService.updatePaymentStatus(orderObjectId, paymentStatus)
+    }
+
+    let result = newStatus
+      ? await orderService.updateOrderStatus(orderObjectId, newStatus, trackingNumber, notes)
+      : await databaseService.orders.findOne({ _id: orderObjectId })
+
+    if (notes && !newStatus && result) {
+      await databaseService.orders.updateOne({ _id: orderObjectId }, { $set: { notes, updatedAt: new Date() } })
+      result = await databaseService.orders.findOne({ _id: orderObjectId })
+    }
     if (!result) {
       throw new ErrorWithStatus({
         message: PHARMACIST_MESSAGES.ORDER_NOT_FOUND,
@@ -1508,8 +1612,8 @@ class PharmacistService {
   }
 
   // Get order statistics
-  async getOrderStatistics(dateRange?: { startDate: Date; endDate: Date }) {
-    const query: Record<string, unknown> = {}
+  async getOrderStatistics(pharmacistId: ObjectId, dateRange?: { startDate: Date; endDate: Date }) {
+    const query: Record<string, unknown> = this.getPharmacistOrderScope(pharmacistId)
 
     if (dateRange) {
       query.createdAt = {
