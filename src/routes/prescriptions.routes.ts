@@ -43,6 +43,7 @@ prescriptionsRouter.get(
   '/stats',
   accessTokenValidator,
   authenticatePharmacist,
+  checkLicense,
   wrapRequestHandler(getPrescriptionStatsController)
 )
 
@@ -58,6 +59,7 @@ prescriptionsRouter.get(
   '/pending',
   accessTokenValidator,
   authenticatePharmacist,
+  checkLicense,
   wrapRequestHandler(getPendingPrescriptionsController)
 )
 
@@ -72,6 +74,7 @@ prescriptionsRouter.get(
   '/pharmacist',
   accessTokenValidator,
   authenticatePharmacist,
+  checkLicense,
   wrapRequestHandler(getPendingPrescriptionsController)
 )
 

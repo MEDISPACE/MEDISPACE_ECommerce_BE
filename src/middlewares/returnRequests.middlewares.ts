@@ -12,6 +12,7 @@ const VALID_RETURN_STATUSES = Object.values(ReturnStatus)
 const VALID_RETURN_TYPES = Object.values(ReturnType)
 const VALID_REFUND_METHODS = Object.values(RefundMethod)
 const VALID_CONDITIONS = ['good', 'damaged', 'opened', 'unusable']
+const VALID_RETURN_TRACKING_STATUSES = ['arranged', 'picked_up', 'in_transit', 'delivered_to_store', 'failed', 'cancelled']
 
 // Common schemas
 const requestIdSchema = {
@@ -85,6 +86,15 @@ export const createReturnRequestValidator = validate(
           }
         }
       },
+      'items.*.unit': {
+        notEmpty: {
+          errorMessage: 'Unit is required for return item'
+        },
+        isString: {
+          errorMessage: 'Unit must be a string'
+        },
+        trim: true
+      },
       'items.*.quantity': {
         isInt: {
           options: { min: 1 },
@@ -124,6 +134,12 @@ export const createReturnRequestValidator = validate(
           errorMessage: RETURN_REQUESTS_MESSAGES.EVIDENCE_REQUIRED
         }
       },
+      'evidence.*': {
+        isURL: {
+          options: { require_protocol: true },
+          errorMessage: RETURN_REQUESTS_MESSAGES.EVIDENCE_MUST_BE_ARRAY
+        }
+      },
       type: {
         optional: true,
         isIn: {
@@ -136,6 +152,39 @@ export const createReturnRequestValidator = validate(
         isIn: {
           options: [VALID_REFUND_METHODS],
           errorMessage: RETURN_REQUESTS_MESSAGES.REFUND_METHOD_INVALID
+        }
+      },
+      bankInfo: {
+        optional: true,
+        custom: {
+          options: (value, { req }) => {
+            if (req.body.refundMethod !== RefundMethod.BANK_TRANSFER) return true
+            if (!value || typeof value !== 'object') {
+              throw new ErrorWithStatus({
+                message: RETURN_REQUESTS_MESSAGES.BANK_NAME_REQUIRED,
+                status: HTTP_STATUS.BAD_REQUEST
+              })
+            }
+            if (!String(value.bankName || '').trim()) {
+              throw new ErrorWithStatus({
+                message: RETURN_REQUESTS_MESSAGES.BANK_NAME_REQUIRED,
+                status: HTTP_STATUS.BAD_REQUEST
+              })
+            }
+            if (!String(value.accountNumber || '').trim()) {
+              throw new ErrorWithStatus({
+                message: RETURN_REQUESTS_MESSAGES.ACCOUNT_NUMBER_REQUIRED,
+                status: HTTP_STATUS.BAD_REQUEST
+              })
+            }
+            if (!String(value.accountHolder || '').trim()) {
+              throw new ErrorWithStatus({
+                message: RETURN_REQUESTS_MESSAGES.ACCOUNT_HOLDER_REQUIRED,
+                status: HTTP_STATUS.BAD_REQUEST
+              })
+            }
+            return true
+          }
         }
       },
       'bankInfo.bankName': {
@@ -181,6 +230,15 @@ export const getReturnRequestsValidator = validate(
           options: [VALID_RETURN_STATUSES],
           errorMessage: RETURN_REQUESTS_MESSAGES.STATUS_INVALID
         }
+      },
+      search: {
+        optional: true,
+        isString: true,
+        trim: true,
+        isLength: {
+          options: { max: 100 },
+          errorMessage: 'Search keyword must be less than 100 characters'
+        }
       }
     },
     ['query']
@@ -203,7 +261,7 @@ export const reviewReturnRequestValidator = validate(
       approvedAmount: {
         optional: true,
         isFloat: {
-          options: { min: 0 },
+          options: { min: 1 },
           errorMessage: RETURN_REQUESTS_MESSAGES.AMOUNT_INVALID
         }
       },
@@ -227,20 +285,45 @@ export const reviewReturnRequestValidator = validate(
 )
 
 /**
- * Validate update return shipping payload
+ * Validate arrange return pickup/shipping payload
  */
-export const updateReturnShippingValidator = validate(
+export const arrangeReturnShippingValidator = validate(
   checkSchema(
     {
       trackingNumber: {
-        notEmpty: true,
-        isString: {
-          errorMessage: RETURN_REQUESTS_MESSAGES.TRACKING_NUMBER_MUST_BE_STRING
+        custom: {
+          options: (value) => {
+            if (value !== undefined) {
+              throw new ErrorWithStatus({
+                message: RETURN_REQUESTS_MESSAGES.TRACKING_NUMBER_NOT_ALLOWED,
+                status: HTTP_STATUS.BAD_REQUEST
+              })
+            }
+            return true
+          }
         }
       },
       carrier: {
         optional: true,
-        isString: true
+        isString: {
+          errorMessage: 'Carrier must be a string'
+        },
+        trim: true,
+        isLength: {
+          options: { max: 100 },
+          errorMessage: 'Carrier must be less than 100 characters'
+        }
+      },
+      notes: {
+        optional: true,
+        isString: {
+          errorMessage: RETURN_REQUESTS_MESSAGES.NOTES_MUST_BE_STRING
+        },
+        trim: true,
+        isLength: {
+          options: { max: 1000 },
+          errorMessage: RETURN_REQUESTS_MESSAGES.NOTES_LENGTH_INVALID
+        }
       }
     },
     ['body']
@@ -278,7 +361,7 @@ export const processRefundValidator = validate(
       refundedAmount: {
         notEmpty: true,
         isFloat: {
-          options: { min: 0 },
+          options: { min: 1 },
           errorMessage: RETURN_REQUESTS_MESSAGES.AMOUNT_INVALID
         }
       },
@@ -293,6 +376,44 @@ export const processRefundValidator = validate(
         },
         isLength: {
           options: { max: 1000 },
+          errorMessage: RETURN_REQUESTS_MESSAGES.NOTES_LENGTH_INVALID
+        }
+      }
+    },
+    ['body']
+  )
+)
+
+/**
+ * Validate mock return tracking update payload
+ */
+export const updateMockReturnTrackingValidator = validate(
+  checkSchema(
+    {
+      status: {
+        notEmpty: true,
+        isIn: {
+          options: [VALID_RETURN_TRACKING_STATUSES],
+          errorMessage: RETURN_REQUESTS_MESSAGES.STATUS_INVALID
+        }
+      },
+      message: {
+        optional: true,
+        isString: {
+          errorMessage: RETURN_REQUESTS_MESSAGES.NOTES_MUST_BE_STRING
+        },
+        trim: true,
+        isLength: {
+          options: { max: 300 },
+          errorMessage: RETURN_REQUESTS_MESSAGES.NOTES_LENGTH_INVALID
+        }
+      },
+      location: {
+        optional: true,
+        isString: true,
+        trim: true,
+        isLength: {
+          options: { max: 200 },
           errorMessage: RETURN_REQUESTS_MESSAGES.NOTES_LENGTH_INVALID
         }
       }

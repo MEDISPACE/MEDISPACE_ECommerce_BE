@@ -294,6 +294,7 @@ export const createPharmacistOrderController = async (req: Request, res: Respons
 
 // Get orders with filters
 export const getOrdersController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
   const { page, limit, status, paymentStatus, search } = req.query as {
     page?: string
     limit?: string
@@ -303,6 +304,7 @@ export const getOrdersController = async (req: Request, res: Response) => {
   }
 
   const result = await pharmacistService.getOrders({
+    pharmacistId: new ObjectId(userId),
     page: page ? Number(page) : undefined,
     limit: limit ? Number(limit) : undefined,
     status,
@@ -318,8 +320,9 @@ export const getOrdersController = async (req: Request, res: Response) => {
 
 // Get order details by ID
 export const getOrderDetailsController = async (req: Request<{ orderId: string }>, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
   const { orderId } = req.params
-  const result = await pharmacistService.getOrderById(orderId)
+  const result = await pharmacistService.getOrderById(orderId, new ObjectId(userId))
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_ORDER_DETAILS_SUCCESS,
     result
@@ -328,9 +331,17 @@ export const getOrderDetailsController = async (req: Request<{ orderId: string }
 
 // Update order status
 export const updateOrderStatusController = async (req: Request<{ orderId: string }>, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
   const { orderId } = req.params
-  const { status, trackingNumber, notes } = req.body
-  const result = await pharmacistService.updateOrderStatus(orderId, status, trackingNumber, notes)
+  const { status, trackingNumber, notes, paymentStatus } = req.body
+  const result = await pharmacistService.updateOrderStatus(
+    orderId,
+    new ObjectId(userId),
+    status,
+    trackingNumber,
+    notes,
+    paymentStatus
+  )
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.UPDATE_ORDER_STATUS_SUCCESS,
     result
@@ -339,6 +350,7 @@ export const updateOrderStatusController = async (req: Request<{ orderId: string
 
 // Get order statistics
 export const getOrderStatisticsController = async (req: Request, res: Response) => {
+  const { userId } = req.decoded_authorization as TokenPayload
   const { startDate, endDate } = req.query as { startDate?: string; endDate?: string }
 
   const dateRange =
@@ -349,7 +361,7 @@ export const getOrderStatisticsController = async (req: Request, res: Response) 
         }
       : undefined
 
-  const result = await pharmacistService.getOrderStatistics(dateRange)
+  const result = await pharmacistService.getOrderStatistics(new ObjectId(userId), dateRange)
 
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_ORDER_STATS_SUCCESS,

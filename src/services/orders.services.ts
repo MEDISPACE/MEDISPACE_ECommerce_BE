@@ -16,6 +16,7 @@ import loyaltyService from './loyalty.services'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import recommendationsService from './recommendations.services'
+import paymentTransactionService from './paymentTransactions.services'
 
 class OrderService {
   private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
@@ -272,10 +273,12 @@ class OrderService {
     if (payload.idempotencyKey) {
       const existing = await this.getOrderByIdempotencyKey(userId, payload.idempotencyKey)
       if (existing) {
-        const paymentUrl =
-          existing.paymentMethod !== PaymentMethod.COD && req
-            ? await paymentService.createPaymentUrl(existing as any, req)
-            : undefined
+        let paymentUrl = undefined
+        if (existing.paymentMethod !== PaymentMethod.COD && req) {
+          const paymentRequest = await paymentService.createPaymentRequest(existing as any, req)
+          paymentUrl = paymentRequest.paymentUrl
+          await paymentTransactionService.attachPaymentRequest(existing, paymentRequest)
+        }
         return { order: existing, orderId: existing._id, paymentUrl }
       }
     }
@@ -569,6 +572,10 @@ class OrderService {
     })
 
     const result = await databaseService.orders.insertOne(order)
+    await paymentTransactionService.ensurePaymentTransaction({
+      order: { ...order, _id: result.insertedId },
+      status: paymentMethod === PaymentMethod.COD ? 'pending_collection' : 'pending'
+    })
 
     // Giữ chỗ lượt dùng coupon trước khi trừ stock.
     // Nếu các bước sau fail, releaseOrderBenefits sẽ hoàn lại lượt dùng và điểm.
@@ -580,6 +587,7 @@ class OrderService {
       }
     } catch (error) {
       await databaseService.orders.deleteOne({ _id: result.insertedId })
+      await databaseService.paymentTransactions.deleteMany({ orderId: result.insertedId })
       await loyaltyService.refundRedeemedPointsForOrder(userId, orderId, orderNumber)
       throw error
     }
@@ -603,6 +611,7 @@ class OrderService {
           // Stock không đủ (do concurrent order) — roll back đơn hàng và thông báo
           await this.restoreStockForItems(deductedItems)
           await databaseService.orders.deleteOne({ _id: result.insertedId })
+          await databaseService.paymentTransactions.deleteMany({ orderId: result.insertedId })
           await this.releaseOrderBenefits({ ...order, _id: result.insertedId })
           throw new ErrorWithStatus({
             message: `Sản phẩm "${item.name}" vừa hết hàng. Vui lòng kiểm tra lại giỏ hàng.`,
@@ -663,7 +672,9 @@ class OrderService {
     let paymentUrlError = false
     if (paymentMethod !== PaymentMethod.COD && req) {
       try {
-        paymentUrl = await paymentService.createPaymentUrl({ ...order, _id: result.insertedId } as any, req)
+        const paymentRequest = await paymentService.createPaymentRequest({ ...order, _id: result.insertedId } as any, req)
+        paymentUrl = paymentRequest.paymentUrl
+        await paymentTransactionService.attachPaymentRequest({ ...order, _id: result.insertedId }, paymentRequest)
       } catch (error) {
         paymentUrlError = true
       }
@@ -743,7 +754,9 @@ class OrderService {
       })
     }
 
-    const paymentUrl = await paymentService.createPaymentUrl(order as any, req)
+    const paymentRequest = await paymentService.createPaymentRequest(order as any, req)
+    await paymentTransactionService.attachPaymentRequest(order, paymentRequest)
+    const paymentUrl = paymentRequest.paymentUrl
     return { paymentUrl }
   }
 
@@ -832,6 +845,10 @@ class OrderService {
       if (order.paymentMethod === PaymentMethod.COD && order.paymentStatus === 'pending') {
         updateData.paymentStatus = 'paid'
         updateData.paidAt = new Date()
+        await paymentTransactionService.markPaymentPaid({
+          order,
+          providerMessage: 'COD collected when order was delivered'
+        })
       }
 
       // Loyalty: tích điểm khi giao thành công
@@ -921,6 +938,10 @@ class OrderService {
 
     if (newStatus === 'paid') {
       updateData.paidAt = new Date()
+      await paymentTransactionService.markPaymentPaid({
+        order,
+        providerMessage: 'Payment status marked paid by order service'
+      })
       // Also confirm the order when payment is successful
       // Only update if order is still in pending/pending_payment status
       if (order.orderStatus === 'pending' || order.orderStatus === 'pending_payment') {
@@ -929,6 +950,9 @@ class OrderService {
     }
 
     if (newStatus === 'failed' && order.paymentStatus !== 'failed') {
+      await paymentTransactionService.markPaymentFailed(order, {
+        providerMessage: 'Payment status marked failed by order service'
+      })
       updateData.orderStatus = 'cancelled'
       updateData.cancelledAt = new Date()
       updateData.cancelReason = 'Thanh toán không thành công'

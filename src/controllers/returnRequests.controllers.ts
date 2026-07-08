@@ -26,13 +26,14 @@ export const createReturnRequestController = async (req: Request, res: Response)
  */
 export const getMyReturnRequestsController = async (req: Request, res: Response) => {
   const userId = new ObjectId(req.decoded_authorization?.userId)
-  const { page, limit, status } = req.query
+  const { page, limit, status, search } = req.query
 
   const result = await returnRequestService.getReturnRequests({
     page: page ? Number(page) : 1,
     limit: limit ? Number(limit) : 10,
     status: status as any,
-    userId
+    userId,
+    search: search as string | undefined
   })
 
   return res.json({
@@ -70,19 +71,14 @@ export const cancelReturnRequestController = async (req: Request, res: Response)
   return res.json(result)
 }
 
-/**
- * Update return shipping info
- * PATCH /returns/:requestId/shipping
- */
-export const updateReturnShippingController = async (req: Request, res: Response) => {
+export const getReturnTrackingController = async (req: Request, res: Response) => {
   const userId = new ObjectId(req.decoded_authorization?.userId)
   const requestId = new ObjectId(req.params.requestId)
-  const { trackingNumber, carrier } = req.body
 
-  const result = await returnRequestService.updateReturnShipping(requestId, userId, trackingNumber, carrier)
+  const result = await returnRequestService.getReturnTracking(requestId, userId)
 
   return res.json({
-    message: RETURN_REQUESTS_MESSAGES.UPDATE_REQUEST_SUCCESS,
+    message: RETURN_REQUESTS_MESSAGES.GET_RETURN_TRACKING_SUCCESS,
     result
   })
 }
@@ -94,12 +90,13 @@ export const updateReturnShippingController = async (req: Request, res: Response
  * GET /admin/returns
  */
 export const getAllReturnRequestsController = async (req: Request, res: Response) => {
-  const { page, limit, status } = req.query
+  const { page, limit, status, search } = req.query
 
   const result = await returnRequestService.getReturnRequests({
     page: page ? Number(page) : 1,
     limit: limit ? Number(limit) : 20,
-    status: status as any
+    status: status as any,
+    search: search as string | undefined
   })
 
   return res.json({
@@ -115,10 +112,26 @@ export const getAllReturnRequestsController = async (req: Request, res: Response
 export const getReturnRequestByIdAdminController = async (req: Request, res: Response) => {
   const requestId = new ObjectId(req.params.requestId)
 
-  const result = await returnRequestService.getReturnRequestById(requestId)
+  const financials = await returnRequestService.getReturnRequestFinancials(requestId)
+  const result = {
+    ...financials.request,
+    paymentTransaction: financials.paymentTransaction,
+    refundTransactions: financials.refundTransactions
+  }
 
   return res.json({
     message: RETURN_REQUESTS_MESSAGES.GET_REQUEST_SUCCESS,
+    result
+  })
+}
+
+export const getReturnTrackingAdminController = async (req: Request, res: Response) => {
+  const requestId = new ObjectId(req.params.requestId)
+
+  const result = await returnRequestService.getReturnTracking(requestId)
+
+  return res.json({
+    message: RETURN_REQUESTS_MESSAGES.GET_RETURN_TRACKING_SUCCESS,
     result
   })
 }
@@ -128,7 +141,7 @@ export const getReturnRequestByIdAdminController = async (req: Request, res: Res
  * PATCH /admin/returns/:requestId/review
  */
 export const reviewReturnRequestController = async (req: Request, res: Response) => {
-  const reviewerId = new ObjectId(req.decoded_authorization?.user_id)
+  const reviewerId = new ObjectId(req.decoded_authorization?.userId)
   const requestId = new ObjectId(req.params.requestId)
 
   const result = await returnRequestService.reviewReturnRequest(requestId, reviewerId, req.body)
@@ -140,6 +153,34 @@ export const reviewReturnRequestController = async (req: Request, res: Response)
 
   return res.json({
     message,
+    result
+  })
+}
+
+/**
+ * Arrange return pickup/shipping
+ * PATCH /admin/returns/:requestId/arrange-return
+ */
+export const arrangeReturnShippingController = async (req: Request, res: Response) => {
+  const staffId = new ObjectId(req.decoded_authorization?.userId)
+  const requestId = new ObjectId(req.params.requestId)
+
+  const result = await returnRequestService.arrangeReturnShipping(requestId, staffId, req.body)
+
+  return res.json({
+    message: RETURN_REQUESTS_MESSAGES.ARRANGE_RETURN_SUCCESS,
+    result
+  })
+}
+
+export const updateMockReturnTrackingController = async (req: Request, res: Response) => {
+  const staffId = new ObjectId(req.decoded_authorization?.userId)
+  const requestId = new ObjectId(req.params.requestId)
+
+  const result = await returnRequestService.updateMockReturnTracking(requestId, staffId, req.body)
+
+  return res.json({
+    message: RETURN_REQUESTS_MESSAGES.UPDATE_RETURN_TRACKING_SUCCESS,
     result
   })
 }
@@ -165,8 +206,9 @@ export const receiveReturnItemsController = async (req: Request, res: Response) 
  */
 export const processRefundController = async (req: Request, res: Response) => {
   const requestId = new ObjectId(req.params.requestId)
+  const processedBy = new ObjectId(req.decoded_authorization?.userId)
 
-  const result = await returnRequestService.processRefund(requestId, req.body)
+  const result = await returnRequestService.processRefund(requestId, { ...req.body, processedBy })
 
   return res.json({
     message: RETURN_REQUESTS_MESSAGES.PROCESS_REFUND_SUCCESS,

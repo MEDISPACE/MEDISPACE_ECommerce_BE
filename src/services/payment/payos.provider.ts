@@ -1,7 +1,7 @@
 const { PayOS } = require('@payos/node')
 import { config } from 'dotenv'
 import Order from '~/models/schemas/Order.schema'
-import { PaymentProvider, PaymentResult } from './payment.interface'
+import { PaymentProvider, PaymentRequestResult, PaymentResult } from './payment.interface'
 import { ORDERS_MESSAGES } from '~/constants/message'
 
 config()
@@ -22,6 +22,11 @@ export class PayOSProvider implements PaymentProvider {
   }
 
   async createPaymentUrl(order: Order, req?: any): Promise<string> {
+    const result = await this.createPaymentRequest(order, req)
+    return result.paymentUrl
+  }
+
+  async createPaymentRequest(order: Order, req?: any): Promise<PaymentRequestResult> {
     // PayOS requires a unique numeric orderCode for every payment link request.
     // Retrying payment for the same pending order must create a fresh link.
     const orderCode = this.generateOrderCode()
@@ -51,13 +56,13 @@ export class PayOSProvider implements PaymentProvider {
 
     try {
       const link = await this.payOS.createPaymentLink(paymentData)
-      return link.checkoutUrl
+      return { paymentUrl: link.checkoutUrl, providerOrderCode: orderCode, requestPayload: paymentData }
     } catch (error: any) {
       // Fallback for newer/different library versions
       if (this.payOS.paymentRequests && typeof this.payOS.paymentRequests.create === 'function') {
         try {
           const link = await this.payOS.paymentRequests.create(paymentData)
-          return link.checkoutUrl
+          return { paymentUrl: link.checkoutUrl, providerOrderCode: orderCode, requestPayload: paymentData }
         } catch (innerError) {
           throw innerError
         }
@@ -93,15 +98,19 @@ export class PayOSProvider implements PaymentProvider {
         isSuccess: webhookData.code === '00',
         orderId: '', // Empty, controller must lookup by transactionId (which holds orderNumber)
         transactionId: orderNumber, // Using this to pass orderNumber back
+        providerOrderCode: webhookData.orderCode,
+        providerResponseCode: webhookData.code,
         amount: webhookData.amount,
-        message: webhookData.desc
+        message: webhookData.desc,
+        rawPayload: webhookData
       }
     } catch (error) {
       return {
         isSuccess: false,
         orderId: '',
         amount: 0,
-        message: ORDERS_MESSAGES.INVALID_WEBHOOK_DATA
+        message: ORDERS_MESSAGES.INVALID_WEBHOOK_DATA,
+        rawPayload: body
       }
     }
   }

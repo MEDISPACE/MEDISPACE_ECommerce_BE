@@ -56,6 +56,17 @@ export interface PharmacistSnapshot {
   licenseNumber?: string
 }
 
+export type OrderReturnStatus =
+  | 'none'
+  | 'requested'
+  | 'approved'
+  | 'awaiting_return'
+  | 'received'
+  | 'refund_processing'
+  | 'completed'
+  | 'rejected'
+  | 'cancelled'
+
 export interface OrderType {
   _id?: ObjectId
   userId: ObjectId
@@ -81,6 +92,10 @@ export interface OrderType {
   notes?: string
   trackingNumber?: string
   estimatedDeliveryDate?: string
+  returnStatus?: OrderReturnStatus
+  returnRequestIds?: ObjectId[]
+  latestReturnRequestId?: ObjectId
+  returnUpdatedAt?: Date
 
   // Loyalty points
   pointsRedeemed?: number // Số điểm đã đổi
@@ -92,6 +107,8 @@ export interface OrderType {
   prescriptionId?: ObjectId
   createdBy?: ObjectId
   createdByInfo?: PharmacistSnapshot
+  assignedPharmacistId?: ObjectId
+  assignedAt?: Date
   safetyReviewConfirmed?: boolean
   safetyReviewConfirmedAt?: Date
   safetyReviewConfirmedBy?: ObjectId
@@ -129,6 +146,10 @@ export default class Order {
   notes?: string
   trackingNumber?: string
   estimatedDeliveryDate?: string
+  returnStatus: OrderReturnStatus
+  returnRequestIds: ObjectId[]
+  latestReturnRequestId?: ObjectId
+  returnUpdatedAt?: Date
 
   // Loyalty points
   pointsRedeemed?: number
@@ -140,6 +161,8 @@ export default class Order {
   prescriptionId?: ObjectId
   createdBy?: ObjectId
   createdByInfo?: PharmacistSnapshot
+  assignedPharmacistId?: ObjectId
+  assignedAt?: Date
   safetyReviewConfirmed?: boolean
   safetyReviewConfirmedAt?: Date
   safetyReviewConfirmedBy?: ObjectId
@@ -178,6 +201,10 @@ export default class Order {
     this.notes = order.notes
     this.trackingNumber = order.trackingNumber
     this.estimatedDeliveryDate = order.estimatedDeliveryDate
+    this.returnStatus = order.returnStatus || 'none'
+    this.returnRequestIds = order.returnRequestIds || []
+    this.latestReturnRequestId = order.latestReturnRequestId
+    this.returnUpdatedAt = order.returnUpdatedAt
     this.pointsRedeemed = order.pointsRedeemed || 0
     this.pointsRedeemAmount = order.pointsRedeemAmount || 0
     this.stockRestored = order.stockRestored || false
@@ -187,6 +214,8 @@ export default class Order {
     this.prescriptionId = order.prescriptionId
     this.createdBy = order.createdBy
     this.createdByInfo = order.createdByInfo
+    this.assignedPharmacistId = order.assignedPharmacistId
+    this.assignedAt = order.assignedAt
     this.safetyReviewConfirmed = order.safetyReviewConfirmed
     this.safetyReviewConfirmedAt = order.safetyReviewConfirmedAt
     this.safetyReviewConfirmedBy = order.safetyReviewConfirmedBy

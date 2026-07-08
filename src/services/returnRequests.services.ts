@@ -14,6 +14,7 @@ import { RETURN_REQUESTS_MESSAGES, ORDERS_MESSAGES } from '~/constants/message'
 import loyaltyService from './loyalty.services'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
+import paymentTransactionService from './paymentTransactions.services'
 
 // Return period in days
 const RETURN_PERIOD_OTC = 7 // 7 days for OTC products
@@ -32,6 +33,7 @@ interface CreateReturnRequestPayload {
   orderId: string
   items: {
     productId: string
+    unit: string
     quantity: number
     returnReason: ReturnReason
     reasonDetail?: string
@@ -49,6 +51,7 @@ interface GetReturnRequestsParams {
   limit?: number
   status?: ReturnStatus
   userId?: ObjectId
+  search?: string
 }
 
 interface ReviewReturnRequestPayload {
@@ -65,13 +68,117 @@ interface ReceiveReturnItemsPayload {
   conditionNotes?: string
 }
 
+interface ArrangeReturnShippingPayload {
+  carrier?: string
+  notes?: string
+}
+
+type ReturnTrackingStatus = 'arranged' | 'picked_up' | 'in_transit' | 'delivered_to_store' | 'failed' | 'cancelled'
+type OrderReturnStatus =
+  | 'requested'
+  | 'approved'
+  | 'awaiting_return'
+  | 'received'
+  | 'refund_processing'
+  | 'completed'
+  | 'rejected'
+  | 'cancelled'
+
+interface UpdateMockReturnTrackingPayload {
+  status: ReturnTrackingStatus
+  message?: string
+  location?: string
+}
+
 interface ProcessRefundPayload {
   refundedAmount: number
   refundTransactionId?: string
   refundNotes?: string
+  processedBy?: ObjectId
 }
 
 class ReturnRequestService {
+  private readonly activeReturnStatuses = [
+    ReturnStatus.PENDING,
+    ReturnStatus.REVIEWING,
+    ReturnStatus.APPROVED,
+    ReturnStatus.AWAITING_RETURN,
+    ReturnStatus.RECEIVED,
+    ReturnStatus.REFUND_PROCESSING
+  ]
+
+  private mapReturnStatusToOrderStatus(status: ReturnStatus | string): OrderReturnStatus {
+    const statusMap: Record<string, OrderReturnStatus> = {
+      [ReturnStatus.PENDING]: 'requested',
+      [ReturnStatus.REVIEWING]: 'requested',
+      [ReturnStatus.APPROVED]: 'approved',
+      [ReturnStatus.AWAITING_RETURN]: 'awaiting_return',
+      [ReturnStatus.RECEIVED]: 'received',
+      [ReturnStatus.REFUND_PROCESSING]: 'refund_processing',
+      [ReturnStatus.COMPLETED]: 'completed',
+      [ReturnStatus.REJECTED]: 'rejected',
+      [ReturnStatus.CANCELLED]: 'cancelled'
+    }
+    return statusMap[status] || 'requested'
+  }
+
+  private async updateOrderReturnStatus(orderId: ObjectId | undefined, requestId: ObjectId, status: OrderReturnStatus) {
+    if (!orderId) return
+    const now = new Date()
+    await databaseService.orders.updateOne(
+      { _id: orderId },
+      {
+        $set: {
+          returnStatus: status,
+          latestReturnRequestId: requestId,
+          returnUpdatedAt: now,
+          updatedAt: now
+        },
+        $addToSet: {
+          returnRequestIds: requestId
+        }
+      }
+    )
+  }
+
+  private async syncOrderReturnStatusAfterTerminalRequest(
+    orderId: ObjectId | undefined,
+    requestId: ObjectId,
+    terminalStatus: OrderReturnStatus
+  ) {
+    if (!orderId) return
+
+    const activeRequest = await databaseService.returnRequests.findOne({
+      orderId,
+      _id: { $ne: requestId },
+      status: { $in: this.activeReturnStatuses }
+    })
+
+    const nextStatus = activeRequest ? this.mapReturnStatusToOrderStatus(activeRequest.status) : terminalStatus
+    const latestRequestId = activeRequest?._id || requestId
+    await this.updateOrderReturnStatus(orderId, latestRequestId, nextStatus)
+  }
+
+  private getDefaultReturnCarrier() {
+    return (process.env.RETURN_SHIPPING_PROVIDER || 'mock_carrier').trim() || 'mock_carrier'
+  }
+
+  private isMockReturnCarrier(carrier?: string) {
+    return (carrier || '').trim().toLowerCase() === 'mock_carrier'
+  }
+
+  private generateMockCarrierTrackingCode(requestId: ObjectId) {
+    const random = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, '0')
+    return `MOCK-RET-${requestId.toHexString().slice(-8).toUpperCase()}-${random}`
+  }
+
+  private getMockTrackingUrl(requestId: ObjectId) {
+    const clientUrl = process.env.CLIENT_URL || process.env.FRONTEND_URLS?.split(',')[0]?.trim()
+    return clientUrl ? `${clientUrl.replace(/\/$/, '')}/account/returns/${requestId.toString()}` : undefined
+  }
+
   private calculateReturnedItemNetAmount(orderItem: any, returnQuantity: number) {
     const quantityRatio = orderItem.quantity > 0 ? returnQuantity / orderItem.quantity : 0
     const grossAmount = Math.floor((orderItem.unitPrice || 0) * returnQuantity)
@@ -107,28 +214,24 @@ class ReturnRequestService {
     )
   }
 
-  private isFullReturn(order: any, returnItems: any[]) {
-    const returnedByLine = new Map<string, number>()
-    for (const item of returnItems) {
-      returnedByLine.set(`${item.productId.toString()}::${item.unit}`, (returnedByLine.get(`${item.productId.toString()}::${item.unit}`) || 0) + item.quantity)
-    }
-
-    return (order.items || []).every((item: any) => {
-      const key = `${item.productId.toString()}::${item.unit}`
-      return (returnedByLine.get(key) || 0) >= item.quantity
-    })
-  }
-
   /**
    * Create a new return request
    */
   async createReturnRequest(userId: ObjectId, payload: CreateReturnRequestPayload) {
     const { orderId, items, reason, reasonDetail, evidence, type, refundMethod, bankInfo } = payload
+    const orderObjectId = new ObjectId(orderId)
+
+    if (type && type !== ReturnType.REFUND) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.TYPE_INVALID,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
 
     // Validate order exists and belongs to user
     // Use $or to match userId as both ObjectId and string (for backwards compatibility)
     const order = await databaseService.orders.findOne({
-      _id: new ObjectId(orderId),
+      _id: orderObjectId,
       $or: [{ userId: userId }, { userId: userId.toString() as unknown as ObjectId }]
     })
 
@@ -147,18 +250,9 @@ class ReturnRequestService {
       })
     }
 
-    // Check if return request already exists for this order
-    const existingRequest = await databaseService.returnRequests.findOne({
-      orderId: new ObjectId(orderId),
-      status: { $nin: [ReturnStatus.CANCELLED, ReturnStatus.REJECTED] }
-    })
-
-    if (existingRequest) {
-      throw new ErrorWithStatus({
-        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_EXISTS,
-        status: HTTP_STATUS.BAD_REQUEST
-      })
-    }
+    const previousReturnContext = await this.getPreviousReturnContext(orderObjectId)
+    const previouslyReturnedByLine = previousReturnContext.returnedByLine
+    const requestedByLine = new Map<string, number>()
 
     // Calculate return deadline
     const deliveredAt = order.deliveredAt || order.updatedAt || order.createdAt
@@ -171,7 +265,7 @@ class ReturnRequestService {
 
     for (const item of items) {
       // Find the item in the order
-      const orderItem = order.items.find((oi) => oi.productId.toString() === item.productId)
+      const orderItem = order.items.find((oi) => oi.productId.toString() === item.productId && oi.unit === item.unit)
 
       if (!orderItem) {
         throw new ErrorWithStatus({
@@ -181,7 +275,12 @@ class ReturnRequestService {
       }
 
       // Validate quantity
-      if (item.quantity > orderItem.quantity) {
+      const lineKey = this.getReturnLineKey(orderItem.productId, orderItem.unit)
+      const quantityAlreadyRequested = previouslyReturnedByLine.get(lineKey) || 0
+      const quantityInThisRequest = (requestedByLine.get(lineKey) || 0) + item.quantity
+      requestedByLine.set(lineKey, quantityInThisRequest)
+
+      if (quantityAlreadyRequested + quantityInThisRequest > orderItem.quantity) {
         throw new ErrorWithStatus({
           message: RETURN_REQUESTS_MESSAGES.QUANTITY_EXCEEDS_ORDERED,
           status: HTTP_STATUS.BAD_REQUEST
@@ -241,10 +340,26 @@ class ReturnRequestService {
     }
 
     // Create return request
+    const combinedReturnedByLine = new Map(previouslyReturnedByLine)
+    for (const returnItem of returnItems) {
+      const key = this.getReturnLineKey(returnItem.productId, returnItem.unit)
+      combinedReturnedByLine.set(key, (combinedReturnedByLine.get(key) || 0) + returnItem.quantity)
+    }
+
+    const isFullOrderReturn = (order.items || []).every((orderItem: any) => {
+      const key = this.getReturnLineKey(orderItem.productId, orderItem.unit)
+      return (combinedReturnedByLine.get(key) || 0) >= orderItem.quantity
+    })
+
+    if (isFullOrderReturn) {
+      const remainingPaidAmount = Math.max(0, Number(order.totalAmount || 0) - previousReturnContext.requestedAmount)
+      totalRequestedAmount = Math.max(totalRequestedAmount, remainingPaidAmount)
+    }
+
     const returnRequest = new ReturnRequest({
       _id: new ObjectId(),
       requestNumber: ReturnRequest.generateRequestNumber(),
-      orderId: new ObjectId(orderId),
+      orderId: orderObjectId,
       orderNumber: order.orderNumber,
       userId,
       items: returnItems,
@@ -259,6 +374,7 @@ class ReturnRequestService {
     })
 
     const result = await databaseService.returnRequests.insertOne(returnRequest)
+    await this.updateOrderReturnStatus(orderObjectId, result.insertedId, 'requested')
 
     // Notify all admins about new return request (fire-and-forget)
     let io
@@ -278,12 +394,16 @@ class ReturnRequestService {
    * Get return requests with pagination
    */
   async getReturnRequests(params: GetReturnRequestsParams) {
-    const { page = 1, limit = 10, status, userId } = params
+    const { page = 1, limit = 10, status, userId, search } = params
     const skip = (page - 1) * limit
 
     const query: any = {}
     if (status) query.status = status
     if (userId) query.userId = userId
+    if (search?.trim()) {
+      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      query.$or = [{ requestNumber: searchRegex }, { orderNumber: searchRegex }]
+    }
 
     const [requests, total] = await Promise.all([
       databaseService.returnRequests
@@ -366,15 +486,25 @@ class ReturnRequestService {
       })
     }
 
-    await databaseService.returnRequests.updateOne(
-      { _id: requestId },
+    const updatedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, status: { $in: [ReturnStatus.PENDING, ReturnStatus.REVIEWING] } },
       {
         $set: {
           status: ReturnStatus.CANCELLED,
           updatedAt: new Date()
         }
-      }
+      },
+      { returnDocument: 'after' }
     )
+
+    if (!updatedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    await this.syncOrderReturnStatusAfterTerminalRequest(request.orderId, requestId, 'cancelled')
 
     return { message: RETURN_REQUESTS_MESSAGES.CANCEL_REQUEST_SUCCESS }
   }
@@ -407,18 +537,46 @@ class ReturnRequestService {
     }
 
     if (payload.status === 'approved') {
+      const approvedAmount = payload.approvedAmount ?? request.requestedAmount
+      if (!Number.isFinite(approvedAmount) || approvedAmount <= 0 || approvedAmount > request.requestedAmount) {
+        throw new ErrorWithStatus({
+          message: RETURN_REQUESTS_MESSAGES.AMOUNT_INVALID,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
       updateData.status = ReturnStatus.APPROVED
-      updateData.approvedAmount = payload.approvedAmount || request.requestedAmount
+      updateData.approvedAmount = approvedAmount
       // Set return deadline (7 days from now)
       updateData.returnDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     } else {
+      if (!payload.rejectionReason?.trim()) {
+        throw new ErrorWithStatus({
+          message: RETURN_REQUESTS_MESSAGES.REJECTION_REASON_REQUIRED,
+          status: HTTP_STATUS.BAD_REQUEST
+        })
+      }
       updateData.status = ReturnStatus.REJECTED
-      updateData.rejectionReason = payload.rejectionReason
+      updateData.rejectionReason = payload.rejectionReason.trim()
     }
 
-    await databaseService.returnRequests.updateOne({ _id: requestId }, { $set: updateData })
+    const updatedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, status: { $in: [ReturnStatus.PENDING, ReturnStatus.REVIEWING] } },
+      { $set: updateData },
+      { returnDocument: 'after' }
+    )
 
-    const updatedRequest = await databaseService.returnRequests.findOne({ _id: requestId })
+    if (!updatedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (updatedRequest.status === ReturnStatus.REJECTED) {
+      await this.syncOrderReturnStatusAfterTerminalRequest(updatedRequest.orderId, requestId, 'rejected')
+    } else {
+      await this.updateOrderReturnStatus(updatedRequest.orderId, requestId, 'approved')
+    }
 
     // Notify customer about return request status (fire-and-forget)
     if (request.userId) {
@@ -437,10 +595,25 @@ class ReturnRequestService {
   }
 
   /**
-   * Update shipping info when customer ships return items
+   * Arrange return pickup/shipping (by pharmacist/admin).
+   * Tracking number is generated by MEDISPACE, not entered by customer or staff.
    */
-  async updateReturnShipping(requestId: ObjectId, userId: ObjectId, trackingNumber: string, carrier?: string) {
-    const request = await this.getReturnRequestById(requestId, userId)
+  async arrangeReturnShipping(requestId: ObjectId, staffId: ObjectId, payload: ArrangeReturnShippingPayload) {
+    const request = await databaseService.returnRequests.findOne({ _id: requestId })
+
+    if ((payload as any).trackingNumber !== undefined) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.TRACKING_NUMBER_NOT_ALLOWED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (!request) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
 
     if (request.status !== ReturnStatus.APPROVED) {
       throw new ErrorWithStatus({
@@ -449,22 +622,202 @@ class ReturnRequestService {
       })
     }
 
-    await databaseService.returnRequests.updateOne(
-      { _id: requestId },
+    if (this.isReturnDeadlinePassed(request.returnDeadline)) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.RETURN_DEADLINE_PASSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const trackingNumber = ReturnRequest.generateReturnTrackingNumber()
+    const carrier = payload.carrier?.trim() || this.getDefaultReturnCarrier()
+    const isMockCarrier = this.isMockReturnCarrier(carrier)
+    const now = new Date()
+
+    const updatedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, status: ReturnStatus.APPROVED },
       {
         $set: {
           status: ReturnStatus.AWAITING_RETURN,
           returnShippingInfo: {
             trackingNumber,
             carrier,
-            shippedAt: new Date()
+            ...(isMockCarrier
+              ? {
+                  carrierTrackingCode: this.generateMockCarrierTrackingCode(requestId),
+                  trackingUrl: this.getMockTrackingUrl(requestId)
+                }
+              : {}),
+            trackingStatus: 'arranged',
+            trackingEvents: [
+              {
+                status: 'arranged',
+                message: 'MEDISPACE đã sắp xếp thu hồi hàng trả',
+                occurredAt: now
+              }
+            ],
+            shippedAt: now,
+            arrangedAt: now,
+            arrangedBy: staffId,
+            pickupNotes: payload.notes?.trim()
           },
-          updatedAt: new Date()
+          updatedAt: now
         }
-      }
+      },
+      { returnDocument: 'after' }
     )
 
-    return await databaseService.returnRequests.findOne({ _id: requestId })
+    if (!updatedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    await this.updateOrderReturnStatus(updatedRequest.orderId, requestId, 'awaiting_return')
+
+    return updatedRequest
+  }
+
+  async getReturnTracking(requestId: ObjectId, userId?: ObjectId) {
+    const request = await this.getReturnRequestById(requestId, userId)
+    return {
+      requestId: request._id,
+      requestNumber: request.requestNumber,
+      orderId: request.orderId,
+      orderNumber: request.orderNumber,
+      status: request.status,
+      returnShippingInfo: request.returnShippingInfo || null
+    }
+  }
+
+  async getReturnRequestFinancials(requestId: ObjectId) {
+    const request = await this.getReturnRequestById(requestId)
+    const financials = await paymentTransactionService.getTransactionsForReturnRequest(request)
+    return {
+      request,
+      ...financials
+    }
+  }
+
+  async updateMockReturnTracking(requestId: ObjectId, staffId: ObjectId, payload: UpdateMockReturnTrackingPayload) {
+    const request = await databaseService.returnRequests.findOne({ _id: requestId })
+
+    if (!request) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    if (!request.returnShippingInfo?.trackingNumber) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.RETURN_SHIPMENT_NOT_ARRANGED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (!this.isMockReturnCarrier(request.returnShippingInfo.carrier)) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.TRACKING_PROVIDER_NOT_MOCK,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const now = new Date()
+    const updatedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, 'returnShippingInfo.carrier': 'mock_carrier' },
+      {
+        $set: {
+          'returnShippingInfo.trackingStatus': payload.status,
+          updatedAt: now
+        },
+        $push: {
+          'returnShippingInfo.trackingEvents': {
+            status: payload.status,
+            message: payload.message?.trim() || this.getMockTrackingMessage(payload.status),
+            location: payload.location?.trim(),
+            occurredAt: now,
+            updatedBy: staffId
+          }
+        }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!updatedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    return updatedRequest
+  }
+
+  private getMockTrackingMessage(status: ReturnTrackingStatus) {
+    const messages: Record<ReturnTrackingStatus, string> = {
+      arranged: 'MEDISPACE đã sắp xếp thu hồi hàng trả',
+      picked_up: 'Đã lấy hàng trả từ khách',
+      in_transit: 'Hàng trả đang vận chuyển về MEDISPACE',
+      delivered_to_store: 'Hàng trả đã về MEDISPACE',
+      failed: 'Thu hồi hàng trả chưa thành công, cần xử lý lại',
+      cancelled: 'Đã hủy lịch thu hồi hàng trả'
+    }
+    return messages[status]
+  }
+
+  private getReturnLineKey(productId: ObjectId | string, unit: string) {
+    return `${productId.toString()}::${unit}`
+  }
+
+  private buildReturnedQuantities(requests: any[]) {
+    const returnedByLine = new Map<string, number>()
+    for (const request of requests) {
+      for (const item of request.items || []) {
+        const key = this.getReturnLineKey(item.productId, item.unit)
+        returnedByLine.set(key, (returnedByLine.get(key) || 0) + item.quantity)
+      }
+    }
+    return returnedByLine
+  }
+
+  private async getPreviousReturnContext(orderId: ObjectId, statuses?: ReturnStatus[]) {
+    const requests = await databaseService.returnRequests
+      .find({
+        orderId,
+        status: statuses?.length
+          ? { $in: statuses }
+          : { $nin: [ReturnStatus.CANCELLED, ReturnStatus.REJECTED] }
+      })
+      .toArray()
+
+    return {
+      requests,
+      returnedByLine: this.buildReturnedQuantities(requests),
+      requestedAmount: requests.reduce((sum, request) => sum + Number(request.requestedAmount || 0), 0)
+    }
+  }
+
+  private async getPreviouslyReturnedQuantities(orderId: ObjectId, statuses?: ReturnStatus[]) {
+    const context = await this.getPreviousReturnContext(orderId, statuses)
+    return context.returnedByLine
+  }
+
+  private async isOrderFullyReturned(order: any) {
+    const returnedByLine = await this.getPreviouslyReturnedQuantities(order._id, [
+      ReturnStatus.REFUND_PROCESSING,
+      ReturnStatus.COMPLETED
+    ])
+
+    return (order.items || []).every((item: any) => {
+      const key = this.getReturnLineKey(item.productId, item.unit)
+      return (returnedByLine.get(key) || 0) >= item.quantity
+    })
+  }
+
+  private isReturnDeadlinePassed(returnDeadline?: Date) {
+    return !!returnDeadline && new Date(returnDeadline).getTime() < Date.now()
   }
 
   /**
@@ -480,25 +833,51 @@ class ReturnRequestService {
       })
     }
 
-    if (![ReturnStatus.APPROVED, ReturnStatus.AWAITING_RETURN].includes(request.status as ReturnStatus)) {
+    if (request.status !== ReturnStatus.AWAITING_RETURN) {
       throw new ErrorWithStatus({
         message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
         status: HTTP_STATUS.BAD_REQUEST
       })
     }
 
-    await databaseService.returnRequests.updateOne(
-      { _id: requestId },
+    if (!request.returnShippingInfo?.trackingNumber) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.RETURN_SHIPMENT_NOT_ARRANGED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const receivedAt = new Date()
+    const updatedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, status: ReturnStatus.AWAITING_RETURN },
       {
         $set: {
           status: ReturnStatus.RECEIVED,
-          'returnShippingInfo.receivedAt': new Date(),
+          'returnShippingInfo.receivedAt': receivedAt,
+          'returnShippingInfo.trackingStatus': 'delivered_to_store',
           'returnShippingInfo.condition': payload.condition,
           'returnShippingInfo.conditionNotes': payload.conditionNotes,
-          updatedAt: new Date()
+          updatedAt: receivedAt
+        },
+        $push: {
+          'returnShippingInfo.trackingEvents': {
+            status: 'delivered_to_store',
+            message: 'MEDISPACE đã nhận hàng trả',
+            occurredAt: receivedAt
+          }
         }
-      }
+      },
+      { returnDocument: 'after' }
     )
+
+    if (!updatedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    await this.updateOrderReturnStatus(updatedRequest.orderId, requestId, 'received')
 
     // Restore stock if items are in good condition
     if (payload.condition === 'good') {
@@ -518,7 +897,7 @@ class ReturnRequestService {
       }
     }
 
-    return await databaseService.returnRequests.findOne({ _id: requestId })
+    return updatedRequest
   }
 
   /**
@@ -534,12 +913,107 @@ class ReturnRequestService {
       })
     }
 
+    if (request.status !== ReturnStatus.RECEIVED) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const approvedAmount = Number(request.approvedAmount || 0)
+    const refundedAmount = Number(payload.refundedAmount)
+    if (!Number.isFinite(approvedAmount) || approvedAmount <= 0 || !Number.isFinite(refundedAmount) || refundedAmount <= 0 || refundedAmount > approvedAmount) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.AMOUNT_INVALID,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const order = await databaseService.orders.findOne({ _id: request.orderId })
+    if (!order) {
+      throw new ErrorWithStatus({
+        message: ORDERS_MESSAGES.ORDER_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
+    const existingRefund = await paymentTransactionService.findRefundByReturnRequest(requestId)
+    if (existingRefund) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REFUND_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const paymentTransaction = await paymentTransactionService.ensureLegacyPaidTransaction(order)
+    if (!paymentTransaction) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.AMOUNT_INVALID,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const refundedBefore = await paymentTransactionService.getSucceededRefundTotal(order._id)
+    if (refundedBefore + refundedAmount > Number(paymentTransaction.amount || order.totalAmount || 0)) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.AMOUNT_INVALID,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const claimedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, status: ReturnStatus.RECEIVED },
+      {
+        $set: {
+          status: ReturnStatus.REFUND_PROCESSING,
+          refundedAmount,
+          refundTransactionId: payload.refundTransactionId,
+          refundNotes: payload.refundNotes,
+          refundedAt: new Date(),
+          updatedAt: new Date()
+        }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!claimedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    const refundTransaction = await paymentTransactionService.createSucceededRefund({
+      request,
+      order,
+      paymentTransaction,
+      amount: refundedAmount,
+      refundMethod: request.refundMethod || 'original',
+      providerTransactionId: payload.refundTransactionId,
+      adminNote: payload.refundNotes,
+      processedBy: payload.processedBy,
+      requestPayload: {
+        refundTransactionId: payload.refundTransactionId,
+        refundNotes: payload.refundNotes
+      }
+    })
+
+    await databaseService.returnRequests.updateOne(
+      { _id: requestId },
+      {
+        $set: {
+          refundLedgerId: refundTransaction?._id,
+          refundTransactionId: payload.refundTransactionId || refundTransaction?._id?.toString(),
+          updatedAt: new Date()
+        }
+      }
+    )
+
         // Loyalty: thu hồi điểm khi hoàn trả
         try {
-            const order = await databaseService.orders.findOne({ _id: request.orderId })
             if (order) {
                 const returnedAmounts = this.calculateReturnedOrderAmounts(order, request.items)
-                const fullReturn = this.isFullReturn(order, request.items)
+                const fullReturn = await this.isOrderFullyReturned(order)
 
                 await loyaltyService.revokePointsForReturn(
                     request.userId,
@@ -559,28 +1033,16 @@ class ReturnRequestService {
             console.error('Loyalty revoke points error:', err)
         }
 
-    await databaseService.returnRequests.updateOne(
-      { _id: requestId },
-      {
-        $set: {
-          status: ReturnStatus.REFUND_PROCESSING,
-          refundedAmount: payload.refundedAmount,
-          refundTransactionId: payload.refundTransactionId,
-          refundNotes: payload.refundNotes,
-          refundedAt: new Date(),
-          updatedAt: new Date()
-        }
-      }
-    )
-
     // Update order payment status
-    const order = await databaseService.orders.findOne({ _id: request.orderId })
-    const fullReturn = order ? this.isFullReturn(order, request.items) : false
+    const fullReturn = order ? await this.isOrderFullyReturned(order) : false
     await databaseService.orders.updateOne(
       { _id: request.orderId },
       {
         $set: {
           paymentStatus: fullReturn ? 'refunded' : 'partially_refunded',
+          returnStatus: 'refund_processing',
+          latestReturnRequestId: requestId,
+          returnUpdatedAt: new Date(),
           ...(fullReturn ? { orderStatus: 'returned' } : {}),
           updatedAt: new Date()
         }
@@ -622,30 +1084,53 @@ class ReturnRequestService {
       })
     }
 
-    await databaseService.returnRequests.updateOne(
-      { _id: requestId },
+    const updatedRequest = await databaseService.returnRequests.findOneAndUpdate(
+      { _id: requestId, status: ReturnStatus.REFUND_PROCESSING },
       {
         $set: {
           status: ReturnStatus.COMPLETED,
           updatedAt: new Date()
         }
-      }
+      },
+      { returnDocument: 'after' }
     )
 
-    return await databaseService.returnRequests.findOne({ _id: requestId })
+    if (!updatedRequest) {
+      throw new ErrorWithStatus({
+        message: RETURN_REQUESTS_MESSAGES.REQUEST_ALREADY_PROCESSED,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    await this.syncOrderReturnStatusAfterTerminalRequest(updatedRequest.orderId, requestId, 'completed')
+
+    return updatedRequest
   }
 
   /**
    * Get return request statistics
    */
   async getReturnRequestStats() {
-    const [total, pending, reviewing, approved, rejected, received, completed, totalRefunded] = await Promise.all([
+    const [
+      total,
+      pending,
+      reviewing,
+      approved,
+      awaitingReturn,
+      rejected,
+      received,
+      refundProcessing,
+      completed,
+      totalRefunded
+    ] = await Promise.all([
       databaseService.returnRequests.countDocuments({}),
       databaseService.returnRequests.countDocuments({ status: ReturnStatus.PENDING }),
       databaseService.returnRequests.countDocuments({ status: ReturnStatus.REVIEWING }),
       databaseService.returnRequests.countDocuments({ status: ReturnStatus.APPROVED }),
+      databaseService.returnRequests.countDocuments({ status: ReturnStatus.AWAITING_RETURN }),
       databaseService.returnRequests.countDocuments({ status: ReturnStatus.REJECTED }),
       databaseService.returnRequests.countDocuments({ status: ReturnStatus.RECEIVED }),
+      databaseService.returnRequests.countDocuments({ status: ReturnStatus.REFUND_PROCESSING }),
       databaseService.returnRequests.countDocuments({ status: ReturnStatus.COMPLETED }),
       databaseService.returnRequests
         .aggregate([
@@ -660,8 +1145,10 @@ class ReturnRequestService {
       pending,
       reviewing,
       approved,
+      awaitingReturn,
       rejected,
       received,
+      refundProcessing,
       completed,
       totalRefunded: totalRefunded[0]?.total || 0
     }
