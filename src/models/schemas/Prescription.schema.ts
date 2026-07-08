@@ -8,12 +8,32 @@ export interface PrescriptionMedication {
   unit?: string
   instructions: string
   matchedName?: string
+  slug?: string
   image?: string | null
+  price?: number | null
+  stockQuantity?: number
+  requiresPrescription?: boolean
   activeIngredient?: string | null
   confidence?: string
   needsReview?: boolean
   source?: string
   reviewReason?: string
+  equivalentProducts?: PrescriptionMedicationProduct[]
+}
+
+export interface PrescriptionMedicationProduct {
+  productId: string
+  name: string
+  slug: string
+  image?: string | null
+  price?: number | null
+  unit?: string
+  stockQuantity?: number
+  requiresPrescription?: boolean
+  activeIngredients?: string
+  strength?: string
+  dosageForm?: string
+  reason?: string
 }
 
 export interface PharmacistSnapshot {

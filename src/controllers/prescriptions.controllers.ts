@@ -273,6 +273,143 @@ const scanSingleImage = async (imageUrl: string, selectedMode: string, pageIndex
   }
 }
 
+const getDefaultPriceVariant = (product: any) =>
+  product?.priceVariants?.find((variant: any) => variant?.isDefault) || product?.priceVariants?.[0]
+
+const normalizeMedicationTerm = (value?: string | null) =>
+  String(value || '')
+    .replace(/\d+(\.\d+)?\s*(mg|g|ml|mcg|iu|%)\b/gi, ' ')
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .trim()
+
+const getPrimaryIngredient = (value?: string | null) =>
+  String(value || '')
+    .split(/[,+/;|]/)
+    .map((part) => part.trim())
+    .find((part) => part.length >= 3) || ''
+
+const toMedicationProduct = (product: any, reason?: string) => {
+  const defaultVariant = getDefaultPriceVariant(product)
+  const images = Array.isArray(product?.images) ? product.images : []
+  return {
+    productId: product?._id?.toString?.() || String(product?._id || ''),
+    name: product?.name || '',
+    slug: product?.slug || '',
+    image: product?.featuredImage || (images.length > 0 ? images[0] : null),
+    price: defaultVariant?.salePrice ?? defaultVariant?.price ?? null,
+    unit: defaultVariant?.unit,
+    stockQuantity: product?.stockQuantity || 0,
+    requiresPrescription: Boolean(product?.requiresPrescription),
+    activeIngredients: product?.details?.activeIngredients || product?.activeIngredients || '',
+    strength: product?.details?.strength || product?.strength || '',
+    dosageForm: product?.details?.dosageForm || product?.dosageForm || '',
+    reason
+  }
+}
+
+const findProductsWithDetails = async (filter: Record<string, unknown>, limit: number) => {
+  return databaseService.products
+    .aggregate([
+      {
+        $lookup: {
+          from: 'productDetails',
+          localField: '_id',
+          foreignField: 'productId',
+          as: 'details'
+        }
+      },
+      { $addFields: { details: { $arrayElemAt: ['$details', 0] } } },
+      { $match: filter },
+      { $sort: { requiresPrescription: 1, stockQuantity: -1, rating: -1, reviewCount: -1 } },
+      { $limit: limit }
+    ])
+    .toArray()
+}
+
+const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4) => {
+  const excludeIds = matchedProduct?._id ? [matchedProduct._id] : []
+  const matchedIngredient = matchedProduct?.details?.activeIngredients || matchedProduct?.activeIngredients
+  const ingredientTerm = getPrimaryIngredient(matchedIngredient || med.activeIngredient)
+  const safeIngredient = normalizeMedicationTerm(ingredientTerm)
+  const candidates: any[] = []
+  const seen = new Set(excludeIds.map((id) => id.toString()))
+
+  const pushUnique = (products: any[], reason: string) => {
+    for (const product of products) {
+      const id = product?._id?.toString?.()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      candidates.push({ product, reason })
+      if (candidates.length >= limit) break
+    }
+  }
+
+  if (safeIngredient.length >= 3) {
+    pushUnique(
+      await findProductsWithDetails(
+        {
+          _id: { $nin: excludeIds },
+          isActive: true,
+          stockQuantity: { $gt: 0 },
+          $or: [
+            { 'details.activeIngredients': { $regex: safeIngredient, $options: 'i' } },
+            { name: { $regex: safeIngredient, $options: 'i' } }
+          ]
+        },
+        limit
+      ),
+      'Cung hoat chat'
+    )
+  }
+
+  if (candidates.length < limit && matchedProduct?.categoryId) {
+    pushUnique(
+      await findProductsWithDetails(
+        {
+          _id: { $nin: [...seen].filter(ObjectId.isValid).map((id) => new ObjectId(id)) },
+          isActive: true,
+          stockQuantity: { $gt: 0 },
+          categoryId: matchedProduct.categoryId,
+          requiresPrescription: matchedProduct.requiresPrescription
+        },
+        limit - candidates.length
+      ),
+      'Cung nhom san pham'
+    )
+  }
+
+  const productNameTerm = normalizeMedicationTerm(med.productName)
+  if (candidates.length < limit && productNameTerm.length >= 3) {
+    pushUnique(
+      await findProductsWithDetails(
+        {
+          _id: { $nin: [...seen].filter(ObjectId.isValid).map((id) => new ObjectId(id)) },
+          isActive: true,
+          stockQuantity: { $gt: 0 },
+          name: { $regex: productNameTerm, $options: 'i' }
+        },
+        limit - candidates.length
+      ),
+      'Ten gan dung'
+    )
+  }
+
+  return candidates.map(({ product, reason }) => toMedicationProduct(product, reason))
+}
+
+const findMatchedProduct = async (productName: string) => {
+  const searchPattern = normalizeMedicationTerm(productName)
+  if (searchPattern.length < 2) return null
+  const products = await findProductsWithDetails(
+    {
+      name: { $regex: new RegExp(searchPattern, 'i') },
+      isActive: true
+    },
+    1
+  )
+  return products[0] || null
+}
+
 const firstNonEmpty = (values: unknown[]) => values.find((value) => value !== undefined && value !== null && value !== '')
 
 const mergeOcrPages = (pages: any[]) => {
@@ -404,25 +541,32 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
       const enrichedMedications = await Promise.all(
         medicationContainer.medications.map(async (med: any) => {
           if (!med.productName) return med
-          if (med.needsReview || med.confidence === 'low') return med
 
           try {
-            // Create a regex to match the product name
-            // Escape special characters and create a case-insensitive, partial match regex
-            const searchPattern = med.productName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            const product = await databaseService.products.findOne({
-              name: { $regex: new RegExp(searchPattern, 'i') },
-              isActive: true
-            })
+            const shouldTrustDirectMatch = !med.needsReview && med.confidence !== 'low'
+            const product = shouldTrustDirectMatch ? await findMatchedProduct(med.productName) : null
+            const equivalentProducts = await findEquivalentProducts(med, product || undefined)
 
             if (product) {
-              const productImages = Array.isArray((product as any).images) ? (product as any).images : []
+              const mappedProduct = toMedicationProduct(product)
               return {
                 ...med,
-                productId: product._id.toString(),
-                matchedName: product.name,
-                image: product.featuredImage || (productImages.length > 0 ? productImages[0] : null)
+                productId: mappedProduct.productId,
+                matchedName: mappedProduct.name,
+                slug: mappedProduct.slug,
+                image: mappedProduct.image,
+                price: mappedProduct.price,
+                unit: med.unit || mappedProduct.unit,
+                stockQuantity: mappedProduct.stockQuantity,
+                requiresPrescription: mappedProduct.requiresPrescription,
+                activeIngredient: med.activeIngredient || mappedProduct.activeIngredients || null,
+                equivalentProducts
               }
+            }
+
+            return {
+              ...med,
+              equivalentProducts
             }
           } catch (e) {
             console.error(`[OCR Map Product] Error mapping ${med.productName}:`, e)
