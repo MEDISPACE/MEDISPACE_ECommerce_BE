@@ -48,6 +48,38 @@ class PrescriptionsService {
     return `PRE-${timestamp}-${randomNum}`
   }
 
+  private parsePrescriptionDate(value?: string) {
+    if (!value) return new Date()
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+      throw new ErrorWithStatus({
+        message: PRESCRIPTIONS_MESSAGES.INVALID_PRESCRIPTION_DATE,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+    return date
+  }
+
+  private normalizeMedicationQuantity(value: unknown) {
+    const quantity = Number(value)
+    return Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+  }
+
+  private normalizeMedications(medications: unknown) {
+    if (!Array.isArray(medications)) return []
+    return medications.map((medication: any) => ({
+      ...medication,
+      productName: typeof medication.productName === 'string' ? medication.productName.trim() : '',
+      dosage: typeof medication.dosage === 'string' ? medication.dosage.trim() : '',
+      instructions: typeof medication.instructions === 'string' ? medication.instructions.trim() : '',
+      quantity: this.normalizeMedicationQuantity(medication.quantity),
+      productId:
+        medication.productId && ObjectId.isValid(medication.productId)
+          ? new ObjectId(medication.productId)
+          : undefined
+    }))
+  }
+
   // Upload prescription
   async uploadPrescription(customerId: ObjectId, body: UploadPrescriptionReqBody) {
     const prescriptionNumber = this.generatePrescriptionNumber()
@@ -62,17 +94,11 @@ class PrescriptionsService {
       phoneNumber: body.phoneNumber,
       diagnosis: body.diagnosis,
       specialNotes: body.specialNotes,
-      doctorName: body.doctorName,
-      hospitalName: body.hospitalName,
-      prescriptionDate: new Date(body.prescriptionDate),
-      images: body.images || [],
-      medications: body.medications.map((medication) => ({
-        ...medication,
-        productId:
-          medication.productId && ObjectId.isValid(medication.productId)
-            ? new ObjectId(medication.productId)
-            : undefined
-      })),
+      doctorName: body.doctorName || '',
+      hospitalName: body.hospitalName || '',
+      prescriptionDate: this.parsePrescriptionDate(body.prescriptionDate),
+      images: Array.isArray(body.images) ? body.images.filter((image) => typeof image === 'string' && image.trim()).map((image) => image.trim()) : [],
+      medications: this.normalizeMedications(body.medications),
       status: 'pending', // lowercase for consistency
       verifiedBy: undefined,
       verifiedAt: undefined,
@@ -189,6 +215,13 @@ class PrescriptionsService {
 
   // Get prescription by ID with user info populated
   async getPrescriptionById(prescriptionId: string) {
+    if (!ObjectId.isValid(prescriptionId)) {
+      throw new ErrorWithStatus({
+        message: PRESCRIPTIONS_MESSAGES.PRESCRIPTION_NOT_FOUND,
+        status: HTTP_STATUS.NOT_FOUND
+      })
+    }
+
     const prescriptions = await databaseService.prescriptions
       .aggregate([
         {
@@ -326,29 +359,10 @@ class PrescriptionsService {
         if (value !== undefined) updateData[field] = String(value).trim()
       }
 
-      if (corrections.prescriptionDate) {
-        const correctedDate = new Date(corrections.prescriptionDate)
-        if (Number.isNaN(correctedDate.getTime())) {
-          throw new ErrorWithStatus({ message: 'Invalid corrected prescription date', status: HTTP_STATUS.BAD_REQUEST })
-        }
-        updateData.prescriptionDate = correctedDate
-      }
+      if (corrections.prescriptionDate) updateData.prescriptionDate = this.parsePrescriptionDate(corrections.prescriptionDate)
 
       if (corrections.medications) {
-        if (!Array.isArray(corrections.medications) || corrections.medications.length === 0) {
-          throw new ErrorWithStatus({ message: 'Corrected medications must contain at least one item', status: HTTP_STATUS.BAD_REQUEST })
-        }
-        updateData.medications = corrections.medications.map((medication) => ({
-          ...medication,
-          productName: medication.productName?.trim(),
-          dosage: medication.dosage?.trim(),
-          instructions: medication.instructions?.trim(),
-          quantity: Number(medication.quantity) || 1,
-          productId:
-            medication.productId && ObjectId.isValid(medication.productId)
-              ? new ObjectId(medication.productId)
-              : undefined
-        }))
+        updateData.medications = this.normalizeMedications(corrections.medications)
       }
 
       updateData.correctedBy = pharmacistId

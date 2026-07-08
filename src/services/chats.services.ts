@@ -536,7 +536,9 @@ class ChatsService {
   // Get available pharmacist (first pharmacist with role = 1)
   async getAvailablePharmacist() {
     const pharmacist = await databaseService.users.findOne({
-      role: 1 // Pharmacist role
+      role: 1,
+      lisenseNumber: { $exists: true, $ne: '' },
+      isOnline: true
     })
 
     if (!pharmacist) {
@@ -563,8 +565,10 @@ class ChatsService {
       return { pharmacistId: currentConversation.pharmacistId as ObjectId }
     }
 
-    // Find all online pharmacists (role = 1, isOnline = true)
-    const onlinePharmacists = await databaseService.users.find({ role: 1, isOnline: true }).toArray()
+    // Find all licensed online pharmacists.
+    const onlinePharmacists = await databaseService.users
+      .find({ role: 1, isOnline: true, lisenseNumber: { $exists: true, $ne: '' } })
+      .toArray()
 
     if (onlinePharmacists.length === 0) {
       return { pharmacistId: null }
@@ -602,6 +606,14 @@ class ChatsService {
 
   // Manual assign: assign specific pharmacist to conversation
   async assignConversationToPharmacist(conversationId: string, pharmacistId: string) {
+    const pharmacist = await databaseService.users.findOne({
+      _id: new ObjectId(pharmacistId),
+      role: 1,
+      isOnline: true,
+      lisenseNumber: { $exists: true, $ne: '' }
+    })
+    if (!pharmacist) throw new ErrorWithStatus({ message: 'Pharmacist is not available', status: HTTP_STATUS.FORBIDDEN })
+
     const conv = await databaseService.conversations.findOne({ _id: new ObjectId(conversationId) })
     if (!conv) throw new Error('Conversation not found')
     if (conv.status === 'closed') throw new Error('Không thể nhận cuộc hội thoại đã đóng')
@@ -862,7 +874,8 @@ class ChatsService {
     // Verify pharmacist tồn tại và là dược sĩ
     const pharmacist = await databaseService.users.findOne({
       _id: new ObjectId(targetPharmacistId),
-      role: 1
+      role: 1,
+      lisenseNumber: { $exists: true, $ne: '' }
     })
     if (!pharmacist) throw new Error('Pharmacist not found')
 

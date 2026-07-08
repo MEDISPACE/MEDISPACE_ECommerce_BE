@@ -694,6 +694,24 @@ class AdminService {
           }
         },
         { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'assignedPharmacistId',
+            foreignField: '_id',
+            as: 'assignedPharmacist'
+          }
+        },
+        { $unwind: { path: '$assignedPharmacist', preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'createdBy',
+            foreignField: '_id',
+            as: 'createdByPharmacist'
+          }
+        },
+        { $unwind: { path: '$createdByPharmacist', preserveNullAndEmptyArrays: true } },
         { $sort: { createdAt: -1 } },
         { $skip: skip },
         { $limit: limit },
@@ -709,11 +727,31 @@ class AdminService {
             orderStatus: 1,
             totalAmount: 1,
             shippingFee: 1,
+            assignedPharmacistId: 1,
+            assignedAt: 1,
+            createdBy: 1,
+            createdByInfo: 1,
             createdAt: 1,
             updatedAt: 1,
             'customer.name': 1,
             'customer.email': 1,
-            'customer.phone_number': 1
+            'customer.phone_number': 1,
+            assignedPharmacist: {
+              _id: '$assignedPharmacist._id',
+              firstName: '$assignedPharmacist.firstName',
+              lastName: '$assignedPharmacist.lastName',
+              email: '$assignedPharmacist.email',
+              phoneNumber: '$assignedPharmacist.phoneNumber',
+              lisenseNumber: '$assignedPharmacist.lisenseNumber'
+            },
+            createdByPharmacist: {
+              _id: '$createdByPharmacist._id',
+              firstName: '$createdByPharmacist.firstName',
+              lastName: '$createdByPharmacist.lastName',
+              email: '$createdByPharmacist.email',
+              phoneNumber: '$createdByPharmacist.phoneNumber',
+              lisenseNumber: '$createdByPharmacist.lisenseNumber'
+            }
           }
         }
       ])

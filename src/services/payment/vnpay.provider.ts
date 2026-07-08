@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import qs from 'qs'
 import { config } from 'dotenv'
 import Order from '~/models/schemas/Order.schema'
-import { PaymentProvider, PaymentResult } from './payment.interface'
+import { PaymentProvider, PaymentRequestResult, PaymentResult } from './payment.interface'
 
 config()
 
@@ -83,6 +83,20 @@ export class VNPayProvider implements PaymentProvider {
     return vnpUrl
   }
 
+  async createPaymentRequest(order: Order, req?: any): Promise<PaymentRequestResult> {
+    const paymentUrl = await this.createPaymentUrl(order, req)
+    return {
+      paymentUrl,
+      providerOrderCode: (order._id as any).toString(),
+      requestPayload: {
+        vnp_TxnRef: (order._id as any).toString(),
+        orderNumber: order.orderNumber,
+        amount: order.totalAmount,
+        provider: 'vnpay'
+      }
+    }
+  }
+
   async verifyReturn(params: any): Promise<PaymentResult> {
     this.assertConfigured()
 
@@ -106,14 +120,20 @@ export class VNPayProvider implements PaymentProvider {
         orderId: params['vnp_TxnRef'],
         amount: Number(params['vnp_Amount']) / 100,
         message: isSuccess ? 'Success' : 'Failed',
-        transactionId: params['vnp_TransactionNo']
+        transactionId: params['vnp_TransactionNo'],
+        providerOrderCode: params['vnp_TxnRef'],
+        providerResponseCode: params['vnp_ResponseCode'],
+        rawPayload: params
       }
     } else {
       return {
         isSuccess: false,
         orderId: params['vnp_TxnRef'],
         amount: 0,
-        message: 'Invalid Signature'
+        message: 'Invalid Signature',
+        providerOrderCode: params['vnp_TxnRef'],
+        providerResponseCode: params['vnp_ResponseCode'],
+        rawPayload: params
       }
     }
   }

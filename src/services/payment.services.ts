@@ -31,6 +31,14 @@ class PaymentService {
     return provider.createPaymentUrl(order, req)
   }
 
+  async createPaymentRequest(order: Order, req?: any) {
+    const provider = this.getProvider(order.paymentMethod)
+    if (typeof provider.createPaymentRequest === 'function') {
+      return provider.createPaymentRequest(order, req)
+    }
+    return { paymentUrl: await provider.createPaymentUrl(order, req) }
+  }
+
   // Helper to verify return data from specific provider
   async verifyReturn(method: string, params: any) {
     const provider = this.getProvider(method)

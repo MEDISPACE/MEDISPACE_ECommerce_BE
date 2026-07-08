@@ -177,7 +177,7 @@ export const PRODUCTS_MESSAGES = {
   BARCODE_ALREADY_EXISTS: 'Barcode already exists',
   CATEGORY_NOT_FOUND: 'Category not found',
   BRAND_NOT_FOUND: 'Brand not found',
-  INSUFFICIENT_STOCK: 'Insufficient stock quantity',
+  INSUFFICIENT_STOCK: 'Số lượng tồn kho không đủ.',
   PRODUCT_DETAIL_NOT_FOUND: 'Product detail not found',
   PRODUCT_MEDIA_NOT_FOUND: 'Product media not found',
 
@@ -281,7 +281,7 @@ export const CARTS_MESSAGES = {
   QUANTITY_INVALID: 'Quantity must be a positive number',
   QUANTITY_MUST_BE_BETWEEN_1_AND_10: 'Quantity must be between 1 and 10',
   PRODUCT_NOT_FOUND: 'Product not found',
-  INSUFFICIENT_STOCK: 'Insufficient stock quantity',
+  INSUFFICIENT_STOCK: 'Số lượng tồn kho không đủ.',
   CART_ITEM_NOT_FOUND: 'Cart item not found',
   INVALID_SESSION_ID: 'Invalid session ID',
   CART_NOT_FOUND: 'Cart not found',
@@ -330,17 +330,17 @@ export const BRANDS_MESSAGES = {
 
 export const ORDERS_MESSAGES = {
   // Validation Messages
-  ORDER_ID_INVALID: 'Invalid order ID',
-  ORDER_ID_REQUIRED: 'Order ID is required',
-  ORDER_NOT_FOUND: 'Order not found',
-  CART_EMPTY: 'Cart is empty',
-  PRESCRIPTION_REQUIRED: 'Prescription required for some items in cart',
-  INVALID_ORDER_STATUS: 'Invalid order status',
-  INVALID_PAYMENT_STATUS: 'Invalid payment status',
-  INVALID_PAYMENT_METHOD: 'Invalid payment method',
-  ORDER_STATUS_INVALID: 'Invalid order status',
-  PAYMENT_STATUS_INVALID: 'Invalid payment status',
-  PAYMENT_METHOD_INVALID: 'Invalid payment method',
+  ORDER_ID_INVALID: 'Mã đơn hàng không hợp lệ.',
+  ORDER_ID_REQUIRED: 'Vui lòng cung cấp mã đơn hàng.',
+  ORDER_NOT_FOUND: 'Không tìm thấy đơn hàng.',
+  CART_EMPTY: 'Giỏ hàng đang trống.',
+  PRESCRIPTION_REQUIRED: 'Một số sản phẩm trong giỏ hàng cần đơn thuốc hợp lệ.',
+  INVALID_ORDER_STATUS: 'Trạng thái đơn hàng không hợp lệ.',
+  INVALID_PAYMENT_STATUS: 'Trạng thái thanh toán không hợp lệ.',
+  INVALID_PAYMENT_METHOD: 'Phương thức thanh toán không hợp lệ.',
+  ORDER_STATUS_INVALID: 'Trạng thái đơn hàng không hợp lệ.',
+  PAYMENT_STATUS_INVALID: 'Trạng thái thanh toán không hợp lệ.',
+  PAYMENT_METHOD_INVALID: 'Phương thức thanh toán không hợp lệ.',
   SHIPPING_ADDRESS_INVALID: 'Invalid shipping address',
   SHIPPING_ADDRESS_REQUIRED: 'Shipping address is required',
   FIRST_NAME_REQUIRED: 'First name is required',
@@ -365,18 +365,18 @@ export const ORDERS_MESSAGES = {
   SHIPPING_METHOD_REQUIRED: 'Shipping method is required',
 
   // Success Messages
-  CREATE_ORDER_SUCCESS: 'Order created successfully',
-  GET_ORDERS_SUCCESS: 'Get orders successfully',
-  GET_ORDER_SUCCESS: 'Get order successfully',
-  UPDATE_ORDER_STATUS_SUCCESS: 'Order status updated successfully',
-  UPDATE_PAYMENT_STATUS_SUCCESS: 'Payment status updated successfully',
-  CANCEL_ORDER_SUCCESS: 'Order cancelled successfully',
+  CREATE_ORDER_SUCCESS: 'Tạo đơn hàng thành công.',
+  GET_ORDERS_SUCCESS: 'Tải danh sách đơn hàng thành công.',
+  GET_ORDER_SUCCESS: 'Tải thông tin đơn hàng thành công.',
+  UPDATE_ORDER_STATUS_SUCCESS: 'Cập nhật trạng thái đơn hàng thành công.',
+  UPDATE_PAYMENT_STATUS_SUCCESS: 'Cập nhật trạng thái thanh toán thành công.',
+  CANCEL_ORDER_SUCCESS: 'Hủy đơn hàng thành công.',
 
   // Error Messages
-  CREATE_ORDER_FAILED: 'Failed to create order',
-  UPDATE_ORDER_FAILED: 'Failed to update order',
-  CANCEL_ORDER_FAILED: 'Failed to cancel order',
-  GET_ORDER_STATS_SUCCESS: 'Get order statistics successfully',
+  CREATE_ORDER_FAILED: 'Không thể tạo đơn hàng. Vui lòng thử lại.',
+  UPDATE_ORDER_FAILED: 'Không thể cập nhật đơn hàng. Vui lòng thử lại.',
+  CANCEL_ORDER_FAILED: 'Không thể hủy đơn hàng. Vui lòng thử lại.',
+  GET_ORDER_STATS_SUCCESS: 'Tải thống kê đơn hàng thành công.',
   GET_PAYMENT_URL_SUCCESS: 'Get payment URL successfully',
   PAYOS_CREATE_URL_FAILED: 'Failed to create PayOS payment URL',
   MOMO_CREATE_URL_FAILED: 'Failed to create Momo payment URL',
@@ -387,29 +387,29 @@ export const ORDERS_MESSAGES = {
 
 export const PRESCRIPTIONS_MESSAGES = {
   // Success Messages
-  UPLOAD_PRESCRIPTION_SUCCESS: 'Upload prescription successfully',
-  GET_PRESCRIPTIONS_SUCCESS: 'Get prescriptions successfully',
-  GET_PRESCRIPTION_SUCCESS: 'Get prescription successfully',
-  VERIFY_PRESCRIPTION_SUCCESS: 'Verify prescription successfully',
-  GET_PENDING_PRESCRIPTIONS_SUCCESS: 'Get pending prescriptions successfully',
+  UPLOAD_PRESCRIPTION_SUCCESS: 'Tải đơn thuốc lên thành công.',
+  GET_PRESCRIPTIONS_SUCCESS: 'Tải danh sách đơn thuốc thành công.',
+  GET_PRESCRIPTION_SUCCESS: 'Tải thông tin đơn thuốc thành công.',
+  VERIFY_PRESCRIPTION_SUCCESS: 'Xác nhận đơn thuốc thành công.',
+  GET_PENDING_PRESCRIPTIONS_SUCCESS: 'Tải danh sách đơn thuốc chờ xử lý thành công.',
 
   // Error Messages
-  UPLOAD_PRESCRIPTION_FAILED: 'Failed to upload prescription',
-  PRESCRIPTION_NOT_FOUND: 'Prescription not found',
-  INVALID_PRESCRIPTION_STATUS: 'Invalid prescription status',
-  PRESCRIPTION_ALREADY_VERIFIED: 'Prescription already verified',
-  UNAUTHORIZED_TO_VERIFY: 'Unauthorized to verify prescription',
-  INVALID_MEDICATION_DATA: 'Invalid medication data',
-  MISSING_DOCTOR_INFO: 'Missing doctor information',
-  INVALID_PRESCRIPTION_DATE: 'Invalid prescription date',
-  GET_PRESCRIPTION_STATS_SUCCESS: 'Get prescription statistics successfully',
-  ACCESS_DENIED: 'Access denied'
+  UPLOAD_PRESCRIPTION_FAILED: 'Không thể tải đơn thuốc lên. Vui lòng thử lại.',
+  PRESCRIPTION_NOT_FOUND: 'Không tìm thấy đơn thuốc.',
+  INVALID_PRESCRIPTION_STATUS: 'Trạng thái đơn thuốc không hợp lệ.',
+  PRESCRIPTION_ALREADY_VERIFIED: 'Đơn thuốc đã được xác nhận trước đó.',
+  UNAUTHORIZED_TO_VERIFY: 'Bạn không có quyền xác nhận đơn thuốc này.',
+  INVALID_MEDICATION_DATA: 'Thông tin thuốc trong đơn chưa hợp lệ.',
+  MISSING_DOCTOR_INFO: 'Vui lòng bổ sung thông tin bác sĩ.',
+  INVALID_PRESCRIPTION_DATE: 'Ngày kê đơn không hợp lệ.',
+  GET_PRESCRIPTION_STATS_SUCCESS: 'Tải thống kê đơn thuốc thành công.',
+  ACCESS_DENIED: 'Bạn không có quyền truy cập nội dung này.'
 } as const
 
 export const PHARMACIST_MESSAGES = {
   // Dashboard
-  GET_DASHBOARD_STATS_SUCCESS: 'Get dashboard stats successfully',
-  GET_RECENT_ACTIVITIES_SUCCESS: 'Get recent activities successfully',
+  GET_DASHBOARD_STATS_SUCCESS: 'Tải thống kê dashboard thành công.',
+  GET_RECENT_ACTIVITIES_SUCCESS: 'Tải hoạt động gần đây thành công.',
 
   // Profile
   GET_PROFILE_SUCCESS: 'Get pharmacist profile successfully',
@@ -436,12 +436,12 @@ export const PHARMACIST_MESSAGES = {
   CHECK_INTERACTIONS_SUCCESS: 'Check drug interactions successfully',
 
   // Order Management
-  CREATE_ORDER_SUCCESS: 'Create order successfully',
-  GET_ORDERS_SUCCESS: 'Get orders successfully',
-  GET_ORDER_DETAILS_SUCCESS: 'Get order details successfully',
-  UPDATE_ORDER_STATUS_SUCCESS: 'Update order status successfully',
-  ORDER_NOT_FOUND: 'Order not found',
-  GET_ORDER_STATS_SUCCESS: 'Get order statistics successfully',
+  CREATE_ORDER_SUCCESS: 'Tạo đơn hàng thành công.',
+  GET_ORDERS_SUCCESS: 'Tải danh sách đơn hàng thành công.',
+  GET_ORDER_DETAILS_SUCCESS: 'Tải chi tiết đơn hàng thành công.',
+  UPDATE_ORDER_STATUS_SUCCESS: 'Cập nhật đơn hàng thành công.',
+  ORDER_NOT_FOUND: 'Không tìm thấy đơn hàng hoặc bạn không có quyền thao tác đơn hàng này.',
+  GET_ORDER_STATS_SUCCESS: 'Tải thống kê đơn hàng thành công.',
 
   // Settings & Profile
   UPDATE_PASSWORD_SUCCESS: 'Update password successfully',
@@ -449,17 +449,17 @@ export const PHARMACIST_MESSAGES = {
   UPDATE_ONLINE_STATUS_SUCCESS: 'Update online status successfully',
 
   // Error Messages
-  UNAUTHORIZED_ACCESS: 'Unauthorized access',
-  INVALID_PHARMACIST_ID: 'Invalid pharmacist ID',
-  PHARMACIST_NOT_FOUND: 'Pharmacist not found',
-  OLD_PASSWORD_INCORRECT: 'Old password is incorrect',
-  OLD_PASSWORD_IS_REQUIRED: 'Old password is required',
-  NEW_PASSWORD_IS_REQUIRED: 'New password is required',
-  PASSWORD_MUST_BE_STRONG: 'Password must be at least 6 characters long',
-  LICENSE_REQUIRED: 'Pharmacist does not have a license',
-  PHARMACIST_NOT_ONLINE: 'Pharmacist is currently offline',
-  CHECK_LICENSE_FAILED: 'Failed to check pharmacist license',
-  ONLY_PHARMACIST_ACCESS: 'Only pharmacists can access this feature'
+  UNAUTHORIZED_ACCESS: 'Bạn không có quyền truy cập chức năng này.',
+  INVALID_PHARMACIST_ID: 'Mã dược sĩ không hợp lệ.',
+  PHARMACIST_NOT_FOUND: 'Không tìm thấy thông tin dược sĩ.',
+  OLD_PASSWORD_INCORRECT: 'Mật khẩu cũ không chính xác.',
+  OLD_PASSWORD_IS_REQUIRED: 'Vui lòng nhập mật khẩu cũ.',
+  NEW_PASSWORD_IS_REQUIRED: 'Vui lòng nhập mật khẩu mới.',
+  PASSWORD_MUST_BE_STRONG: 'Mật khẩu phải có ít nhất 6 ký tự.',
+  LICENSE_REQUIRED: 'Bạn cần cập nhật số chứng chỉ hành nghề trong Cài đặt trước khi sử dụng chức năng dược sĩ.',
+  PHARMACIST_NOT_ONLINE: 'Bạn cần bật trạng thái Online để sử dụng chức năng dược sĩ.',
+  CHECK_LICENSE_FAILED: 'Không thể kiểm tra thông tin hành nghề. Vui lòng thử lại sau.',
+  ONLY_PHARMACIST_ACCESS: 'Chỉ tài khoản dược sĩ mới được sử dụng chức năng này.'
 } as const
 
 export const CHATS_MESSAGES = {
@@ -667,10 +667,11 @@ export const RETURN_REQUESTS_MESSAGES = {
   ACCOUNT_NUMBER_REQUIRED: 'Account number is required for bank transfer refund',
   ACCOUNT_HOLDER_REQUIRED: 'Account holder name is required for bank transfer refund',
   AMOUNT_INVALID: 'Amount must be a positive number',
-  NOTES_MUST_BE_STRING: 'Notes must be a string',
-  NOTES_LENGTH_INVALID: 'Notes must be less than 1000 characters',
-  TRACKING_NUMBER_MUST_BE_STRING: 'Tracking number must be a string',
-  CONDITION_INVALID: 'Condition must be good, damaged, opened, or unusable',
+    NOTES_MUST_BE_STRING: 'Notes must be a string',
+    NOTES_LENGTH_INVALID: 'Notes must be less than 1000 characters',
+    TRACKING_NUMBER_MUST_BE_STRING: 'Tracking number must be a string',
+    TRACKING_NUMBER_NOT_ALLOWED: 'Return tracking number is generated by the system',
+    CONDITION_INVALID: 'Condition must be good, damaged, opened, or unusable',
   PAGE_INVALID: 'Page must be a positive integer',
   LIMIT_INVALID: 'Limit must be a positive integer between 1 and 100',
 
@@ -685,11 +686,13 @@ export const RETURN_REQUESTS_MESSAGES = {
   REQUEST_CANNOT_BE_CANCELLED: 'This return request cannot be cancelled',
   REQUEST_NOT_EDITABLE: 'This return request can no longer be edited',
   PRODUCT_NOT_IN_ORDER: 'Product not found in the original order',
-  QUANTITY_EXCEEDS_ORDERED: 'Return quantity exceeds ordered quantity',
-  INSUFFICIENT_EVIDENCE: 'Insufficient evidence provided for this return reason',
-  REFUND_ALREADY_PROCESSED: 'Refund has already been processed for this request',
-  AWAITING_RETURN_SHIPMENT: 'Waiting for customer to ship return items',
-  RETURN_DEADLINE_PASSED: 'Return shipment deadline has passed',
+  QUANTITY_EXCEEDS_ORDERED: 'Số lượng yêu cầu trả vượt quá số lượng còn lại có thể hoàn của đơn hàng',
+    INSUFFICIENT_EVIDENCE: 'Insufficient evidence provided for this return reason',
+    REFUND_ALREADY_PROCESSED: 'Refund has already been processed for this request',
+      AWAITING_RETURN_SHIPMENT: 'Waiting for customer to ship return items',
+      RETURN_SHIPMENT_NOT_ARRANGED: 'Return pickup has not been arranged yet',
+      RETURN_DEADLINE_PASSED: 'Return shipment deadline has passed',
+      TRACKING_PROVIDER_NOT_MOCK: 'Mock tracking updates are only available for mock_carrier return shipments',
 
   // Success Messages
   CREATE_REQUEST_SUCCESS: 'Return request created successfully',
@@ -697,10 +700,13 @@ export const RETURN_REQUESTS_MESSAGES = {
   GET_REQUEST_SUCCESS: 'Get return request successfully',
   UPDATE_REQUEST_SUCCESS: 'Return request updated successfully',
   CANCEL_REQUEST_SUCCESS: 'Return request cancelled successfully',
-  APPROVE_REQUEST_SUCCESS: 'Return request approved successfully',
-  REJECT_REQUEST_SUCCESS: 'Return request rejected successfully',
-  RECEIVE_ITEMS_SUCCESS: 'Return items received and verified',
+    APPROVE_REQUEST_SUCCESS: 'Return request approved successfully',
+    REJECT_REQUEST_SUCCESS: 'Return request rejected successfully',
+    ARRANGE_RETURN_SUCCESS: 'Return pickup arranged successfully',
+    RECEIVE_ITEMS_SUCCESS: 'Return items received and verified',
   PROCESS_REFUND_SUCCESS: 'Refund processed successfully',
-  COMPLETE_REQUEST_SUCCESS: 'Return request completed successfully',
-  GET_REQUEST_STATS_SUCCESS: 'Get return request statistics successfully'
-} as const
+    COMPLETE_REQUEST_SUCCESS: 'Return request completed successfully',
+    GET_REQUEST_STATS_SUCCESS: 'Get return request statistics successfully',
+    GET_RETURN_TRACKING_SUCCESS: 'Get return tracking successfully',
+    UPDATE_RETURN_TRACKING_SUCCESS: 'Return tracking updated successfully'
+  } as const

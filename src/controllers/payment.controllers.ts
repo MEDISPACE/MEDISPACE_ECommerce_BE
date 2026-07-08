@@ -7,6 +7,7 @@ import emailService from '~/services/email.services'
 import { PaymentMethod } from '~/constants/enum'
 import { ObjectId } from 'mongodb'
 import { PaymentResult } from '~/services/payment/payment.interface'
+import paymentTransactionService from '~/services/paymentTransactions.services'
 
 /**
  * Helper: After payment success — clear cart & send order confirmation email.
@@ -57,6 +58,14 @@ async function confirmVerifiedPayment(result: PaymentResult, allowedMethods: str
   if (!Number.isFinite(result.amount) || Math.round(result.amount) !== Math.round(order.totalAmount)) return null
 
   if (order.paymentStatus !== 'paid') await orderService.updatePaymentStatus(orderId, 'paid')
+  await paymentTransactionService.markPaymentPaid({
+    order,
+    providerTransactionId: result.transactionId,
+    providerOrderCode: result.providerOrderCode,
+    providerResponseCode: result.providerResponseCode,
+    providerMessage: result.message,
+    returnPayload: result.rawPayload
+  })
   await handlePostPaymentSuccess(orderId)
   return order
 }
@@ -138,6 +147,14 @@ export const payOSIpnController = async (req: Request, res: Response) => {
         Math.round(result.amount) === Math.round(order.totalAmount)
       if (paymentMatches) {
         if (order.paymentStatus !== 'paid') await orderService.updatePaymentStatus(order._id as ObjectId, 'paid')
+        await paymentTransactionService.markPaymentPaid({
+          order,
+          providerTransactionId: result.transactionId,
+          providerOrderCode: result.providerOrderCode,
+          providerResponseCode: result.providerResponseCode,
+          providerMessage: result.message,
+          ipnPayload: result.rawPayload || req.body
+        })
         await handlePostPaymentSuccess(order._id as ObjectId)
       }
 

@@ -25,7 +25,10 @@ import LoyaltyAccount from '~/models/schemas/LoyaltyAccount.schema'
 import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
 import LoyaltyProgramConfig from '~/models/schemas/LoyaltyProgramConfig.schema'
 import Notification from '~/models/schemas/Notification.schema'
+import PaymentTransaction from '~/models/schemas/PaymentTransaction.schema'
+import RefundTransaction from '~/models/schemas/RefundTransaction.schema'
 import { ensureCriticalLoyaltyCouponIndexes, verifyCriticalLoyaltyCouponIndexes } from './loyaltyCouponIndexes.services'
+import { UserRole } from '~/constants/enum'
 
 config()
 
@@ -46,8 +49,11 @@ class DatabaseService {
       await this.db.command({ ping: 1 })
       // Create indexes for better performance
       await this.createIndexes()
-      // Reset online status on server startup to handle crashes/restarts
-      await this.users.updateMany({}, { $set: { isOnline: false, onlineCount: 0 } })
+      // Socket presence is reset on startup, but pharmacist availability is a manual preference.
+      await Promise.all([
+        this.users.updateMany({}, { $set: { onlineCount: 0 } }),
+        this.users.updateMany({ role: { $ne: UserRole.Pharmacist } }, { $set: { isOnline: false } })
+      ])
     } catch (error) {
       console.error('❌ MongoDB connection failed:', error)
       process.exit(1)
@@ -211,6 +217,8 @@ class DatabaseService {
       await safeCreateIndex(this.orders, { 'shippingAddress.phone': 1 })
       await safeCreateIndex(this.orders, { 'shippingAddress.firstName': 1, 'shippingAddress.lastName': 1 })
       await safeCreateIndex(this.orders, { userId: 1, orderStatus: 1, deliveredAt: -1 })
+      await safeCreateIndex(this.orders, { assignedPharmacistId: 1, orderStatus: 1, createdAt: -1 })
+      await safeCreateIndex(this.orders, { createdBy: 1, orderStatus: 1, createdAt: -1 })
       await safeCreateIndex(this.orders, { orderNumber: 1 }, { unique: true })
       await ensurePrescriptionOrderUniqueIndex()
       await safeCreateIndex(
@@ -234,6 +242,26 @@ class DatabaseService {
       await safeCreateIndex(this.returnRequests, { orderId: 1 })
       await safeCreateIndex(this.returnRequests, { status: 1 })
       await safeCreateIndex(this.returnRequests, { requestNumber: 1 }, { unique: true })
+
+      // Payment/refund ledger indexes for audit, idempotency and reconciliation.
+      await safeCreateIndex(this.paymentTransactions, { orderId: 1, createdAt: -1 })
+      await safeCreateIndex(this.paymentTransactions, { userId: 1, createdAt: -1 })
+      await safeCreateIndex(this.paymentTransactions, { provider: 1, providerOrderCode: 1 })
+      await safeCreateIndex(this.paymentTransactions, { provider: 1, providerTransactionId: 1 })
+      await safeCreateIndex(this.paymentTransactions, { status: 1, createdAt: -1 })
+      await safeCreateIndex(this.refundTransactions, { orderId: 1, createdAt: -1 })
+      await safeCreateIndex(this.refundTransactions, { returnRequestId: 1, createdAt: -1 })
+      await safeCreateIndex(this.refundTransactions, { paymentTransactionId: 1 })
+      await safeCreateIndex(this.refundTransactions, { status: 1, createdAt: -1 })
+      await safeCreateIndex(
+        this.refundTransactions,
+        { returnRequestId: 1 },
+        {
+          name: 'refund_return_request_active_unique',
+          unique: true,
+          partialFilterExpression: { status: { $in: ['pending', 'processing', 'succeeded'] } }
+        }
+      )
 
       // Coupons collection indexes
       await safeCreateIndex(this.coupons, { code: 1 }, { unique: true })
@@ -368,6 +396,12 @@ class DatabaseService {
   }
   get orders(): Collection<Order> {
     return this.db.collection(process.env.DB_ORDERS_COLLECTION as string)
+  }
+  get paymentTransactions(): Collection<PaymentTransaction> {
+    return this.db.collection(process.env.DB_PAYMENT_TRANSACTIONS_COLLECTION || 'payment_transactions')
+  }
+  get refundTransactions(): Collection<RefundTransaction> {
+    return this.db.collection(process.env.DB_REFUND_TRANSACTIONS_COLLECTION || 'refund_transactions')
   }
   get prescriptions(): Collection<Prescription> {
     return this.db.collection(process.env.DB_PRESCRIPTIONS_COLLECTION as string)

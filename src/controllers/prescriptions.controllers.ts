@@ -74,6 +74,12 @@ export const getPrescriptionByIdController = async (req: Request<{ prescriptionI
         message: PRESCRIPTIONS_MESSAGES.ACCESS_DENIED
       })
     }
+
+    if (!user?.lisenseNumber || user.isOnline === false) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        message: PRESCRIPTIONS_MESSAGES.UNAUTHORIZED_TO_VERIFY
+      })
+    }
   }
 
   return res.status(HTTP_STATUS.OK).json({

@@ -3,11 +3,14 @@ import {
   createReturnRequestController,
   getMyReturnRequestsController,
   getReturnRequestByIdController,
+  getReturnTrackingController,
   cancelReturnRequestController,
-  updateReturnShippingController,
   getAllReturnRequestsController,
   getReturnRequestByIdAdminController,
+  getReturnTrackingAdminController,
   reviewReturnRequestController,
+  arrangeReturnShippingController,
+  updateMockReturnTrackingController,
   receiveReturnItemsController,
   processRefundController,
   completeReturnRequestController,
@@ -18,12 +21,13 @@ import {
   requestIdValidator,
   getReturnRequestsValidator,
   reviewReturnRequestValidator,
-  updateReturnShippingValidator,
+  arrangeReturnShippingValidator,
   receiveReturnItemsValidator,
-  processRefundValidator
+  processRefundValidator,
+  updateMockReturnTrackingValidator
 } from '~/middlewares/returnRequests.middlewares'
 import { accessTokenValidator } from '~/middlewares/users.middlewares'
-import { isAdminOrPharmacist } from '~/middlewares/common.middlewares'
+import { isAdmin, isAdminOrLicensedPharmacist } from '~/middlewares/common.middlewares'
 import { wrapRequestHandler } from '~/utils/handlers'
 
 const returnRequestsRouter = Router()
@@ -76,6 +80,13 @@ returnRequestsRouter.get(
   wrapRequestHandler(getReturnRequestByIdController)
 )
 
+returnRequestsRouter.get(
+  '/:requestId/tracking',
+  accessTokenValidator,
+  requestIdValidator,
+  wrapRequestHandler(getReturnTrackingController)
+)
+
 /**
  * @swagger
  * /returns/{requestId}/cancel:
@@ -92,23 +103,6 @@ returnRequestsRouter.patch(
   wrapRequestHandler(cancelReturnRequestController)
 )
 
-/**
- * @swagger
- * /returns/{requestId}/shipping:
- *   patch:
- *     summary: Update return shipping info
- *     tags: [Return Requests]
- *     security:
- *       - bearerAuth: []
- */
-returnRequestsRouter.patch(
-  '/:requestId/shipping',
-  accessTokenValidator,
-  requestIdValidator,
-  updateReturnShippingValidator,
-  wrapRequestHandler(updateReturnShippingController)
-)
-
 // ==================== ADMIN/PHARMACIST ROUTES ====================
 
 /**
@@ -123,7 +117,7 @@ returnRequestsRouter.patch(
 returnRequestsRouter.get(
   '/admin/stats',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdminOrLicensedPharmacist,
   wrapRequestHandler(getReturnRequestStatsController)
 )
 
@@ -139,7 +133,7 @@ returnRequestsRouter.get(
 returnRequestsRouter.get(
   '/admin/all',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdminOrLicensedPharmacist,
   getReturnRequestsValidator,
   wrapRequestHandler(getAllReturnRequestsController)
 )
@@ -156,9 +150,17 @@ returnRequestsRouter.get(
 returnRequestsRouter.get(
   '/admin/:requestId',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdminOrLicensedPharmacist,
   requestIdValidator,
   wrapRequestHandler(getReturnRequestByIdAdminController)
+)
+
+returnRequestsRouter.get(
+  '/admin/:requestId/tracking',
+  accessTokenValidator,
+  isAdminOrLicensedPharmacist,
+  requestIdValidator,
+  wrapRequestHandler(getReturnTrackingAdminController)
 )
 
 /**
@@ -173,10 +175,37 @@ returnRequestsRouter.get(
 returnRequestsRouter.patch(
   '/admin/:requestId/review',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdminOrLicensedPharmacist,
   requestIdValidator,
   reviewReturnRequestValidator,
   wrapRequestHandler(reviewReturnRequestController)
+)
+
+/**
+ * @swagger
+ * /returns/admin/{requestId}/arrange-return:
+ *   patch:
+ *     summary: Arrange return pickup/shipping and generate return tracking code
+ *     tags: [Return Requests - Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+returnRequestsRouter.patch(
+  '/admin/:requestId/arrange-return',
+  accessTokenValidator,
+  isAdminOrLicensedPharmacist,
+  requestIdValidator,
+  arrangeReturnShippingValidator,
+  wrapRequestHandler(arrangeReturnShippingController)
+)
+
+returnRequestsRouter.patch(
+  '/admin/:requestId/tracking/mock',
+  accessTokenValidator,
+  isAdminOrLicensedPharmacist,
+  requestIdValidator,
+  updateMockReturnTrackingValidator,
+  wrapRequestHandler(updateMockReturnTrackingController)
 )
 
 /**
@@ -191,7 +220,7 @@ returnRequestsRouter.patch(
 returnRequestsRouter.patch(
   '/admin/:requestId/receive',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdminOrLicensedPharmacist,
   requestIdValidator,
   receiveReturnItemsValidator,
   wrapRequestHandler(receiveReturnItemsController)
@@ -209,7 +238,7 @@ returnRequestsRouter.patch(
 returnRequestsRouter.patch(
   '/admin/:requestId/refund',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdmin,
   requestIdValidator,
   processRefundValidator,
   wrapRequestHandler(processRefundController)
@@ -227,7 +256,7 @@ returnRequestsRouter.patch(
 returnRequestsRouter.patch(
   '/admin/:requestId/complete',
   accessTokenValidator,
-  isAdminOrPharmacist,
+  isAdmin,
   requestIdValidator,
   wrapRequestHandler(completeReturnRequestController)
 )

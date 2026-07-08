@@ -33,6 +33,14 @@ const chatRoleFromToken = (role?: number) =>
 const firstParam = (value: string | string[] | undefined, fallback = '') =>
   Array.isArray(value) ? value[0] || fallback : value || fallback
 
+async function ensureLicensedOnlinePharmacist(userId: string) {
+  const pharmacist = await databaseService.users.findOne({ _id: new ObjectId(userId), role: UserRole.Pharmacist })
+  if (!pharmacist?.lisenseNumber || pharmacist.isOnline === false) {
+    return false
+  }
+  return true
+}
+
 function validateAIMessageInput(message: string, conversationId: string, contextProducts?: unknown[], imageUrl?: string) {
   const hasMessage = typeof message === 'string' && message.trim().length > 0
   const hasImage = typeof imageUrl === 'string' && imageUrl.trim().length > 0
@@ -201,6 +209,12 @@ export const sendMessageController = async (
   const { userId, role } = req.decoded_authorization as TokenPayload
   const senderRole = role === 1 ? 'pharmacist' : 'customer'
 
+  if (senderRole === 'pharmacist' && !(await ensureLicensedOnlinePharmacist(userId))) {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({
+      message: 'Dược sĩ cần có chứng chỉ hành nghề và đang online để tư vấn'
+    })
+  }
+
   const message = await chatsService.sendMessage(userId, senderRole, req.body)
 
   try {
@@ -320,6 +334,12 @@ export const assignConversationController = async (req: Request, res: Response) 
   if (role !== 1) {
     return res.status(HTTP_STATUS.FORBIDDEN).json({
       message: 'Chỉ dược sĩ mới có thể nhận cuộc trò chuyện'
+    })
+  }
+
+  if (!(await ensureLicensedOnlinePharmacist(userId))) {
+    return res.status(HTTP_STATUS.FORBIDDEN).json({
+      message: 'Dược sĩ cần có chứng chỉ hành nghề và đang online để nhận cuộc trò chuyện'
     })
   }
 
