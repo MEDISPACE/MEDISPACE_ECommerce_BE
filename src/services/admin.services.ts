@@ -227,9 +227,9 @@ class AdminService {
           ])
           .toArray(),
         databaseService.products.countDocuments(),
-        databaseService.products.countDocuments({ isActive: true }),
-        databaseService.products.countDocuments({ stockQuantity: 0 }),
-        databaseService.products.countDocuments({ stockQuantity: { $gt: 0, $lt: 20 } })
+        databaseService.products.countDocuments({ status: 'active' }),
+        databaseService.products.countDocuments({ status: 'out_of_stock' }),
+        databaseService.products.countDocuments({ status: 'active', stockQuantity: { $gt: 0, $lt: 20 } })
       ])
 
       const totalProductValue = productStats[0]?.totalValue || 0
@@ -1941,7 +1941,12 @@ class AdminService {
       {
         $set: {
           stockQuantity: finalStock,
-          status: finalStock === 0 ? 'out_of_stock' : 'active',
+          status:
+            product.status === 'discontinued' || product.status === 'out_of_stock'
+              ? product.status
+              : finalStock === 0
+                ? 'out_of_stock'
+                : 'active',
           updatedAt: new Date()
         }
       },

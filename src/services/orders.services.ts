@@ -21,6 +21,15 @@ import paymentTransactionService from './paymentTransactions.services'
 class OrderService {
   private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
 
+  private assertProductAvailableForSale(product: any) {
+    if (product.isActive === false || product.status !== 'active') {
+      throw new ErrorWithStatus({
+        message: product.status === 'discontinued' ? `Sản phẩm "${product.name}" đã ngừng kinh doanh.` : `Sản phẩm "${product.name}" hiện không có sẵn để mua.`,
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+  }
+
   private estimatePackageWeight(items: any[]) {
     return Math.max(
       500,
@@ -294,6 +303,7 @@ class OrderService {
             status: HTTP_STATUS.NOT_FOUND
           })
         }
+        this.assertProductAvailableForSale(product)
 
         // Validate stock with unit conversion
         const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
@@ -380,6 +390,7 @@ class OrderService {
           orderItems.push(cartItem)
           continue
         }
+        this.assertProductAvailableForSale(product)
 
         const selectedVariant = product.priceVariants?.find((v: any) => v.unit === cartItem.unit)
         const originalPrice = selectedVariant?.price || product.price || 0

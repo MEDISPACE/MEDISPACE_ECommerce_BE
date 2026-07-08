@@ -28,7 +28,8 @@ function toSearchProductDocument(product: any) {
     brandId: product.brandId?.toString?.() || product.brandId || '',
     brandName: product.brand?.name || product.brandName || '',
     price: product.price ?? defaultVariant?.price ?? 0,
-    inStock: product.inStock ?? (product.stockQuantity || 0) > 0,
+    status: product.status || 'active',
+    inStock: (product.status || 'active') === 'active' && (product.inStock ?? (product.stockQuantity || 0) > 0),
     activeIngredients: product.details?.activeIngredients || product.activeIngredients || '',
     indications: product.details?.indications || product.indications || ''
   }
@@ -155,6 +156,7 @@ export const searchProductsController = async (req: Request, res: Response) => {
       mongoFilter.requiresPrescription = false
     }
     if (inStockValue === 'true') {
+      mongoFilter.status = 'active'
       mongoFilter.stockQuantity = { $gt: 0 }
     }
     if (params.priceMin !== undefined || params.priceMax !== undefined) {

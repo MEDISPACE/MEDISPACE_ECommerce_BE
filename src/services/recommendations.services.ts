@@ -209,6 +209,7 @@ async function getBackfillCandidates(
     const excludedObjectIds = excludedProductIds.filter(isValidObjectId).map((id) => new ObjectId(id))
     const filter: Record<string, unknown> = {
       isActive: true,
+      status: 'active',
       stockQuantity: { $gt: 0 },
       requiresPrescription: { $ne: true }
     }
@@ -265,12 +266,12 @@ async function enrichAndBackfill(
  */
 async function getFallbackTrending(limit: number = 12): Promise<any[]> {
   return databaseService.products
-    .find({ isActive: true, stockQuantity: { $gt: 0 }, requiresPrescription: { $ne: true } })
+    .find({ isActive: true, status: 'active', stockQuantity: { $gt: 0 }, requiresPrescription: { $ne: true } })
     .sort({ rating: -1, reviewCount: -1 })
     .limit(limit)
     .project({
       _id: 1, name: 1, slug: 1, featuredImage: 1,
-      priceVariants: 1, rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
+      priceVariants: 1, rating: 1, reviewCount: 1, stockQuantity: 1, status: 1, requiresPrescription: 1
     })
     .toArray()
 }
@@ -316,6 +317,7 @@ class RecommendationsService {
         .find({
           categoryId: product.categoryId,
           isActive: true,
+          status: 'active',
           stockQuantity: { $gt: 0 },
           requiresPrescription: { $ne: true },
           _id: { $ne: product._id }
@@ -323,7 +325,7 @@ class RecommendationsService {
         .limit(limit)
         .project({
           _id: 1, name: 1, slug: 1, featuredImage: 1, priceVariants: 1,
-          rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
+          rating: 1, reviewCount: 1, stockQuantity: 1, status: 1, requiresPrescription: 1
         })
         .toArray()
       return recommendationResult('fallback_category', fallback)
@@ -372,6 +374,7 @@ class RecommendationsService {
       if (!data || data.products.length === 0) {
         const filter: Record<string, unknown> = {
           isActive: true,
+          status: 'active',
           stockQuantity: { $gt: 0 },
           requiresPrescription: { $ne: true }
         }
@@ -382,7 +385,7 @@ class RecommendationsService {
           .limit(limit)
           .project({
             _id: 1, name: 1, slug: 1, featuredImage: 1, priceVariants: 1,
-            rating: 1, reviewCount: 1, stockQuantity: 1, requiresPrescription: 1
+            rating: 1, reviewCount: 1, stockQuantity: 1, status: 1, requiresPrescription: 1
           })
           .toArray()
         return { algorithm: 'fallback_rating', products: fallback, modelVersion: DEFAULT_MODEL_VERSION }
