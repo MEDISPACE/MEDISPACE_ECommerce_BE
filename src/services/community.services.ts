@@ -432,7 +432,11 @@ class CommunityService {
             {
               $match: {
                 $expr: {
-                  $and: [{ $eq: ['$roomId', '$$roomId'] }, { $eq: ['$status', 'visible'] }]
+                  $and: [
+                    { $eq: ['$roomId', '$$roomId'] },
+                    { $eq: ['$status', 'visible'] },
+                    { $eq: [{ $type: '$videoEventId' }, 'missing'] }
+                  ]
                 }
               }
             },
@@ -485,6 +489,7 @@ class CommunityService {
                   $and: [
                     { $eq: ['$roomId', '$$roomId'] },
                     { $eq: ['$status', 'visible'] },
+                    { $eq: [{ $type: '$videoEventId' }, 'missing'] },
                     { $gt: ['$createdAt', '$$lastReadAt'] },
                     { $ne: ['$senderId', viewerId] }
                   ]

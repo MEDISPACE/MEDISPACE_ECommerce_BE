@@ -671,6 +671,10 @@ class CommunityVideoEventsService {
     if (['draft', 'ended', 'cancelled'].includes(event.status))
       throw new ErrorWithStatus({ message: 'Hội thảo hiện không thể tham gia.', status: HTTP_STATUS.BAD_REQUEST })
     const isHost = role === UserRole.Admin || this.isHost(event, userId)
+    const existingRegistration = await databaseService.communityVideoEventRegistrations.findOne({ eventId, userId })
+    if (!isHost && existingRegistration?.status === 'removed') {
+      throw new ErrorWithStatus({ message: 'Bạn đã bị mời khỏi hội thảo này và không thể tham gia lại.', status: HTTP_STATUS.FORBIDDEN })
+    }
     const user = await databaseService.users.findOne(
       { _id: userId },
       { projection: { firstName: 1, lastName: 1, email: 1, avatar: 1 } }
@@ -858,6 +862,71 @@ class CommunityVideoEventsService {
     return result
   }
 
+  async disableLiveParticipantCamera(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.disableParticipantCamera(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-camera-disabled',
+      cameraPublishAllowed: false
+    })
+    return result
+  }
+
+  async disableLiveParticipantScreenShare(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.disableParticipantScreenShare(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-screen-share-disabled',
+      screenSharePublishAllowed: false
+    })
+    return result
+  }
+
+  async enableLiveParticipantAudio(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.enableParticipantAudio(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-audio-enabled',
+      audioPublishAllowed: true
+    })
+    return result
+  }
+
+  async enableLiveParticipantCamera(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.enableParticipantCamera(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-camera-enabled',
+      cameraPublishAllowed: true
+    })
+    return result
+  }
+
+  async enableLiveParticipantScreenShare(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    const result = await liveKitService.enableParticipantScreenShare(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-screen-share-enabled',
+      screenSharePublishAllowed: true
+    })
+    return result
+  }
+
   async kickLiveParticipant(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
     const event = await this.getEvent(eventId)
     await this.assertCanManageEvent(event, context)
@@ -868,6 +937,22 @@ class CommunityVideoEventsService {
       action: 'participant-kicked'
     })
     return result
+  }
+
+  async banLiveParticipant(eventId: ObjectId, userId: ObjectId, context: AuthContext) {
+    const event = await this.getEvent(eventId)
+    await this.assertCanManageEvent(event, context)
+    await this.updateRegistration(eventId, userId, context, {
+      status: 'removed',
+      removeReason: 'Admin removed participant from live meeting'
+    })
+    const result = await liveKitService.removeParticipant(eventId.toString(), userId.toString())
+    emitVideoEvent(COMMUNITY_VIDEO_EVENT_SOCKET_EVENTS.UPDATED, eventId, {
+      eventId,
+      userId,
+      action: 'participant-banned'
+    })
+    return { ...result, action: 'banned' as const }
   }
 
   async sendDueReminders() {

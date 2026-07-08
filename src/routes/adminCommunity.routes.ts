@@ -12,8 +12,14 @@ import {
   updateRoomMemberController
 } from '~/controllers/adminCommunity.controllers'
 import {
+  banAdminVideoEventParticipantController,
   cancelAdminVideoEventController,
   createAdminVideoEventController,
+  disableAdminVideoEventParticipantCameraController,
+  disableAdminVideoEventParticipantScreenShareController,
+  enableAdminVideoEventParticipantAudioController,
+  enableAdminVideoEventParticipantCameraController,
+  enableAdminVideoEventParticipantScreenShareController,
   getVideoEventDetailController,
   kickAdminVideoEventParticipantController,
   listAdminVideoEventParticipantsController,
@@ -96,10 +102,46 @@ adminCommunityRouter.post(
   wrapRequestHandler(muteAdminVideoEventParticipantController)
 )
 adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/unmute',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(enableAdminVideoEventParticipantAudioController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/disable-camera',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(disableAdminVideoEventParticipantCameraController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/enable-camera',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(enableAdminVideoEventParticipantCameraController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/disable-screen-share',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(disableAdminVideoEventParticipantScreenShareController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/enable-screen-share',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(enableAdminVideoEventParticipantScreenShareController)
+)
+adminCommunityRouter.post(
   '/video-events/:eventId/participants/:userId/kick',
   eventIdValidator,
   userIdParamValidator,
   wrapRequestHandler(kickAdminVideoEventParticipantController)
+)
+adminCommunityRouter.post(
+  '/video-events/:eventId/participants/:userId/ban',
+  eventIdValidator,
+  userIdParamValidator,
+  wrapRequestHandler(banAdminVideoEventParticipantController)
 )
 adminCommunityRouter.get(
   '/video-events/:eventId/registrations',

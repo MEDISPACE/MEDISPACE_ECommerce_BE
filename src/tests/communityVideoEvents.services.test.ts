@@ -29,6 +29,11 @@ const getWsUrl = vi.fn(() => 'wss://livekit.test')
 const getRoomName = vi.fn((eventId: string) => `medispace-event-${eventId}`)
 const listParticipants = vi.fn()
 const muteParticipantAudio = vi.fn()
+const disableParticipantCamera = vi.fn()
+const disableParticipantScreenShare = vi.fn()
+const enableParticipantAudio = vi.fn()
+const enableParticipantCamera = vi.fn()
+const enableParticipantScreenShare = vi.fn()
 const removeParticipant = vi.fn()
 const emit = vi.fn()
 
@@ -44,7 +49,19 @@ vi.mock('~/services/database.services', () => ({
 }))
 
 vi.mock('~/services/livekit.services', () => ({
-  default: { createJoinToken, getWsUrl, getRoomName, listParticipants, muteParticipantAudio, removeParticipant }
+  default: {
+    createJoinToken,
+    getWsUrl,
+    getRoomName,
+    listParticipants,
+    muteParticipantAudio,
+    disableParticipantCamera,
+    disableParticipantScreenShare,
+    enableParticipantAudio,
+    enableParticipantCamera,
+    enableParticipantScreenShare,
+    removeParticipant
+  }
 }))
 
 vi.mock('~/services/notifications.services', () => ({
@@ -212,6 +229,16 @@ describe('CommunityVideoEventsService functional rules', () => {
     )
   })
 
+  it('joinEvent blocks participants removed from the live meeting', async () => {
+    const userId = new ObjectId()
+    const event = makeEvent({ status: 'live' })
+    mockCommunityVideoEvents.findOne.mockResolvedValue(event)
+    mockCommunityVideoEventRegistrations.findOne.mockResolvedValue({ eventId: event._id, userId, status: 'removed' })
+
+    await expect(communityVideoEventsService.joinEvent(event._id, userId)).rejects.toMatchObject({ status: 403 })
+    expect(createJoinToken).not.toHaveBeenCalled()
+  })
+
   it('listEvents limits visible events by public rooms and member private rooms', async () => {
     const publicRoomId = new ObjectId()
     mockCommunityVideoEvents.aggregate.mockReturnValue(cursor([]))
@@ -278,7 +305,7 @@ describe('CommunityVideoEventsService functional rules', () => {
     ).rejects.toMatchObject({ status: 403 })
   })
 
-  it('mutes and kicks LiveKit participants only after event manage permission passes', async () => {
+  it('moderates LiveKit participants only after event manage permission passes', async () => {
     const adminId = new ObjectId()
     const targetUserId = new ObjectId()
     const event = makeEvent({ status: 'live' })
@@ -287,6 +314,7 @@ describe('CommunityVideoEventsService functional rules', () => {
       eventId: event._id.toString(),
       userId: targetUserId.toString(),
       action: 'muted',
+      audioPublishAllowed: false,
       track: { sid: 'TR_AUDIO', source: 'microphone', muted: true }
     })
     removeParticipant.mockResolvedValueOnce({
@@ -294,13 +322,73 @@ describe('CommunityVideoEventsService functional rules', () => {
       userId: targetUserId.toString(),
       action: 'kicked'
     })
+    disableParticipantCamera.mockResolvedValueOnce({
+      eventId: event._id.toString(),
+      userId: targetUserId.toString(),
+      action: 'camera-disabled',
+      cameraPublishAllowed: false
+    })
+    disableParticipantScreenShare.mockResolvedValueOnce({
+      eventId: event._id.toString(),
+      userId: targetUserId.toString(),
+      action: 'screen-share-disabled',
+      screenSharePublishAllowed: false
+    })
+    enableParticipantAudio.mockResolvedValueOnce({
+      eventId: event._id.toString(),
+      userId: targetUserId.toString(),
+      action: 'audio-enabled',
+      audioPublishAllowed: true
+    })
+    enableParticipantCamera.mockResolvedValueOnce({
+      eventId: event._id.toString(),
+      userId: targetUserId.toString(),
+      action: 'camera-enabled',
+      cameraPublishAllowed: true
+    })
+    enableParticipantScreenShare.mockResolvedValueOnce({
+      eventId: event._id.toString(),
+      userId: targetUserId.toString(),
+      action: 'screen-share-enabled',
+      screenSharePublishAllowed: true
+    })
 
     await expect(
       communityVideoEventsService.muteLiveParticipantAudio(event._id, targetUserId, {
         userId: adminId,
         role: UserRole.Admin
       })
-    ).resolves.toMatchObject({ action: 'muted' })
+    ).resolves.toMatchObject({ action: 'muted', audioPublishAllowed: false })
+    await expect(
+      communityVideoEventsService.disableLiveParticipantCamera(event._id, targetUserId, {
+        userId: adminId,
+        role: UserRole.Admin
+      })
+    ).resolves.toMatchObject({ action: 'camera-disabled', cameraPublishAllowed: false })
+    await expect(
+      communityVideoEventsService.disableLiveParticipantScreenShare(event._id, targetUserId, {
+        userId: adminId,
+        role: UserRole.Admin
+      })
+    ).resolves.toMatchObject({ action: 'screen-share-disabled', screenSharePublishAllowed: false })
+    await expect(
+      communityVideoEventsService.enableLiveParticipantAudio(event._id, targetUserId, {
+        userId: adminId,
+        role: UserRole.Admin
+      })
+    ).resolves.toMatchObject({ action: 'audio-enabled', audioPublishAllowed: true })
+    await expect(
+      communityVideoEventsService.enableLiveParticipantCamera(event._id, targetUserId, {
+        userId: adminId,
+        role: UserRole.Admin
+      })
+    ).resolves.toMatchObject({ action: 'camera-enabled', cameraPublishAllowed: true })
+    await expect(
+      communityVideoEventsService.enableLiveParticipantScreenShare(event._id, targetUserId, {
+        userId: adminId,
+        role: UserRole.Admin
+      })
+    ).resolves.toMatchObject({ action: 'screen-share-enabled', screenSharePublishAllowed: true })
     await expect(
       communityVideoEventsService.kickLiveParticipant(event._id, targetUserId, {
         userId: adminId,
@@ -309,6 +397,11 @@ describe('CommunityVideoEventsService functional rules', () => {
     ).resolves.toMatchObject({ action: 'kicked' })
 
     expect(muteParticipantAudio).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
+    expect(disableParticipantCamera).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
+    expect(disableParticipantScreenShare).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
+    expect(enableParticipantAudio).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
+    expect(enableParticipantCamera).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
+    expect(enableParticipantScreenShare).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
     expect(removeParticipant).toHaveBeenCalledWith(event._id.toString(), targetUserId.toString())
   })
 })
