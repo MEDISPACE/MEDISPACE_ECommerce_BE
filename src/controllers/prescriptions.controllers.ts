@@ -14,6 +14,7 @@ import { PRESCRIPTIONS_MESSAGES } from '~/constants/message'
 import HTTP_STATUS from '~/constants/httpStatus'
 import prescriptionsService from '~/services/prescriptions.services'
 import databaseService from '~/services/database.services'
+import typesenseService from '~/services/typesense.services'
 
 // Upload prescription - Customer
 export const uploadPrescriptionController = async (
@@ -312,21 +313,51 @@ const getParentheticalTerms = (value?: string | null) => {
   return Array.from(matches).map((match) => match[1])
 }
 
+const splitMedicationTerms = (value?: string | null) =>
+  String(value || '')
+    .split(/[,+/;|]/)
+    .map((part) => part.trim())
+
+const getLooseParentheticalTerms = (value?: string | null) => {
+  const text = String(value || '')
+  const start = text.indexOf('(')
+  if (start < 0) return []
+  return [text.slice(start + 1)]
+}
+
 const getBrandTerm = (value?: string | null) => String(value || '').split('(')[0]
 
 const getMedicationSearchTerms = (med: any, matchedProduct?: any) => {
   const matchedIngredient = matchedProduct?.details?.activeIngredients || matchedProduct?.activeIngredients
   const ingredientSource = matchedIngredient || med.activeIngredient
-  const ingredientParts = String(ingredientSource || '')
-    .split(/[,+/;|]/)
-    .map((part) => part.trim())
+  const parentheticalTerms = [...getParentheticalTerms(med.productName), ...getLooseParentheticalTerms(med.productName)]
+  const parentheticalParts = parentheticalTerms.flatMap(splitMedicationTerms)
+  const ingredientParts = splitMedicationTerms(ingredientSource)
 
   return uniqTerms([
     getBrandTerm(med.productName),
     med.productName,
-    ...getParentheticalTerms(med.productName),
+    ...parentheticalTerms,
+    ...parentheticalParts,
     ingredientSource,
     ...ingredientParts
+  ])
+}
+
+const getTypesenseMedicationSearchTerms = (med: any, matchedProduct?: any) => {
+  const matchedIngredient = matchedProduct?.details?.activeIngredients || matchedProduct?.activeIngredients
+  const ingredientSource = matchedIngredient || med.activeIngredient
+  const parentheticalTerms = [...getParentheticalTerms(med.productName), ...getLooseParentheticalTerms(med.productName)]
+  const parentheticalParts = parentheticalTerms.flatMap(splitMedicationTerms)
+  const ingredientParts = splitMedicationTerms(ingredientSource)
+
+  return uniqTerms([
+    ...parentheticalParts,
+    ...parentheticalTerms,
+    ingredientSource,
+    ...ingredientParts,
+    getBrandTerm(med.productName),
+    med.productName
   ])
 }
 
@@ -349,6 +380,39 @@ const toMedicationProduct = (product: any, reason?: string) => {
   }
 }
 
+const toMedicationProductFromTypesenseHit = (hit: any, reason?: string) => {
+  const doc = hit?.document || {}
+  return {
+    productId: doc.mongoId || doc.id || '',
+    name: doc.name || '',
+    slug: doc.slug || '',
+    image: doc.featuredImage || null,
+    price: doc.salePrice ?? doc.price ?? null,
+    unit: doc.defaultUnit,
+    stockQuantity: doc.stockQuantity || 0,
+    requiresPrescription: Boolean(doc.requiresPrescription),
+    activeIngredients: doc.activeIngredients || '',
+    strength: doc.strength || '',
+    dosageForm: doc.dosageForm || '',
+    reason
+  }
+}
+
+const mergeMedicationProducts = (groups: any[][], limit: number) => {
+  const seen = new Set<string>()
+  const merged: any[] = []
+  for (const group of groups) {
+    for (const product of group) {
+      const id = product?.productId
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      merged.push(product)
+      if (merged.length >= limit) return merged
+    }
+  }
+  return merged
+}
+
 const findProductsWithDetails = async (filter: Record<string, unknown>, limit: number) => {
   return databaseService.products
     .aggregate([
@@ -366,6 +430,44 @@ const findProductsWithDetails = async (filter: Record<string, unknown>, limit: n
       { $limit: limit }
     ])
     .toArray()
+}
+
+const findTypesenseMedicationProducts = async (med: any, matchedProduct?: any, limit = 4) => {
+  if (!typesenseService.getAvailability()) return []
+
+  const terms = getTypesenseMedicationSearchTerms(med, matchedProduct)
+  const products: any[] = []
+  const seen = new Set<string>()
+  const brandTerm = cleanMedicationSearchTerm(getBrandTerm(med.productName)).toLowerCase()
+
+  for (const term of terms) {
+    if (products.length >= limit) break
+    try {
+      const result = await typesenseService.searchProducts({
+        q: term,
+        page: 1,
+        limit,
+        includeDrugDatabaseFields: true,
+        prioritizeOtc: false
+      })
+
+      const hits = Array.isArray(result?.hits) ? result.hits : []
+      for (const hit of hits) {
+        const mapped = toMedicationProductFromTypesenseHit(
+          hit,
+          term.toLowerCase() === brandTerm ? 'Ten gan dung' : 'Cung hoat chat'
+        )
+        if (!mapped.productId || seen.has(mapped.productId)) continue
+        seen.add(mapped.productId)
+        products.push(mapped)
+        if (products.length >= limit) break
+      }
+    } catch (error) {
+      console.error(`[OCR Typesense] Error searching ${term}:`, (error as Error)?.message || error)
+    }
+  }
+
+  return products
 }
 
 const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4) => {
@@ -439,23 +541,6 @@ const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4)
   }
 
   return candidates.map(({ product, reason }) => toMedicationProduct(product, reason))
-}
-
-const findMatchedProduct = async (productName: string) => {
-  const searchTerms = uniqTerms([getBrandTerm(productName), productName, ...getParentheticalTerms(productName)])
-  for (const term of searchTerms) {
-    const searchPattern = escapeRegexTerm(term)
-    if (searchPattern.length < 2) continue
-    const products = await findProductsWithDetails(
-      {
-        name: { $regex: new RegExp(searchPattern, 'i') },
-        isActive: true
-      },
-      1
-    )
-    if (products[0]) return products[0]
-  }
-  return null
 }
 
 const firstNonEmpty = (values: unknown[]) => values.find((value) => value !== undefined && value !== null && value !== '')
@@ -583,7 +668,7 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
 
     const ocrData = mergeOcrPages(scannedPages)
 
-    // Map OCR medications to actual products in Database
+    // Keep OCR medication text as the primary source of truth and only attach suggested products.
     const medicationContainer = ocrData?.data && Array.isArray(ocrData.data.medications) ? ocrData.data : ocrData
     if (medicationContainer && Array.isArray(medicationContainer.medications)) {
       const enrichedMedications = await Promise.all(
@@ -591,26 +676,12 @@ export const scanPrescriptionController = async (req: Request, res: Response) =>
           if (!med.productName) return med
 
           try {
-            const shouldTrustDirectMatch = !med.needsReview && med.confidence !== 'low'
-            const product = shouldTrustDirectMatch ? await findMatchedProduct(med.productName) : null
-            const equivalentProducts = await findEquivalentProducts(med, product || undefined)
-
-            if (product) {
-              const mappedProduct = toMedicationProduct(product)
-              return {
-                ...med,
-                productId: mappedProduct.productId,
-                matchedName: mappedProduct.name,
-                slug: mappedProduct.slug,
-                image: mappedProduct.image,
-                price: mappedProduct.price,
-                unit: med.unit || mappedProduct.unit,
-                stockQuantity: mappedProduct.stockQuantity,
-                requiresPrescription: mappedProduct.requiresPrescription,
-                activeIngredient: med.activeIngredient || mappedProduct.activeIngredients || null,
-                equivalentProducts
-              }
-            }
+            const typesenseProducts = await findTypesenseMedicationProducts(med, undefined, 5)
+            const mongoEquivalentProducts = await findEquivalentProducts(med, undefined)
+            const equivalentProducts = mergeMedicationProducts(
+              [typesenseProducts, mongoEquivalentProducts],
+              4
+            )
 
             return {
               ...med,
