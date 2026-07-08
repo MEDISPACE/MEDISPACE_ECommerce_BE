@@ -656,6 +656,23 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     contextData = await fetchUserContextData(socket.userId, contextIntent, data.content || '')
                   }
 
+                  const imageUrlForAi = typeof data.imageUrl === 'string' && data.imageUrl.trim()
+                    ? data.imageUrl.trim()
+                    : undefined
+                  if (data.type === 'image' || imageUrlForAi) {
+                    let imageHost = 'invalid-url'
+                    try {
+                      imageHost = imageUrlForAi ? new URL(imageUrlForAi).hostname : 'missing'
+                    } catch {
+                      // Keep invalid-url marker for logs.
+                    }
+                    console.log('[Socket] Forwarding chat image to AI', {
+                      conversationId: convIdStr,
+                      hasImageUrl: Boolean(imageUrlForAi),
+                      imageHost
+                    })
+                  }
+
                   const aiRes = await fetch(`${aiServiceUrl}/chat/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -666,9 +683,9 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       history,
                       context_products: contextProducts,
                       context_data: contextData || undefined,
-                      image_url: data.imageUrl || undefined
+                      image_url: imageUrlForAi
                     }),
-                    signal: AbortSignal.timeout(data.imageUrl ? 180000 : 65000)
+                    signal: AbortSignal.timeout(imageUrlForAi ? 180000 : 65000)
                   })
 
                   if (!aiRes.body) throw new Error("No response body from AI stream");
