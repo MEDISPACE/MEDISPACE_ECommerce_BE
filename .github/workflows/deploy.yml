@@ -76,8 +76,6 @@ jobs:
               COMPOSE_ARGS=(-f "$COMPOSE_FILE_OVERRIDE")
             elif [ -f docker-compose.yml ]; then
               COMPOSE_ARGS=()
-            elif [ -f infra/docker-compose.prod.yml ]; then
-              COMPOSE_ARGS=(-f infra/docker-compose.prod.yml)
             else
               echo "No Docker Compose file found in deploy path."
               exit 1
@@ -203,8 +201,6 @@ jobs:
               COMPOSE_ARGS=(-f "$COMPOSE_FILE_OVERRIDE")
             elif [ -f docker-compose.yml ]; then
               COMPOSE_ARGS=()
-            elif [ -f infra/docker-compose.prod.yml ]; then
-              COMPOSE_ARGS=(-f infra/docker-compose.prod.yml)
             else
               echo "No Docker Compose file found in deploy path."
               exit 1
