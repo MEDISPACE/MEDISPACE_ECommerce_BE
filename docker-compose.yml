@@ -92,9 +92,6 @@ services:
       # Override để đảm bảo dùng đúng service name trong Docker network
       TYPESENSE_URL: http://typesense:8108
       TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-medispace-ts-secret}
-    volumes:
-      # Mount src để sửa Python không cần rebuild image
-      - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/src:/app/src
     restart: unless-stopped
     networks:
       - medispace-net
