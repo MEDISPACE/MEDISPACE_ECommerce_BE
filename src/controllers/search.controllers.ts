@@ -67,7 +67,7 @@ export const searchProductsController = async (req: Request, res: Response) => {
   const effectivePriceMax = firstQueryValue(priceMax) ?? firstQueryValue(maxPrice)
   const ratingMinValue = firstQueryValue(ratingMin)
   const sortByValue = firstQueryValue(sortBy)
-  const shouldIncludeSubcategories = firstQueryValue(includeSubcategories) === 'true'
+  const shouldIncludeSubcategories = firstQueryValue(includeSubcategories) !== 'false'
   const selectedBrandIds = parseIdList(brandIds)
 
   let categoryIds: string[] | undefined

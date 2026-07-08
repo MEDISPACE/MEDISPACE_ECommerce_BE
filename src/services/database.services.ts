@@ -333,6 +333,7 @@ class DatabaseService {
       await safeCreateIndex(this.communityRoomMembers, { userId: 1, status: 1, updatedAt: -1 })
 
       await safeCreateIndex(this.communityMessages, { roomId: 1, createdAt: -1 })
+      await safeCreateIndex(this.communityMessages, { videoEventId: 1, createdAt: -1 })
       await safeCreateIndex(this.communityMessages, { threadId: 1, createdAt: 1 })
       await safeCreateIndex(this.communityMessages, { threadId: 1, status: 1, createdAt: 1 })
       await safeCreateIndex(this.communityMessages, { senderId: 1, createdAt: -1 })

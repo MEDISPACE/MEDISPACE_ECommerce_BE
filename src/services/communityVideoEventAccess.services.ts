@@ -33,7 +33,10 @@ class CommunityVideoEventAccessService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
     }
 
-    if (this.isAdmin(context) || this.isHost(event, context.userId) || event.visibility === 'public') return event
+    if (this.isAdmin(context) || this.isHost(event, context.userId)) return event
+
+    const room = await databaseService.communityRooms.findOne({ _id: event.roomId, status: 'active' })
+    if (room?.visibility !== 'private') return event
 
     const member = context.userId
       ? await databaseService.communityRoomMembers.findOne({ roomId: event.roomId, userId: context.userId })

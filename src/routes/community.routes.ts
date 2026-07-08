@@ -25,9 +25,11 @@ import {
   getVideoEventDetailController,
   getLiveKitDiagnosticsController,
   joinVideoEventController,
+  listVideoEventMessagesController,
   listMyVideoEventsController,
   listVideoEventsController,
-  registerVideoEventController
+  registerVideoEventController,
+  sendVideoEventMessageController
 } from '~/controllers/communityVideoEvents.controllers'
 import {
   communityActionRateLimit,
@@ -64,6 +66,22 @@ communityRouter.get(
   accessTokenValidator,
   verifiedUserValidator,
   wrapRequestHandler(getLiveKitDiagnosticsController)
+)
+communityRouter.get(
+  '/video-events/:eventId/messages',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  paginationValidator,
+  wrapRequestHandler(listVideoEventMessagesController)
+)
+communityRouter.post(
+  '/video-events/:eventId/messages',
+  accessTokenValidator,
+  verifiedUserValidator,
+  eventIdValidator,
+  sendMessageValidator,
+  wrapRequestHandler(sendVideoEventMessageController)
 )
 communityRouter.get(
   '/video-events/:eventId',

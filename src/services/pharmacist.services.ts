@@ -1124,9 +1124,9 @@ class PharmacistService {
         })
       }
 
-      if (product.requiresPrescription && !prescription) {
+      if (product.requiresPrescription && !prescription && orderData.safetyReviewConfirmed !== true) {
         throw new ErrorWithStatus({
-          message: `Verified prescription is required for product: ${product.name}`,
+          message: 'Pharmacist safety review confirmation is required before creating this order',
           status: HTTP_STATUS.BAD_REQUEST
         })
       }

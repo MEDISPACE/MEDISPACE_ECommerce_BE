@@ -3,6 +3,7 @@ import HTTP_STATUS from '~/constants/httpStatus'
 import { UserRole } from '~/constants/enum'
 import { ErrorWithStatus } from '~/models/Error'
 import aiModerationService from '~/services/aiModeration.services'
+import communityVideoEventAccessService from '~/services/communityVideoEventAccess.services'
 import databaseService from '~/services/database.services'
 import { getIO } from '~/sockets/chat.socket'
 import { moderateTextRuleBased } from '~/utils/moderation/moderationEngine'
@@ -35,6 +36,29 @@ type MessageReactionType = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry' | 
 type FindingStatus = 'open' | 'resolved'
 
 type ModerationTrigger = 'auto' | 'user_report' | 'ai'
+type ModerationSeverity = 'low' | 'medium' | 'high' | 'critical'
+type ModerationConfidence = 'low' | 'medium' | 'high' | number
+type CommunityModerationDecision = {
+  categories: string[]
+  severity: ModerationSeverity
+  confidence: ModerationConfidence
+  reasons: string[]
+  trigger: ModerationTrigger
+  shouldAutoHide: boolean
+  ai?: {
+    severity: ModerationSeverity
+    categories: string[]
+    confidence: number
+    shouldHide: boolean
+    requiresHumanReview: boolean
+    reason: string
+    suggestedAction: 'none' | 'review' | 'hide'
+    model?: string
+    promptVersion?: string
+    reviewedAt: Date
+    latencyMs: number
+  }
+}
 
 type AuthContext = {
   userId?: ObjectId
@@ -83,6 +107,14 @@ function emitCommunity(event: string, roomId: ObjectId | string, payload: unknow
   }
 }
 
+function emitCommunityVideoEvent(event: string, videoEventId: ObjectId | string, payload: unknown) {
+  try {
+    getIO().to(`community:video-event:${videoEventId.toString()}`).emit(event, payload)
+  } catch {
+    // Socket is optional for REST flows and tests.
+  }
+}
+
 function emitToUser(event: string, userId: ObjectId | string, payload: unknown) {
   try {
     getIO().to(`user:${userId.toString()}`).emit(event, payload)
@@ -115,8 +147,61 @@ const EMPTY_MESSAGE_REACTION_COUNTS: Record<MessageReactionType, number> = {
   dislike: 0
 }
 const THREAD_VIDEO_MEETING_STATUSES: ThreadVideoMeetingStatus[] = ['scheduled', 'live', 'ended']
-
 class CommunityService {
+  private async moderateCommunityContent(content: string, ruleInput = content): Promise<CommunityModerationDecision> {
+    const ruleResult = moderateTextRuleBased(ruleInput)
+    const config = aiModerationService.getConfig()
+    const ruleShouldHide = ruleResult.severity === 'high' || ruleResult.severity === 'critical'
+
+    const fallback: CommunityModerationDecision = {
+      categories: ruleResult.categories,
+      severity: ruleResult.severity,
+      confidence: ruleResult.confidence,
+      reasons: ruleResult.reasons,
+      trigger: 'auto',
+      shouldAutoHide: ruleShouldHide
+    }
+
+    if (!config.autoEnabled || !config.configured || !content.trim()) return fallback
+
+    try {
+      const startedAt = Date.now()
+      const aiResult = await aiModerationService.reviewText(content, { ruleResult })
+      const latencyMs = Date.now() - startedAt
+      const aiPayload = {
+        ...aiResult,
+        model: config.model,
+        promptVersion: 'community-moderation-v1',
+        reviewedAt: new Date(),
+        latencyMs
+      }
+      const aiShouldHide =
+        aiResult.shouldHide &&
+        aiResult.severity !== 'low' &&
+        aiResult.confidence >= config.autoHideConfidence
+      const shouldReviewToxic =
+        aiResult.severity !== 'low' &&
+        aiResult.confidence >= config.reviewConfidence &&
+        aiResult.categories.some((category) => category === 'toxic' || category === 'harassment')
+      const aiNeedsQueue =
+        aiShouldHide ||
+        shouldReviewToxic ||
+        (aiResult.requiresHumanReview && aiResult.severity !== 'low' && aiResult.confidence >= config.reviewConfidence)
+
+      return {
+        categories: aiNeedsQueue ? aiResult.categories : [],
+        severity: aiNeedsQueue ? aiResult.severity : 'low',
+        confidence: aiResult.confidence,
+        reasons: aiNeedsQueue && aiResult.reason ? [`AI: ${aiResult.reason}`] : [],
+        trigger: 'ai',
+        shouldAutoHide: aiShouldHide,
+        ai: aiPayload
+      }
+    } catch {
+      return fallback
+    }
+  }
+
   private async attachMessageSender(message: any) {
     if (!message?.senderId) return message
     const [sender, replyTo] = await Promise.all([
@@ -195,15 +280,6 @@ class CommunityService {
     })
   }
 
-  private normalizeThreadTags(tags?: unknown) {
-    return Array.isArray(tags)
-      ? tags
-          .map((tag) => String(tag || '').trim())
-          .filter(Boolean)
-          .slice(0, 8)
-      : []
-  }
-
   private async ensureRoomReadable(roomId: ObjectId, viewer?: AuthContext) {
     const room = await databaseService.communityRooms.findOne({ _id: roomId, status: 'active' })
     if (!room) throw new ErrorWithStatus({ message: 'Không tìm thấy chuyên mục.', status: HTTP_STATUS.NOT_FOUND })
@@ -231,7 +307,7 @@ class CommunityService {
 
   private async attachThreadRelations(thread: any, viewer?: AuthContext) {
     if (!thread) return thread
-    const [author, room, starterMessage, acceptedReply] = await Promise.all([
+    const [author, room, viewerMembership, starterMessage, acceptedReply] = await Promise.all([
       thread.authorId
         ? databaseService.users.findOne(
             { _id: thread.authorId },
@@ -244,6 +320,9 @@ class CommunityService {
             { projection: { _id: 1, name: 1, slug: 1, diseaseKey: 1, topicLabel: 1, visibility: 1 } }
           )
         : Promise.resolve(null),
+      thread.roomId && viewer?.userId
+        ? databaseService.communityRoomMembers.findOne({ roomId: thread.roomId, userId: viewer.userId })
+        : Promise.resolve(null),
       thread.starterMessageId ? this.attachMessageSender(await databaseService.communityMessages.findOne({ _id: thread.starterMessageId })) : Promise.resolve(null),
       thread.acceptedReplyId ? this.attachMessageSender(await databaseService.communityMessages.findOne({ _id: thread.acceptedReplyId })) : Promise.resolve(null)
     ])
@@ -253,7 +332,7 @@ class CommunityService {
     return {
       ...thread,
       ...(author ? { author } : {}),
-      ...(room ? { room } : {}),
+      ...(room ? { room: { ...room, ...(viewerMembership ? { viewerMembership } : {}) } } : {}),
       ...(starterMessageWithReactions ? { starterMessage: starterMessageWithReactions } : {}),
       ...(acceptedReplyWithReactions ? { acceptedReply: acceptedReplyWithReactions } : {})
     }
@@ -326,6 +405,23 @@ class CommunityService {
             { $count: 'count' }
           ],
           as: 'memberStats'
+        }
+      },
+      {
+        $lookup: {
+          from: process.env.DB_COMMUNITY_ROOM_MEMBERS_COLLECTION || 'communityRoomMembers',
+          let: { roomId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [{ $eq: ['$roomId', '$$roomId'] }, { $eq: ['$status', 'pending'] }]
+                }
+              }
+            },
+            { $count: 'count' }
+          ],
+          as: 'pendingMemberStats'
         }
       },
       {
@@ -404,6 +500,7 @@ class CommunityService {
 
     const addFields: any = {
       memberCount: { $ifNull: [{ $arrayElemAt: ['$memberStats.count', 0] }, 0] },
+      pendingMemberCount: { $ifNull: [{ $arrayElemAt: ['$pendingMemberStats.count', 0] }, 0] },
       messageCount: { $ifNull: [{ $arrayElemAt: ['$messageStats.messageCount', 0] }, 0] },
       lastMessageAt: { $arrayElemAt: ['$messageStats.lastMessageAt', 0] },
       lastMessagePreview: { $arrayElemAt: ['$messageStats.lastMessagePreview', 0] },
@@ -425,6 +522,7 @@ class CommunityService {
     pipeline.push({
       $project: {
         memberStats: 0,
+        pendingMemberStats: 0,
         messageStats: 0,
         unreadStats: 0
       }
@@ -473,24 +571,21 @@ class CommunityService {
         .toArray()
       const allowedPrivateRoomIds = memberships.map((member: any) => member.roomId).filter(Boolean)
 
-      const visibilityOr = [{ visibility: 'public' }]
-      if (allowedPrivateRoomIds.length > 0) {
-        visibilityOr.push({ _id: { $in: allowedPrivateRoomIds }, visibility: 'private' } as any)
-      }
-      if (query.$or) {
-        query.$and = [{ $or: query.$or }, { $or: visibilityOr }]
-        delete query.$or
+      if (filters.visibility === 'private') {
+        query.visibility = 'private'
+        query._id = { $in: allowedPrivateRoomIds }
+      } else if (filters.visibility === 'public') {
+        query.visibility = 'public'
       } else {
-        query.$or = visibilityOr
-      }
-      if (filters.visibility) {
-        const searchOr = query.$and?.[0]
-        query.visibility = filters.visibility
-        delete query.$or
-        delete query.$and
-        if (searchOr) query.$and = [searchOr]
-        if (filters.visibility === 'private') {
-          query._id = { $in: allowedPrivateRoomIds }
+        const visibilityOr: any[] = [{ visibility: 'public' }]
+        if (allowedPrivateRoomIds.length > 0) {
+          visibilityOr.push({ _id: { $in: allowedPrivateRoomIds }, visibility: 'private' })
+        }
+        if (query.$or) {
+          query.$and = [{ $or: query.$or }, { $or: visibilityOr }]
+          delete query.$or
+        } else {
+          query.$or = visibilityOr
         }
       }
     } else {
@@ -822,11 +917,12 @@ class CommunityService {
     }
 
     const sortKey = (params.sort || 'latest') as ThreadSort
+    if (sortKey === 'unanswered') query.replyCount = 0
     const sortMap: Record<ThreadSort, Record<string, 1 | -1>> = {
       latest: { sticky: -1, lastReplyAt: -1, createdAt: -1 },
       newest: { sticky: -1, createdAt: -1 },
       hot: { sticky: -1, replyCount: -1, viewCount: -1, lastReplyAt: -1 },
-      unanswered: { sticky: -1, replyCount: 1, createdAt: -1 }
+      unanswered: { sticky: -1, createdAt: -1 }
     }
 
     const [items, total] = await Promise.all([
@@ -895,7 +991,6 @@ class CommunityService {
     title: string
     content: string
     prefix?: ThreadPrefix
-    tags?: unknown
     isAnonymous?: boolean
     imageUrl?: string
   }) {
@@ -934,8 +1029,8 @@ class CommunityService {
     const threadId = new ObjectId()
     const starterMessageId = new ObjectId()
     const slug = `${slugify(title)}-${threadId.toString().slice(-6)}`
-    const moderation = moderateTextRuleBased(`${title}\n${content}`)
-    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
+    const moderation = await this.moderateCommunityContent(`${title}\n${content}`)
+    const shouldAutoHide = moderation.shouldAutoHide
     const threadStatus: ThreadStatus = shouldAutoHide ? 'hidden' : 'open'
 
     const threadDoc: any = {
@@ -948,7 +1043,6 @@ class CommunityService {
       isAnonymous: Boolean(params.isAnonymous),
       content,
       ...(imageUrl ? { imageUrl } : {}),
-      tags: this.normalizeThreadTags(params.tags),
       status: threadStatus,
       sticky: false,
       locked: false,
@@ -977,7 +1071,8 @@ class CommunityService {
         severity: moderation.severity,
         categories: moderation.categories,
         confidence: moderation.confidence,
-        reasons: moderation.reasons
+        reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {})
       }
     }
 
@@ -990,12 +1085,13 @@ class CommunityService {
         roomId: params.roomId,
         messageId: starterMessageId,
         senderId: params.userId,
-        trigger: 'auto' as ModerationTrigger,
+        trigger: moderation.trigger,
         status: 'open' as FindingStatus,
         severity: moderation.severity,
         categories: moderation.categories,
         confidence: moderation.confidence,
         reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {}),
         reportCount: 0,
         createdAt: now,
         updatedAt: now
@@ -1009,7 +1105,7 @@ class CommunityService {
     }
 
     const storedMessage = await databaseService.communityMessages.findOne({ _id: starterMessageId })
-    if (storedMessage) aiModerationService.enqueueMessageReview({ message: storedMessage, ruleResult: moderation }).catch(() => {})
+    if (storedMessage && !moderation.ai) aiModerationService.enqueueMessageReview({ message: storedMessage, ruleResult: moderation }).catch(() => {})
 
     const thread = await this.attachThreadRelations(await databaseService.communityThreads.findOne({ _id: threadId }), {
       userId: params.userId
@@ -1169,8 +1265,8 @@ class CommunityService {
     }
 
     const messageId = new ObjectId()
-    const moderation = moderateTextRuleBased(content)
-    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
+    const moderation = await this.moderateCommunityContent(content)
+    const shouldAutoHide = moderation.shouldAutoHide
     const messageDoc: any = {
       _id: messageId,
       roomId: thread.roomId as ObjectId,
@@ -1188,7 +1284,8 @@ class CommunityService {
         severity: moderation.severity,
         categories: moderation.categories,
         confidence: moderation.confidence,
-        reasons: moderation.reasons
+        reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {})
       }
     }
 
@@ -1200,12 +1297,13 @@ class CommunityService {
         roomId: thread.roomId as ObjectId,
         messageId,
         senderId: params.userId,
-        trigger: 'auto' as ModerationTrigger,
+        trigger: moderation.trigger,
         status: 'open' as FindingStatus,
         severity: moderation.severity,
         categories: moderation.categories,
         confidence: moderation.confidence,
         reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {}),
         reportCount: 0,
         createdAt: now,
         updatedAt: now
@@ -1217,7 +1315,7 @@ class CommunityService {
 
     const stored = await databaseService.communityMessages.findOne({ _id: messageId })
     const messageWithSender = stored ? await this.attachMessageSender(stored) : stored
-    if (messageWithSender) aiModerationService.enqueueMessageReview({ message: messageWithSender, ruleResult: moderation }).catch(() => {})
+    if (messageWithSender && !moderation.ai) aiModerationService.enqueueMessageReview({ message: messageWithSender, ruleResult: moderation }).catch(() => {})
 
     if (messageWithSender?.status === 'visible') {
       await databaseService.communityThreads.updateOne(
@@ -1368,8 +1466,8 @@ class CommunityService {
       throw new ErrorWithStatus({ message: 'Bài viết phải có nội dung hoặc ảnh.', status: HTTP_STATUS.BAD_REQUEST })
     }
 
-    const moderation = moderateTextRuleBased(content)
-    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
+    const moderation = await this.moderateCommunityContent(content)
+    const shouldAutoHide = moderation.shouldAutoHide
     const update: any = {
       content,
       updatedAt: now,
@@ -1384,7 +1482,8 @@ class CommunityService {
         severity: moderation.severity,
         categories: moderation.categories,
         confidence: moderation.confidence,
-        reasons: moderation.reasons
+        reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {})
       }
     }
 
@@ -1421,11 +1520,37 @@ class CommunityService {
               categories: moderation.categories,
               confidence: moderation.confidence,
               reasons: moderation.reasons,
+              ...(moderation.ai ? { ai: moderation.ai } : {}),
               updatedAt: now
             }
           }
         )
         emitToAdmins('community:moderation:queued', { findingId: finding._id, roomId: message.roomId, messageId: params.messageId })
+      } else {
+        const findingInsert = await databaseService.moderationFindings.insertOne({
+          roomId: message.roomId,
+          messageId: params.messageId,
+          senderId: message.senderId,
+          trigger: moderation.trigger,
+          status: 'open' as FindingStatus,
+          severity: moderation.severity,
+          categories: moderation.categories,
+          confidence: moderation.confidence,
+          reasons: moderation.reasons,
+          ...(moderation.ai ? { ai: moderation.ai } : {}),
+          reportCount: 0,
+          createdAt: now,
+          updatedAt: now
+        } as any)
+        await databaseService.communityMessages.updateOne(
+          { _id: params.messageId },
+          { $set: { 'moderated.findingId': findingInsert.insertedId } }
+        )
+        emitToAdmins('community:moderation:queued', {
+          findingId: findingInsert.insertedId,
+          roomId: message.roomId,
+          messageId: params.messageId
+        })
       }
     }
 
@@ -1524,8 +1649,15 @@ class CommunityService {
     return member as any
   }
 
-  async listMessages(params: { roomId: ObjectId; userId: ObjectId; page: number; limit: number; q?: string }) {
-    await this.requireActiveMember(params.roomId, params.userId)
+  async listMessages(params: { roomId: ObjectId; userId: ObjectId; page: number; limit: number; q?: string; videoEventId?: ObjectId; role?: UserRole }) {
+    if (params.videoEventId) {
+      await communityVideoEventAccessService.assertCanSubscribeRealtime(params.videoEventId, {
+        userId: params.userId,
+        role: params.role
+      })
+    } else {
+      await this.requireActiveMember(params.roomId, params.userId)
+    }
 
     const skip = (params.page - 1) * params.limit
     const search = params.q?.trim()
@@ -1533,6 +1665,7 @@ class CommunityService {
       roomId: params.roomId,
       $or: [{ status: 'visible' as MessageStatus }, { status: 'hidden' as MessageStatus, senderId: params.userId }]
     }
+    query.videoEventId = params.videoEventId || { $exists: false }
     if (search) {
       query.content = new RegExp(escapeRegex(search), 'i')
     }
@@ -1574,6 +1707,7 @@ class CommunityService {
           {
             $project: {
               roomId: 1,
+              videoEventId: 1,
               senderId: 1,
               content: 1,
               imageUrl: 1,
@@ -1620,12 +1754,53 @@ class CommunityService {
     return databaseService.communityMessages.findOne({ _id: messageId })
   }
 
+  async sendVideoEventChatMessage(params: { eventId: ObjectId; userId: ObjectId; role?: UserRole; content?: string }) {
+    const content = params.content?.trim() || ''
+    if (!content) {
+      throw new ErrorWithStatus({ message: 'Tin nhắn không được để trống.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (content.length > 2000) {
+      throw new ErrorWithStatus({ message: 'Nội dung tin nhắn không được vượt quá 2000 ký tự.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const event = await communityVideoEventAccessService.assertCanSubscribeRealtime(params.eventId, {
+      userId: params.userId,
+      role: params.role
+    })
+
+    const now = new Date()
+    const messageDoc = {
+      roomId: event.roomId as ObjectId,
+      videoEventId: params.eventId,
+      senderId: params.userId,
+      content,
+      status: 'visible' as MessageStatus,
+      moderated: {
+        autoHidden: false,
+        at: now,
+        severity: 'low' as ModerationSeverity,
+        categories: [],
+        confidence: 'low' as ModerationConfidence,
+        reasons: []
+      },
+      createdAt: now,
+      updatedAt: now
+    }
+
+    const insert = await databaseService.communityMessages.insertOne(messageDoc)
+    const stored = await databaseService.communityMessages.findOne({ _id: insert.insertedId })
+    const messageWithSender = stored ? await this.attachMessageSender(stored) : { ...messageDoc, _id: insert.insertedId }
+    emitCommunityVideoEvent('community:message:new', params.eventId, messageWithSender)
+    return { message: messageWithSender }
+  }
+
   async sendMessage(params: {
     roomId: ObjectId
     userId: ObjectId
     content?: string
     imageUrl?: string
     replyToMessageId?: ObjectId
+    videoEventId?: ObjectId
   }) {
     const member = await this.requireCanChat(params.roomId, params.userId)
     const now = new Date()
@@ -1640,6 +1815,7 @@ class CommunityService {
       const replyTo = await databaseService.communityMessages.findOne({
         _id: params.replyToMessageId,
         roomId: params.roomId,
+        videoEventId: params.videoEventId || { $exists: false },
         status: 'visible' as MessageStatus
       })
       if (!replyTo) {
@@ -1648,35 +1824,47 @@ class CommunityService {
       replyToMessageId = params.replyToMessageId
     }
 
+    const moderation = await this.moderateCommunityContent(content)
+    const shouldAutoHide = moderation.shouldAutoHide
+
     const baseMessage: any = {
       roomId: params.roomId,
+      ...(params.videoEventId ? { videoEventId: params.videoEventId } : {}),
       senderId: params.userId,
       content,
       ...(imageUrl ? { imageUrl } : {}),
       ...(replyToMessageId ? { replyToMessageId } : {}),
-      status: 'visible' as MessageStatus,
+      status: shouldAutoHide ? ('hidden' as MessageStatus) : ('visible' as MessageStatus),
+      moderated: {
+        autoHidden: shouldAutoHide,
+        at: now,
+        severity: moderation.severity,
+        categories: moderation.categories,
+        confidence: moderation.confidence,
+        reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {})
+      },
       createdAt: now,
       updatedAt: now
     }
 
     const insert = await databaseService.communityMessages.insertOne(baseMessage)
     const messageId = insert.insertedId
-    const moderation = moderateTextRuleBased(content)
-
-    const shouldAutoHide = moderation.severity === 'high' || moderation.severity === 'critical'
     let findingId: ObjectId | undefined
 
     if (moderation.categories.length > 0 && moderation.severity !== 'low') {
       const findingDoc: any = {
         roomId: params.roomId,
+        ...(params.videoEventId ? { videoEventId: params.videoEventId } : {}),
         messageId,
         senderId: params.userId,
-        trigger: 'auto' as ModerationTrigger,
+        trigger: moderation.trigger,
         status: 'open' as FindingStatus,
         severity: moderation.severity,
         categories: moderation.categories,
         confidence: moderation.confidence,
         reasons: moderation.reasons,
+        ...(moderation.ai ? { ai: moderation.ai } : {}),
         reportCount: 0,
         createdAt: now,
         updatedAt: now
@@ -1686,32 +1874,19 @@ class CommunityService {
       emitToAdmins('community:moderation:queued', { findingId, roomId: params.roomId, messageId })
     }
 
-    const update: any = {
-      $set: {
-        updatedAt: new Date(),
-        moderated: {
-          autoHidden: shouldAutoHide,
-          at: new Date(),
-          severity: moderation.severity,
-          categories: moderation.categories,
-          confidence: moderation.confidence,
-          reasons: moderation.reasons,
-          ...(findingId ? { findingId } : {})
-        },
-        ...(shouldAutoHide ? { status: 'hidden' as MessageStatus } : {})
-      }
+    if (findingId) {
+      await databaseService.communityMessages.updateOne({ _id: messageId }, { $set: { 'moderated.findingId': findingId } })
     }
-
-    await databaseService.communityMessages.updateOne({ _id: messageId }, update)
     const stored = await databaseService.communityMessages.findOne({ _id: messageId })
     const messageWithSender = stored ? await this.attachMessageSender(stored) : stored
 
-    if (messageWithSender) {
+    if (messageWithSender && !moderation.ai) {
       aiModerationService.enqueueMessageReview({ message: messageWithSender, ruleResult: moderation }).catch(() => {})
     }
 
     if (messageWithSender?.status === 'visible') {
-      emitCommunity('community:message:new', params.roomId, messageWithSender)
+      if (params.videoEventId) emitCommunityVideoEvent('community:message:new', params.videoEventId, messageWithSender)
+      else emitCommunity('community:message:new', params.roomId, messageWithSender)
     } else {
       emitToUser('community:message:hidden', params.userId, messageWithSender)
     }
@@ -1732,12 +1907,14 @@ class CommunityService {
     }
 
     const now = new Date()
+    const reportReason = params.reason?.trim()
+    const findingReason = reportReason ? `Báo cáo người dùng: ${reportReason}` : 'Người dùng báo cáo nội dung.'
     try {
       await databaseService.moderationReports.insertOne({
         roomId: message.roomId as ObjectId,
         messageId: params.messageId,
         reporterId: params.reporterId,
-        reason: params.reason?.trim(),
+        reason: reportReason,
         createdAt: now
       } as any)
     } catch (error: any) {
@@ -1754,7 +1931,7 @@ class CommunityService {
         {
           $set: { updatedAt: now, status: 'open' },
           $inc: { reportCount: 1 },
-          $addToSet: { categories: 'user_report' }
+          $addToSet: { categories: 'user_report', reasons: findingReason }
         }
       )
       emitToAdmins('community:moderation:queued', {
@@ -1774,7 +1951,7 @@ class CommunityService {
       severity: 'medium',
       categories: ['user_report'],
       confidence: 'low',
-      reasons: ['Người dùng báo cáo tin nhắn.'],
+      reasons: [findingReason],
       reportCount: 1,
       createdAt: now,
       updatedAt: now

@@ -1,8 +1,6 @@
 import { ObjectId } from 'mongodb'
 import { UserRole } from '~/constants/enum'
 
-type CommunityVideoEventVisibility = 'public' | 'private'
-
 export type CommunityVideoEventAuthContext = {
   userId?: ObjectId
   role?: UserRole
@@ -11,7 +9,6 @@ export type CommunityVideoEventAuthContext = {
 export type CommunityVideoEventAccessShape = {
   hostIds?: ObjectId[]
   roomId: ObjectId
-  visibility: CommunityVideoEventVisibility
 }
 
 export function isCommunityVideoEventAdmin(context?: CommunityVideoEventAuthContext) {
