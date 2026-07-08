@@ -31,6 +31,8 @@ type VideoEventAccessDoc = CommunityVideoEventAccessShape & {
   status?: VideoEventStatus
 }
 
+type VideoEventListSort = 'scheduled_asc' | 'created_desc'
+
 type CommunityVideoEventDoc = WithId<Document> &
   VideoEventAccessDoc & {
     status: VideoEventStatus
@@ -147,6 +149,28 @@ class CommunityVideoEventsService {
 
   private isHost(event: VideoEventHostShape, userId?: ObjectId) {
     return isCommunityVideoEventHost(event, userId)
+  }
+
+  private effectiveStatus(event: Pick<CommunityVideoEventDoc, 'status' | 'scheduledStartAt' | 'scheduledEndAt'>) {
+    const startAt = event.scheduledStartAt ? new Date(event.scheduledStartAt).getTime() : Number.NaN
+    const endAt = event.scheduledEndAt ? new Date(event.scheduledEndAt).getTime() : Number.NaN
+    const now = Date.now()
+    if (['scheduled', 'live'].includes(event.status) && !Number.isNaN(endAt) && endAt <= now) return 'ended' as VideoEventStatus
+    if (event.status === 'scheduled' && !Number.isNaN(startAt) && startAt <= now) return 'live' as VideoEventStatus
+    return event.status
+  }
+
+  private withEffectiveStatus<T extends { status: VideoEventStatus; scheduledStartAt?: Date; scheduledEndAt?: Date; endedAt?: Date | null }>(event: T): T {
+    const status = this.effectiveStatus(event as CommunityVideoEventDoc)
+    if (status === event.status) return event
+    return { ...event, status, endedAt: event.endedAt || event.scheduledEndAt || null }
+  }
+
+  private effectiveStatusCondition(status: VideoEventStatus, now = new Date()) {
+    if (status === 'ended') return { $or: [{ status: 'ended' }, { status: { $in: ['scheduled', 'live'] }, scheduledEndAt: { $lte: now } }] }
+    if (status === 'scheduled') return { status: 'scheduled', scheduledStartAt: { $gt: now }, scheduledEndAt: { $gt: now } }
+    if (status === 'live') return { $or: [{ status: 'live', scheduledEndAt: { $gt: now } }, { status: 'scheduled', scheduledStartAt: { $lte: now }, scheduledEndAt: { $gt: now } }] }
+    return { status }
   }
 
   private async getActiveRoom(roomId: ObjectId) {
@@ -283,8 +307,8 @@ class CommunityVideoEventsService {
   }
 
   async assertCanSubscribeRealtime(eventId: ObjectId, context: AuthContext) {
-    const event = await this.getEvent(eventId)
-    if (event.status === 'cancelled' || event.status === 'draft') {
+    const event = this.withEffectiveStatus(await this.getEvent(eventId))
+    if (event.status === 'cancelled' || event.status === 'draft' || event.status === 'ended') {
       throw new ErrorWithStatus({ message: 'Không tìm thấy hội thảo.', status: HTTP_STATUS.NOT_FOUND })
     }
     await this.assertCanViewEvent(event, context)
@@ -424,14 +448,17 @@ class CommunityVideoEventsService {
     status?: VideoEventStatus
     search?: string
     upcomingOnly?: boolean
+    sort?: VideoEventListSort
     page?: number
     limit?: number
   }) {
     const page = params?.page || 1
     const limit = params?.limit || 20
     const query: any = {}
+    const andConditions: any[] = []
+    const now = new Date()
     if (params?.roomId) query.roomId = params.roomId
-    if (params?.status) query.status = params.status
+    if (params?.status) andConditions.push(this.effectiveStatusCondition(params.status, now))
     if (params?.upcomingOnly) {
       query.scheduledEndAt = { $gte: new Date() }
       if (!params.status) query.status = { $in: ['scheduled', 'live'] }
@@ -439,11 +466,11 @@ class CommunityVideoEventsService {
     const search = params?.search?.trim()
     if (search) {
       const regex = new RegExp(escapeRegex(search), 'i')
-      query.$or = [{ title: regex }, { description: regex }, { tags: regex }]
+      andConditions.push({ $or: [{ title: regex }, { description: regex }, { tags: regex }] })
     }
 
     if (!this.isAdmin(params?.viewer)) {
-      if (!query.status) query.status = { $nin: ['draft', 'cancelled'] }
+      if (!params?.status && !query.status) query.status = { $nin: ['draft', 'cancelled'] }
       const publicRooms = await databaseService.communityRooms
         .find({ status: 'active', visibility: { $ne: 'private' } })
         .project({ _id: 1 })
@@ -464,12 +491,17 @@ class CommunityVideoEventsService {
       }
     }
 
+    if (andConditions.length) query.$and = andConditions
+
     const skip = (page - 1) * limit
+    const sort = params?.sort === 'created_desc'
+      ? { createdAt: -1, scheduledStartAt: -1 }
+      : { scheduledStartAt: 1, createdAt: -1 }
     const [items, total] = await Promise.all([
       databaseService.communityVideoEvents
         .aggregate([
           { $match: query },
-          { $sort: { scheduledStartAt: 1, createdAt: -1 } },
+          { $sort: sort },
           { $skip: skip },
           { $limit: limit },
           {
@@ -509,7 +541,7 @@ class CommunityVideoEventsService {
         .toArray(),
       databaseService.communityVideoEvents.countDocuments(query)
     ])
-    return { items, page, limit, total }
+    return { items: items.map((item: any) => this.withEffectiveStatus(item)), page, limit, total }
   }
 
   async listMyEvents(
@@ -525,9 +557,9 @@ class CommunityVideoEventsService {
       .toArray()
     const registeredEventIds = registrations.map((item: any) => item.eventId).filter(Boolean)
     const hostQuery = { hostIds: userId }
-    const query: any = { $or: [{ _id: { $in: registeredEventIds } }, hostQuery] }
-    if (params?.status) query.status = params.status
-    if (role !== UserRole.Admin) query.status = query.status || { $ne: 'cancelled' }
+    const query: any = { $and: [{ $or: [{ _id: { $in: registeredEventIds } }, hostQuery] }] }
+    if (params?.status) query.$and.push(this.effectiveStatusCondition(params.status))
+    if (role !== UserRole.Admin && !params?.status) query.$and.push({ status: { $ne: 'cancelled' } })
     const page = params?.page || 1
     const limit = params?.limit || 20
     const skip = (page - 1) * limit
@@ -535,7 +567,7 @@ class CommunityVideoEventsService {
       databaseService.communityVideoEvents.find(query).sort({ scheduledStartAt: 1 }).skip(skip).limit(limit).toArray(),
       databaseService.communityVideoEvents.countDocuments(query)
     ])
-    return { items, page, limit, total }
+    return { items: items.map((item: any) => this.withEffectiveStatus(item)), page, limit, total }
   }
 
   async getEventDetail(eventId: ObjectId, context?: AuthContext) {
@@ -554,7 +586,7 @@ class CommunityVideoEventsService {
         ? databaseService.communityVideoEventRegistrations.findOne({ eventId, userId: context.userId })
         : null
     ])
-    return { ...event, room, registrationCount, viewerRegistration }
+    return this.withEffectiveStatus({ ...event, room, registrationCount, viewerRegistration })
   }
 
   async cancelEvent(eventId: ObjectId, context: AuthContext) {
@@ -666,7 +698,7 @@ class CommunityVideoEventsService {
   }
 
   async joinEvent(eventId: ObjectId, userId: ObjectId, role?: UserRole) {
-    const event = await this.getEvent(eventId)
+    const event = this.withEffectiveStatus(await this.getEvent(eventId))
     await this.assertCanJoinOrRegister(event, userId, role)
     if (['draft', 'ended', 'cancelled'].includes(event.status))
       throw new ErrorWithStatus({ message: 'Hội thảo hiện không thể tham gia.', status: HTTP_STATUS.BAD_REQUEST })
