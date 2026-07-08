@@ -229,6 +229,19 @@ describe('CommunityVideoEventsService functional rules', () => {
     )
   })
 
+  it('joinEvent blocks scheduled meetings after their end time', async () => {
+    const userId = new ObjectId()
+    const event = makeEvent({
+      status: 'scheduled',
+      scheduledStartAt: new Date(Date.now() - 2 * 60 * 60_000),
+      scheduledEndAt: new Date(Date.now() - 60 * 60_000)
+    })
+    mockCommunityVideoEvents.findOne.mockResolvedValue(event)
+
+    await expect(communityVideoEventsService.joinEvent(event._id, userId)).rejects.toMatchObject({ status: 400 })
+    expect(createJoinToken).not.toHaveBeenCalled()
+  })
+
   it('joinEvent blocks participants removed from the live meeting', async () => {
     const userId = new ObjectId()
     const event = makeEvent({ status: 'live' })
@@ -261,6 +274,49 @@ describe('CommunityVideoEventsService functional rules', () => {
       publicRoomId.toString(),
       privateRoomId.toString()
     ])
+  })
+
+  it('listEvents exposes past scheduled meetings as ended', async () => {
+    const event = makeEvent({
+      status: 'scheduled',
+      scheduledStartAt: new Date(Date.now() - 2 * 60 * 60_000),
+      scheduledEndAt: new Date(Date.now() - 60 * 60_000)
+    })
+    mockCommunityVideoEvents.aggregate.mockReturnValue(cursor([event]))
+    mockCommunityVideoEvents.countDocuments.mockResolvedValue(1)
+
+    const result = await communityVideoEventsService.listEvents({ viewer: { userId: new ObjectId(), role: UserRole.Admin }, page: 1, limit: 10 })
+
+    expect(result.items[0]).toMatchObject({ status: 'ended', endedAt: event.scheduledEndAt })
+  })
+
+  it('listEvents exposes started scheduled meetings as live until their end time', async () => {
+    const event = makeEvent({
+      status: 'scheduled',
+      scheduledStartAt: new Date(Date.now() - 10 * 60_000),
+      scheduledEndAt: new Date(Date.now() + 50 * 60_000)
+    })
+    mockCommunityVideoEvents.aggregate.mockReturnValue(cursor([event]))
+    mockCommunityVideoEvents.countDocuments.mockResolvedValue(1)
+
+    const result = await communityVideoEventsService.listEvents({ viewer: { userId: new ObjectId(), role: UserRole.Admin }, page: 1, limit: 10 })
+
+    expect(result.items[0]).toMatchObject({ status: 'live' })
+  })
+
+  it('listEvents can sort newest created events first for admin lists', async () => {
+    mockCommunityVideoEvents.aggregate.mockReturnValue(cursor([]))
+    mockCommunityVideoEvents.countDocuments.mockResolvedValue(0)
+
+    await communityVideoEventsService.listEvents({
+      viewer: { userId: new ObjectId(), role: UserRole.Admin },
+      page: 1,
+      limit: 10,
+      sort: 'created_desc'
+    })
+
+    const sortStage = mockCommunityVideoEvents.aggregate.mock.calls[0][0][1]
+    expect(sortStage).toEqual({ $sort: { createdAt: -1, scheduledStartAt: -1 } })
   })
 
   it('sendDueReminders processes registration batches and marks event sentinel only when sends succeed', async () => {
