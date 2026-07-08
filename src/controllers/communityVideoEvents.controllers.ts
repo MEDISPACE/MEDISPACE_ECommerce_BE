@@ -222,6 +222,51 @@ export const muteAdminVideoEventParticipantController = async (req: Request, res
   return res.status(200).json({ message: 'Đã tắt micro người tham gia', data: result })
 }
 
+export const disableAdminVideoEventParticipantCameraController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.disableLiveParticipantCamera(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã khóa camera người tham gia', data: result })
+}
+
+export const disableAdminVideoEventParticipantScreenShareController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.disableLiveParticipantScreenShare(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã khóa chia sẻ màn hình người tham gia', data: result })
+}
+
+export const enableAdminVideoEventParticipantAudioController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.enableLiveParticipantAudio(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã mở khóa micro người tham gia', data: result })
+}
+
+export const enableAdminVideoEventParticipantCameraController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.enableLiveParticipantCamera(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã mở khóa camera người tham gia', data: result })
+}
+
+export const enableAdminVideoEventParticipantScreenShareController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.enableLiveParticipantScreenShare(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã mở khóa chia sẻ màn hình người tham gia', data: result })
+}
+
 export const kickAdminVideoEventParticipantController = async (req: Request, res: Response) => {
   const result = await communityVideoEventsService.kickLiveParticipant(
     new ObjectId(paramString(req.params.eventId)),
@@ -229,4 +274,13 @@ export const kickAdminVideoEventParticipantController = async (req: Request, res
     authContext(req) || {}
   )
   return res.status(200).json({ message: 'Đã mời người tham gia khỏi phòng họp', data: result })
+}
+
+export const banAdminVideoEventParticipantController = async (req: Request, res: Response) => {
+  const result = await communityVideoEventsService.banLiveParticipant(
+    new ObjectId(paramString(req.params.eventId)),
+    new ObjectId(paramString(req.params.userId)),
+    authContext(req) || {}
+  )
+  return res.status(200).json({ message: 'Đã cấm người tham gia vào lại phòng họp', data: result })
 }

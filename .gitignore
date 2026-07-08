@@ -28,5 +28,6 @@ coverage/
 !src/tests/loyaltyCoupon.integration.test.ts
 !src/tests/recommendations.services.spec.ts
 !src/tests/communityVideoEvents.services.test.ts
+!src/tests/livekit.services.test.ts
 
 note.txt

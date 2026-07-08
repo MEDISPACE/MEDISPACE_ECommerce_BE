@@ -116,6 +116,18 @@ describe('CommunityService', () => {
     expect(pipeline[0].$match).toEqual({ status: 'active', visibility: 'public' })
   })
 
+  it('excludes video event chat messages from room latest activity stats', async () => {
+    const toArray = vi.fn().mockResolvedValue([])
+    mockCommunityRooms.aggregate.mockReturnValue({ toArray })
+
+    await communityService.listRooms()
+
+    const pipeline = mockCommunityRooms.aggregate.mock.calls[0][0]
+    const messageStatsLookup = pipeline.find((stage: any) => stage.$lookup?.as === 'messageStats')
+    const messageMatch = messageStatsLookup.$lookup.pipeline[0].$match.$expr.$and
+    expect(messageMatch).toContainEqual({ $eq: [{ $type: '$videoEventId' }, 'missing'] })
+  })
+
   it('includes pending and banned private rooms in the authenticated room list', async () => {
     const userId = new ObjectId()
     const roomId = new ObjectId()
