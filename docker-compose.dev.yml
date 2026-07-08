@@ -32,6 +32,7 @@ services:
       TYPESENSE_EMBEDDING_ENABLED: "false"
       OCR_SERVICE_URL: http://ocr-service:8001
       PRESCRIPTION_OCR_MODE: ${PRESCRIPTION_OCR_MODE:-parallel}
+      PRESCRIPTION_OCR_SCAN_TIMEOUT_MS: ${PRESCRIPTION_OCR_SCAN_TIMEOUT_MS:-220000}
       ML_SERVICE_URL: http://ml-service:8002
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:-medispace-dev-ml-token}
       CHAT_AI_URL: http://chat-ai-service:8003
