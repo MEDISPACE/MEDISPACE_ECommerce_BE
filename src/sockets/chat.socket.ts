@@ -19,6 +19,47 @@ const GREETING_RESPONSE = 'Chào bạn, mình là Trợ lý Sức khỏe AI củ
 
 const IMAGE_MISSING_RESPONSE = 'Mình thấy bạn vừa gửi ảnh, nhưng hệ thống chưa nhận được đường dẫn ảnh hợp lệ để AI đọc nội dung. Bạn vui lòng gửi lại ảnh rõ nét hơn; nếu vẫn lỗi, Medispace sẽ kiểm tra cấu hình tải ảnh trên production.'
 const IMAGE_AI_ERROR_RESPONSE = 'Mình đã nhận được yêu cầu có ảnh nhưng hiện chưa đọc được ảnh này trên hệ thống production. Bạn vui lòng gửi lại ảnh hoặc thử ảnh khác; Medispace sẽ kiểm tra log tải ảnh để xử lý.'
+const CHAT_IMAGE_INLINE_MAX_BYTES = Number(process.env.CHAT_IMAGE_INLINE_MAX_BYTES || 8 * 1024 * 1024)
+
+function detectImageMime(bytes: Uint8Array): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) return 'image/png'
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) return 'image/webp'
+  return null
+}
+
+async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
+  const response = await fetch(imageUrl, { signal: AbortSignal.timeout(20000) })
+  if (!response.ok) throw new Error(`Image fetch HTTP ${response.status}`)
+
+  const arrayBuffer = await response.arrayBuffer()
+  if (arrayBuffer.byteLength > CHAT_IMAGE_INLINE_MAX_BYTES) {
+    throw new Error(`Image is too large: ${arrayBuffer.byteLength} bytes`)
+  }
+
+  const bytes = new Uint8Array(arrayBuffer)
+  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || ''
+  const mime = contentType.startsWith('image/') ? contentType : detectImageMime(bytes)
+  if (!mime || !['image/jpeg', 'image/png', 'image/webp'].includes(mime)) {
+    throw new Error(`Unsupported image content-type: ${contentType || 'missing'}`)
+  }
+
+  return `data:${mime};base64,${Buffer.from(arrayBuffer).toString('base64')}`
+}
 
 function normalizeVietnameseText(value: string): string {
   return (value || '')
@@ -662,6 +703,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   const imageUrlForAi = typeof data.imageUrl === 'string' && data.imageUrl.trim()
                     ? data.imageUrl.trim()
                     : undefined
+                  let imagePayloadForAi = imageUrlForAi
                   if (data.type === 'image' || imageUrlForAi) {
                     let imageHost = 'invalid-url'
                     try {
@@ -693,6 +735,22 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     return
                   }
 
+                  if (imageUrlForAi && process.env.CHAT_AI_INLINE_IMAGES !== 'false') {
+                    try {
+                      imagePayloadForAi = await imageUrlToDataUrl(imageUrlForAi)
+                      console.log('[Socket] Inlined chat image for AI', {
+                        conversationId: convIdStr,
+                        originalHost: new URL(imageUrlForAi).hostname,
+                        payloadBytes: imagePayloadForAi.length
+                      })
+                    } catch (inlineErr) {
+                      console.warn('[Socket] Could not inline chat image for AI; forwarding URL instead', {
+                        conversationId: convIdStr,
+                        reason: inlineErr instanceof Error ? inlineErr.message : String(inlineErr)
+                      })
+                    }
+                  }
+
                   const aiRes = await fetch(`${aiServiceUrl}/chat/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -703,7 +761,7 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                       history,
                       context_products: contextProducts,
                       context_data: contextData || undefined,
-                      image_url: imageUrlForAi
+                      image_url: imagePayloadForAi
                     }),
                     signal: AbortSignal.timeout(imageUrlForAi ? 180000 : 65000)
                   })
@@ -835,9 +893,10 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     message: aiErr instanceof Error ? aiErr.message : 'AI stream error'
                   })
                   const fallback = 'Trợ lý ảo hiện đang gặp sự cố. Bạn có muốn kết nối với Dược sĩ thật không?'
+                  const imageErrorDetail = aiErr instanceof Error && aiErr.message ? ` Chi tiết kỹ thuật: ${aiErr.message.slice(0, 180)}` : ''
                   const aiMessage = await chatsService.sendAIMessage(
                     convIdStr,
-                    isImageAttempt ? IMAGE_AI_ERROR_RESPONSE : fallback,
+                    isImageAttempt ? `${IMAGE_AI_ERROR_RESPONSE}${imageErrorDetail}` : fallback,
                     isImageAttempt ? 'image_only_triage' : undefined
                   )
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
