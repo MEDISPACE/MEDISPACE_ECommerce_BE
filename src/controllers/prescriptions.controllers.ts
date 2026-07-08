@@ -282,11 +282,53 @@ const normalizeMedicationTerm = (value?: string | null) =>
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     .trim()
 
-const getPrimaryIngredient = (value?: string | null) =>
+const cleanMedicationSearchTerm = (value?: string | null) =>
   String(value || '')
+    .replace(/\d+(\.\d+)?\s*(mg|g|ml|mcg|iu|%)\b/gi, ' ')
+    .replace(/\b(vien|viên|goi|gói|chai|ong|ống|lo|lọ|tuyp|tube|hop|hộp)\b/gi, ' ')
+    .replace(/[()[\]{}]/g, ' ')
+    .replace(/[,;|/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const escapeRegexTerm = (value?: string | null) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim()
+
+const uniqTerms = (terms: Array<string | null | undefined>) => {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const term of terms) {
+    const cleaned = cleanMedicationSearchTerm(term)
+    if (cleaned.length < 3) continue
+    const key = cleaned.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(cleaned)
+  }
+  return result
+}
+
+const getParentheticalTerms = (value?: string | null) => {
+  const matches = String(value || '').matchAll(/\(([^)]+)\)/g)
+  return Array.from(matches).map((match) => match[1])
+}
+
+const getBrandTerm = (value?: string | null) => String(value || '').split('(')[0]
+
+const getMedicationSearchTerms = (med: any, matchedProduct?: any) => {
+  const matchedIngredient = matchedProduct?.details?.activeIngredients || matchedProduct?.activeIngredients
+  const ingredientSource = matchedIngredient || med.activeIngredient
+  const ingredientParts = String(ingredientSource || '')
     .split(/[,+/;|]/)
     .map((part) => part.trim())
-    .find((part) => part.length >= 3) || ''
+
+  return uniqTerms([
+    getBrandTerm(med.productName),
+    med.productName,
+    ...getParentheticalTerms(med.productName),
+    ingredientSource,
+    ...ingredientParts
+  ])
+}
 
 const toMedicationProduct = (product: any, reason?: string) => {
   const defaultVariant = getDefaultPriceVariant(product)
@@ -320,7 +362,7 @@ const findProductsWithDetails = async (filter: Record<string, unknown>, limit: n
       },
       { $addFields: { details: { $arrayElemAt: ['$details', 0] } } },
       { $match: filter },
-      { $sort: { requiresPrescription: 1, stockQuantity: -1, rating: -1, reviewCount: -1 } },
+      { $sort: { stockQuantity: -1, rating: -1, reviewCount: -1 } },
       { $limit: limit }
     ])
     .toArray()
@@ -328,9 +370,7 @@ const findProductsWithDetails = async (filter: Record<string, unknown>, limit: n
 
 const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4) => {
   const excludeIds = matchedProduct?._id ? [matchedProduct._id] : []
-  const matchedIngredient = matchedProduct?.details?.activeIngredients || matchedProduct?.activeIngredients
-  const ingredientTerm = getPrimaryIngredient(matchedIngredient || med.activeIngredient)
-  const safeIngredient = normalizeMedicationTerm(ingredientTerm)
+  const searchTerms = getMedicationSearchTerms(med, matchedProduct)
   const candidates: any[] = []
   const seen = new Set(excludeIds.map((id) => id.toString()))
 
@@ -344,21 +384,27 @@ const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4)
     }
   }
 
-  if (safeIngredient.length >= 3) {
+  for (const term of searchTerms) {
+    if (candidates.length >= limit) break
+    const safeTerm = escapeRegexTerm(term)
+    if (safeTerm.length < 3) continue
+
     pushUnique(
       await findProductsWithDetails(
         {
-          _id: { $nin: excludeIds },
+          _id: { $nin: [...seen].filter(ObjectId.isValid).map((id) => new ObjectId(id)) },
           isActive: true,
-          stockQuantity: { $gt: 0 },
           $or: [
-            { 'details.activeIngredients': { $regex: safeIngredient, $options: 'i' } },
-            { name: { $regex: safeIngredient, $options: 'i' } }
+            { 'details.activeIngredients': { $regex: safeTerm, $options: 'i' } },
+            { activeIngredients: { $regex: safeTerm, $options: 'i' } },
+            { name: { $regex: safeTerm, $options: 'i' } }
           ]
         },
-        limit
+        limit - candidates.length
       ),
-      'Cung hoat chat'
+      term.toLowerCase() === cleanMedicationSearchTerm(getBrandTerm(med.productName)).toLowerCase()
+        ? 'Ten gan dung'
+        : 'Cung hoat chat'
     )
   }
 
@@ -368,7 +414,6 @@ const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4)
         {
           _id: { $nin: [...seen].filter(ObjectId.isValid).map((id) => new ObjectId(id)) },
           isActive: true,
-          stockQuantity: { $gt: 0 },
           categoryId: matchedProduct.categoryId,
           requiresPrescription: matchedProduct.requiresPrescription
         },
@@ -385,7 +430,6 @@ const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4)
         {
           _id: { $nin: [...seen].filter(ObjectId.isValid).map((id) => new ObjectId(id)) },
           isActive: true,
-          stockQuantity: { $gt: 0 },
           name: { $regex: productNameTerm, $options: 'i' }
         },
         limit - candidates.length
@@ -398,16 +442,20 @@ const findEquivalentProducts = async (med: any, matchedProduct?: any, limit = 4)
 }
 
 const findMatchedProduct = async (productName: string) => {
-  const searchPattern = normalizeMedicationTerm(productName)
-  if (searchPattern.length < 2) return null
-  const products = await findProductsWithDetails(
-    {
-      name: { $regex: new RegExp(searchPattern, 'i') },
-      isActive: true
-    },
-    1
-  )
-  return products[0] || null
+  const searchTerms = uniqTerms([getBrandTerm(productName), productName, ...getParentheticalTerms(productName)])
+  for (const term of searchTerms) {
+    const searchPattern = escapeRegexTerm(term)
+    if (searchPattern.length < 2) continue
+    const products = await findProductsWithDetails(
+      {
+        name: { $regex: new RegExp(searchPattern, 'i') },
+        isActive: true
+      },
+      1
+    )
+    if (products[0]) return products[0]
+  }
+  return null
 }
 
 const firstNonEmpty = (values: unknown[]) => values.find((value) => value !== undefined && value !== null && value !== '')
