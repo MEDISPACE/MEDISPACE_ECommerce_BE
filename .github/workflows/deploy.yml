@@ -19,7 +19,7 @@ on:
         required: false
         default: ''
         type: choice
-        options: ['', backend, frontend, ocr-service, ml-service]
+        options: ['', backend, frontend, ocr-service, ml-service, chat-ai-service]
       image_tag:
         description: 'Image tag for manual deploy/rollback (empty = keep current tag, rollback uses previous tag)'
         required: false
@@ -93,6 +93,7 @@ jobs:
                 frontend) echo "FRONTEND_TAG" ;;
                 ocr-service) echo "OCR_SERVICE_TAG" ;;
                 ml-service) echo "ML_SERVICE_TAG" ;;
+                chat-ai-service) echo "CHAT_AI_SERVICE_TAG" ;;
                 *) echo "Unknown service: $1" >&2; exit 1 ;;
               esac
             }
@@ -219,6 +220,7 @@ jobs:
                 frontend) echo "FRONTEND_TAG" ;;
                 ocr-service) echo "OCR_SERVICE_TAG" ;;
                 ml-service) echo "ML_SERVICE_TAG" ;;
+                chat-ai-service) echo "CHAT_AI_SERVICE_TAG" ;;
                 *) echo "Unknown service: $1" >&2; exit 1 ;;
               esac
             }

@@ -34,6 +34,7 @@ services:
       - typesense
       - ocr-service
       - ml-service
+      - chat-ai-service
     restart: unless-stopped
     networks:
       - medispace-net
@@ -78,6 +79,7 @@ services:
 
   # ── Chat AI Service (Python / FastAPI / Gemma) ──────────────────────────
   chat-ai-service:
+    image: ${DOCKERHUB_USERNAME:-bao110304}/medispace-chat-ai:${CHAT_AI_SERVICE_TAG:-latest}
     build:
       context: ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service
       dockerfile: Dockerfile

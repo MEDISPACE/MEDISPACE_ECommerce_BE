@@ -18,6 +18,7 @@ services:
       OCR_SERVICE_URL: http://ocr-service:8001
       ML_SERVICE_URL: http://ml-service:8002
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
+      CHAT_AI_URL: http://chat-ai-service:8003
       REDIS_URL: redis://redis:6379
     volumes:
       - ../uploads:/app/uploads
@@ -26,6 +27,7 @@ services:
       - typesense
       - ocr-service
       - ml-service
+      - chat-ai-service
     restart: unless-stopped
     networks:
       - medispace-net
@@ -64,6 +66,23 @@ services:
     environment:
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN is required}
       BE_SERVICE_URLS: http://backend:8000
+    restart: unless-stopped
+    networks:
+      - medispace-net
+
+  chat-ai-service:
+    image: ${DOCKERHUB_USERNAME}/medispace-chat-ai:${CHAT_AI_SERVICE_TAG:-latest}
+    container_name: medispace-chat-ai
+    ports:
+      - "8003:8003"
+    env_file:
+      - ../.env
+    environment:
+      TYPESENSE_URL: http://typesense:8108
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY}
+    depends_on:
+      - typesense
+      - redis
     restart: unless-stopped
     networks:
       - medispace-net
