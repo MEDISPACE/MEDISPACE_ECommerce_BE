@@ -43,6 +43,7 @@ const productSchema = {
     { name: 'brandName', type: 'string' as const, facet: true, optional: true },
     { name: 'requiresPrescription', type: 'bool' as const, facet: true },
     { name: 'isActive', type: 'bool' as const, facet: true },
+    { name: 'status', type: 'string' as const, facet: true },
     { name: 'inStock', type: 'bool' as const, facet: true },
     { name: 'stockQuantity', type: 'int32' as const },
     { name: 'price', type: 'float' as const },
@@ -211,7 +212,8 @@ function toProductDocument(product: any): Record<string, unknown> {
     brandName: product.brand?.name || product.brandName || '',
     requiresPrescription: Boolean(product.requiresPrescription),
     isActive: product.isActive !== false,
-    inStock: (product.stockQuantity || 0) > 0,
+    status: product.status || 'active',
+    inStock: (product.status || 'active') === 'active' && (product.stockQuantity || 0) > 0,
     stockQuantity: product.stockQuantity || 0,
     price,
     originalPrice,
@@ -916,9 +918,9 @@ class TypesenseService {
     const strictSearchMatching = isTextSearch && searchQueryTokens.length >= 3
 
     const publicIncludeFields =
-      'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,inStock,stockQuantity,maxOrderQuantity,activeIngredients'
+      'mongoId,name,slug,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,status,inStock,stockQuantity,maxOrderQuantity,activeIngredients'
     const drugDatabaseIncludeFields =
-      'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,inStock,stockQuantity,maxOrderQuantity,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt'
+      'mongoId,name,slug,sku,barcode,shortDescription,featuredImage,price,originalPrice,salePrice,discountPercentage,defaultUnit,priceVariantsJson,rating,reviewCount,categoryId,categoryName,brandId,brandName,requiresPrescription,isActive,status,inStock,stockQuantity,maxOrderQuantity,activeIngredients,indications,manufacturer,dosageForm,strength,packSize,dosageInstructions,storageInstructions,createdAt'
 
     try {
       return await client.collections(PRODUCTS_COLLECTION).documents().search({

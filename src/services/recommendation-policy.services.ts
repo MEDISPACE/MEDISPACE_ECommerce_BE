@@ -45,6 +45,7 @@ class RecommendationPolicyService {
           $match: {
             _id: { $in: productIds },
             isActive: true,
+            status: 'active',
             stockQuantity: { $gt: 0 },
             // Automatic recommendations are merchandising assistance only.
             // Prescription products must be selected explicitly by a pharmacist.
@@ -85,6 +86,7 @@ class RecommendationPolicyService {
             rating: 1,
             reviewCount: 1,
             stockQuantity: 1,
+            status: 1,
             requiresPrescription: 1,
             'details.activeIngredients': 1,
             'category.name': 1,

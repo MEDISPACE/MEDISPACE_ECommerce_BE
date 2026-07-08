@@ -419,6 +419,7 @@ class ProductsService {
     }
 
     if (query.inStock === 'true') {
+      if (!query.status) filter.status = 'active'
       filter.stockQuantity = { ...(filter.stockQuantity as Record<string, number>), $gt: 0 }
     }
 
@@ -441,6 +442,7 @@ class ProductsService {
 
     // Handle inStock filter: map to stockQuantity > 0
     if (query.inStock === 'true') {
+      if (!query.status) filter.status = 'active'
       filter.stockQuantity = { ...(filter.stockQuantity as Record<string, number> || {}), $gt: 0 }
     }
 
@@ -907,7 +909,7 @@ class ProductsService {
 
   // Update stock quantity
   async updateStock(productId: string, quantity: number, lastModifiedBy: ObjectId) {
-    await this.getProductById(productId) // Check product exists
+    const product = await this.getProductById(productId) // Check product exists
 
     if (quantity < 0) {
       throw new ErrorWithStatus({
@@ -921,7 +923,12 @@ class ProductsService {
       {
         $set: {
           stockQuantity: quantity,
-          status: quantity === 0 ? 'out_of_stock' : 'active',
+          status:
+            product.status === 'discontinued' || product.status === 'out_of_stock'
+              ? product.status
+              : quantity === 0
+                ? 'out_of_stock'
+                : 'active',
           updatedAt: new Date(),
           lastModifiedBy
         }

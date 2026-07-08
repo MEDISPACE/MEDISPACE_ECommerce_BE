@@ -8,6 +8,15 @@ import { generateSessionId } from '~/utils/crypto'
 import { CARTS_MESSAGES } from '~/constants/message'
 
 class CartService {
+  private assertProductAvailableForSale(product: any) {
+    if (product.isActive === false || product.status !== 'active') {
+      throw new ErrorWithStatus({
+        message: product.status === 'discontinued' ? 'Sản phẩm đã ngừng kinh doanh.' : 'Sản phẩm hiện không có sẵn để mua.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+  }
+
   private getGuestCartQuery(sessionId: string) {
     return {
       sessionId,
@@ -184,6 +193,7 @@ class CartService {
         status: HTTP_STATUS.NOT_FOUND
       })
     }
+    this.assertProductAvailableForSale(product)
 
     // Check stock availability with unit conversion
     const variant = product.priceVariants?.find((v: any) => v.unit === requestedUnit)
@@ -278,6 +288,7 @@ class CartService {
         status: HTTP_STATUS.NOT_FOUND
       })
     }
+    this.assertProductAvailableForSale(product)
     if (quantity < 1 || quantity > (product.maxOrderQuantity || 10)) {
       throw new ErrorWithStatus({
         message: CARTS_MESSAGES.QUANTITY_MUST_BE_BETWEEN_1_AND_10,
@@ -349,6 +360,7 @@ class CartService {
         status: HTTP_STATUS.NOT_FOUND
       })
     }
+    this.assertProductAvailableForSale(product)
 
     // Find the price variant for the selected unit
     const variant = product.priceVariants?.find((v: any) => v.unit === unit)
@@ -476,6 +488,7 @@ class CartService {
           status: HTTP_STATUS.BAD_REQUEST
         })
       }
+      this.assertProductAvailableForSale(product)
 
       // Check stock with unit conversion
       const variant = product.priceVariants?.find((v: any) => v.unit === item.unit)
