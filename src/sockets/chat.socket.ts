@@ -17,6 +17,9 @@ import communityVideoEventAccessService from '~/services/communityVideoEventAcce
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const GREETING_RESPONSE = 'Chào bạn, mình là Trợ lý Sức khỏe AI của Medispace. Mình có thể hỗ trợ bạn tra cứu thông tin thuốc, sản phẩm, đơn hàng hoặc hướng dẫn kết nối Dược sĩ khi cần. Bạn cần mình hỗ trợ gì hôm nay?'
 
+const IMAGE_MISSING_RESPONSE = 'Mình thấy bạn vừa gửi ảnh, nhưng hệ thống chưa nhận được đường dẫn ảnh hợp lệ để AI đọc nội dung. Bạn vui lòng gửi lại ảnh rõ nét hơn; nếu vẫn lỗi, Medispace sẽ kiểm tra cấu hình tải ảnh trên production.'
+const IMAGE_AI_ERROR_RESPONSE = 'Mình đã nhận được yêu cầu có ảnh nhưng hiện chưa đọc được ảnh này trên hệ thống production. Bạn vui lòng gửi lại ảnh hoặc thử ảnh khác; Medispace sẽ kiểm tra log tải ảnh để xử lý.'
+
 function normalizeVietnameseText(value: string): string {
   return (value || '')
     .normalize('NFD')
@@ -669,8 +672,25 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     console.log('[Socket] Forwarding chat image to AI', {
                       conversationId: convIdStr,
                       hasImageUrl: Boolean(imageUrlForAi),
-                      imageHost
+                      imageHost,
+                      aiServiceUrl
                     })
+                  }
+
+                  if (data.type === 'image' && !imageUrlForAi) {
+                    io.to(`conversation:${convIdStr}`).emit('message:stream:start', { conversationId: convIdStr })
+                    io.to(`conversation:${convIdStr}`).emit('message:stream:error', {
+                      conversationId: convIdStr,
+                      message: 'Missing imageUrl in socket payload'
+                    })
+                    const aiMessage = await chatsService.sendAIMessage(
+                      convIdStr,
+                      IMAGE_MISSING_RESPONSE,
+                      'image_only_triage'
+                    )
+                    io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
+                    io.to(`conversation:${convIdStr}`).emit('message:stream:done', { conversationId: convIdStr })
+                    return
                   }
 
                   const aiRes = await fetch(`${aiServiceUrl}/chat/stream`, {
@@ -687,6 +707,11 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                     }),
                     signal: AbortSignal.timeout(imageUrlForAi ? 180000 : 65000)
                   })
+
+                  if (!aiRes.ok) {
+                    const errorText = await aiRes.text().catch(() => '')
+                    throw new Error(`AI service HTTP ${aiRes.status}: ${errorText.slice(0, 500)}`)
+                  }
 
                   if (!aiRes.body) throw new Error("No response body from AI stream");
 
@@ -804,12 +829,17 @@ export const initChatSocket = (httpServer: HTTPServer) => {
                   }
                 } catch (aiErr) {
                   console.error('Error calling AI Service:', aiErr)
+                  const isImageAttempt = data.type === 'image' || Boolean(data.imageUrl)
                   io.to(`conversation:${convIdStr}`).emit('message:stream:error', {
                     conversationId: convIdStr,
                     message: aiErr instanceof Error ? aiErr.message : 'AI stream error'
                   })
                   const fallback = 'Trợ lý ảo hiện đang gặp sự cố. Bạn có muốn kết nối với Dược sĩ thật không?'
-                  const aiMessage = await chatsService.sendAIMessage(convIdStr, fallback)
+                  const aiMessage = await chatsService.sendAIMessage(
+                    convIdStr,
+                    isImageAttempt ? IMAGE_AI_ERROR_RESPONSE : fallback,
+                    isImageAttempt ? 'image_only_triage' : undefined
+                  )
                   io.to(`conversation:${convIdStr}`).emit('message:new', aiMessage)
                 }
               } else {
