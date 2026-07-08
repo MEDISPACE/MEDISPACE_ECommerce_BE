@@ -852,6 +852,7 @@ class TypesenseService {
     ratingMin?: number
     sortBy?: string
     includeDrugDatabaseFields?: boolean
+    prioritizeOtc?: boolean
   }): Promise<any> {
     console.log('[Typesense] searchProducts called, isAvailable =', this.isAvailable)
     if (!this.isAvailable) return null
@@ -870,7 +871,8 @@ class TypesenseService {
       priceMax,
       ratingMin,
       sortBy,
-      includeDrugDatabaseFields = false
+      includeDrugDatabaseFields = false,
+      prioritizeOtc = true
     } = params
 
     let reqPrescription = requiresPrescription
@@ -892,7 +894,7 @@ class TypesenseService {
 
     // Mặc định: ưu tiên OTC trước kê đơn (requiresPrescription:asc → false=0 trước true=1)
     // Trừ khi user đã filter requiresPrescription cụ thể thì bỏ qua ưu tiên này
-    const rxSort = reqPrescription !== undefined ? '' : 'requiresPrescription:asc,'
+    const rxSort = reqPrescription !== undefined || !prioritizeOtc ? '' : 'requiresPrescription:asc,'
     // Khi q='*' (browse mode), _text_match không có ý nghĩa → bỏ qua
     // Typesense giới hạn tối đa 3 sort fields
     const isTextSearch = q && q !== '*'
