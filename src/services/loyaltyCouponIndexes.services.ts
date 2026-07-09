@@ -30,7 +30,7 @@ export const CRITICAL_LOYALTY_COUPON_INDEXES: CriticalIndexDefinition[] = [
       name: 'uniq_loyalty_transaction_order_type',
       unique: true,
       partialFilterExpression: {
-        orderId: { $exists: true },
+        orderId: { $type: 'objectId' },
         type: { $in: ['earn', 'redeem', 'revoke', 'adjust'] }
       }
     }
