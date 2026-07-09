@@ -555,6 +555,7 @@ class TypesenseService {
   }
 
   private async reconcileIfNeeded(force = false): Promise<void> {
+    if (!TYPESENSE_AUTO_RECONCILE) return
     const state = await databaseService.typesenseSyncState.findOne({ key: 'global' })
     if (force || state?.dirty) await this.reconcileAll()
   }
@@ -974,8 +975,12 @@ class TypesenseService {
   }
 
   async requestReconciliation(reason: string): Promise<void> {
+    if (!TYPESENSE_AUTO_RECONCILE) {
+      console.log(`[Typesense] Auto reconciliation disabled; ignoring request: ${reason}`)
+      return
+    }
     await this.markDirty(reason)
-    if (TYPESENSE_AUTO_RECONCILE && this.isAvailable) void this.reconcileAll()
+    if (this.isAvailable) void this.reconcileAll()
   }
 
   async getConsistencyStatus(): Promise<Record<string, unknown>> {
