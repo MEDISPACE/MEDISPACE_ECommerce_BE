@@ -312,6 +312,8 @@ class DatabaseService {
       await safeCreateIndex(this.messages, { conversationId: 1, isRead: 1, senderId: 1 })
       await safeCreateIndex(this.db.collection('chatAuditLogs'), { conversationId: 1, createdAt: -1 })
       await safeCreateIndex(this.db.collection('chatAuditLogs'), { actorId: 1, action: 1, createdAt: -1 })
+      await safeCreateIndex(this.adminAuditLogs, { actorAdminId: 1, action: 1, createdAt: -1 })
+      await safeCreateIndex(this.adminAuditLogs, { targetUserId: 1, action: 1, createdAt: -1 })
       await safeCreateIndex(this.patientPhiAuditLogs, { pharmacistId: 1, createdAt: -1 })
       await safeCreateIndex(this.patientPhiAuditLogs, { customerId: 1, createdAt: -1 })
       await safeCreateIndex(this.patientPhiAuditLogs, { action: 1, createdAt: -1 })
@@ -463,6 +465,10 @@ class DatabaseService {
 
   get patientPhiAuditLogs(): Collection {
     return this.db.collection('patient_phi_audit_logs')
+  }
+
+  get adminAuditLogs(): Collection {
+    return this.db.collection('admin_audit_logs')
   }
 
   // ── Community / Moderation (MVP) ───────────────────────────────────────────

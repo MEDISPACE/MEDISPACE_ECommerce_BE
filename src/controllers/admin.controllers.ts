@@ -162,7 +162,8 @@ export const createUserController = async (req: Request, res: Response, next: Ne
 export const updateUserController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const user = await adminService.updateUser(userId as string, req.body)
+    const { userId: actorAdminId } = req.decoded_authorization as TokenPayload
+    const user = await adminService.updateUser(userId as string, req.body, actorAdminId)
     return res.json({
       message: ADMIN_MESSAGES.UPDATE_USER_SUCCESS,
       result: user
@@ -181,7 +182,8 @@ export const updateUserController = async (req: Request, res: Response, next: Ne
 export const deleteUserController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const result = await adminService.deleteUser(userId as string)
+    const { userId: actorAdminId } = req.decoded_authorization as TokenPayload
+    const result = await adminService.deleteUser(userId as string, actorAdminId)
     return res.json(result)
   } catch (error) {
     next(error)
@@ -197,7 +199,8 @@ export const deleteUserController = async (req: Request, res: Response, next: Ne
 export const resetUserPasswordController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params
-    const result = await adminService.resetUserPassword(userId as string)
+    const { userId: actorAdminId } = req.decoded_authorization as TokenPayload
+    const result = await adminService.resetUserPassword(userId as string, actorAdminId)
     return res.json(result)
   } catch (error) {
     next(error)
