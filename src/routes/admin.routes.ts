@@ -118,7 +118,7 @@ adminRouter.get(
  * Description: Create new user
  * Path: /admin/users
  * Method: POST
- * Body: { email, password, firstName, lastName, phoneNumber, role, gender }
+ * Body: { email, password, firstName, lastName, phoneNumber, lisenseNumber?, role, gender }
  * Headers: { Authorization: Bearer <access_token> } (Admin)
  */
 adminRouter.post(

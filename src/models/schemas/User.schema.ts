@@ -27,6 +27,7 @@ interface UserType {
 
   emailVerifyToken?: string
   forgotPasswordToken?: string
+  forcePasswordChange?: boolean
 
   createdAt?: Date
   updatedAt?: Date
@@ -57,6 +58,7 @@ export default class User {
 
   emailVerifyToken?: string
   forgotPasswordToken?: string
+  forcePasswordChange?: boolean
 
   createdAt?: Date
   updatedAt?: Date
@@ -85,6 +87,7 @@ export default class User {
 
     this.emailVerifyToken = user.emailVerifyToken || ''
     this.forgotPasswordToken = user.forgotPasswordToken || ''
+    this.forcePasswordChange = user.forcePasswordChange || false
 
     this.createdAt = user.createdAt || date
     this.updatedAt = user.updatedAt || date
