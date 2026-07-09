@@ -4,6 +4,8 @@ import {
   applyCouponController,
   removeCouponController,
   getPublicCouponsController,
+  getAvailableCouponsController,
+  getMyCouponsController,
   getAdminCouponsController,
   getAdminCouponByIdController,
   createCouponController,
@@ -26,6 +28,18 @@ const couponsRouter = Router()
  * Danh sách mã giảm giá đang chạy (public)
  */
 couponsRouter.get('/public', wrapRequestHandler(getPublicCouponsController))
+
+/**
+ * GET /coupons/available
+ * Danh sách mã public và mã private được gán cho user
+ */
+couponsRouter.get('/available', accessTokenValidator, wrapRequestHandler(getAvailableCouponsController))
+
+/**
+ * GET /coupons/mine
+ * Danh sach uu dai public/targeted kem trang thai rieng cua user
+ */
+couponsRouter.get('/mine', accessTokenValidator, wrapRequestHandler(getMyCouponsController))
 
 /**
  * POST /coupons/validate

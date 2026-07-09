@@ -34,6 +34,7 @@ vi.mock('~/services/database.services', () => {
   const carts = makeCollection()
   const products = makeCollection({ find: mockProductsFind })
   const categories = makeCollection({ find: mockCategoriesFind })
+  const users = makeCollection()
 
   return {
     default: {
@@ -41,7 +42,8 @@ vi.mock('~/services/database.services', () => {
       couponRedemptions,
       carts,
       products,
-      categories
+      categories,
+      users
     }
   }
 })
@@ -395,6 +397,38 @@ describe('CouponService', () => {
         { _id: coupon._id },
         expect.any(Array)
       )
+    })
+  })
+
+  describe('getAvailableCouponsForUser()', () => {
+    it('Tráº£ vá» public coupon vÃ  private coupon Ä‘Æ°á»£c gáº¯n cho user', async () => {
+      const userId = new ObjectId(USER_ID)
+      const publicCoupon = makeCoupon({ code: 'PUBLIC10', isPublic: true })
+      const targetedCoupon = makeCoupon({ code: 'PRIVATE20', isPublic: false, targetUserIds: [userId] })
+      const expiredCoupon = makeCoupon({
+        code: 'EXPIRED',
+        isPublic: true,
+        startDate: new Date(Date.now() - 86400000 * 3),
+        endDate: new Date(Date.now() - 86400000)
+      })
+      const sort = vi.fn().mockReturnValue({
+        toArray: vi.fn().mockResolvedValueOnce([publicCoupon, targetedCoupon, expiredCoupon])
+      })
+      mockFind.mockReturnValueOnce({ sort })
+
+      const result = await couponService.getAvailableCouponsForUser(userId)
+
+      expect(mockFind).toHaveBeenCalledWith({
+        isActive: true,
+        $or: [
+          { isPublic: true },
+          { targetUserIds: userId },
+          { targetUserIds: userId.toString() }
+        ]
+      })
+      expect(sort).toHaveBeenCalledWith({ createdAt: -1 })
+      expect(result.map((coupon: any) => coupon.code)).toEqual(['PUBLIC10', 'PRIVATE20'])
+      expect(result.map((coupon: any) => coupon.code)).not.toContain('EXPIRED')
     })
   })
 

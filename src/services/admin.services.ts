@@ -501,11 +501,17 @@ class AdminService {
     }
 
     if (search) {
-      filter.$or = [
+      const searchConditions: Record<string, unknown>[] = [
         { firstName: { $regex: search, $options: 'i' } },
         { lastName: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
         { phoneNumber: { $regex: search, $options: 'i' } }
+      ]
+      if (ObjectId.isValid(search)) {
+        searchConditions.unshift({ _id: new ObjectId(search) })
+      }
+      filter.$or = [
+        ...searchConditions
       ]
     }
 

@@ -121,7 +121,130 @@ class CouponService {
     if ('applicableProductIds' in normalized) normalized.applicableProductIds = this.normalizeIdArray(normalized.applicableProductIds)
     if ('applicableCategoryIds' in normalized) normalized.applicableCategoryIds = this.normalizeIdArray(normalized.applicableCategoryIds)
     if (normalized.totalUsageLimit === null || normalized.totalUsageLimit === '') normalized.totalUsageLimit = undefined
+    if (normalized.type === 'fixed') normalized.type = 'fixed_amount'
     return normalized
+  }
+
+  private async attachTargetUsers(coupons: any[]) {
+    const targetUserIds = coupons
+      .flatMap((coupon) => coupon.targetUserIds || [])
+      .filter((id) => id && ObjectId.isValid(id.toString()))
+      .map((id) => new ObjectId(id.toString()))
+    const applicableProductIds = coupons
+      .flatMap((coupon) => coupon.applicableProductIds || [])
+      .filter((id) => id && ObjectId.isValid(id.toString()))
+      .map((id) => new ObjectId(id.toString()))
+
+    if (targetUserIds.length === 0 && applicableProductIds.length === 0) return coupons
+
+    const uniqueUserIds = Array.from(new Map(targetUserIds.map((id) => [id.toString(), id])).values())
+    const uniqueProductIds = Array.from(new Map(applicableProductIds.map((id) => [id.toString(), id])).values())
+    const [users, products] = await Promise.all([
+      uniqueUserIds.length > 0
+        ? databaseService.users.find(
+            { _id: { $in: uniqueUserIds } },
+            { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, phoneNumber: 1 } }
+          ).toArray()
+        : [],
+      uniqueProductIds.length > 0
+        ? databaseService.products.find(
+            { _id: { $in: uniqueProductIds } },
+            { projection: { _id: 1, name: 1, sku: 1 } }
+          ).toArray()
+        : []
+    ])
+    const userMap = new Map(users.map((user: any) => [user._id.toString(), user]))
+    const productMap = new Map(products.map((product: any) => [product._id.toString(), product]))
+
+    return coupons.map((coupon) => ({
+      ...coupon,
+      targetUsers: (coupon.targetUserIds || [])
+        .map((id: ObjectId | string) => userMap.get(id.toString()) || { _id: id.toString(), missing: true }),
+      applicableProducts: (coupon.applicableProductIds || [])
+        .map((id: ObjectId | string) => productMap.get(id.toString()) || { _id: id.toString(), missing: true })
+    }))
+  }
+
+  private assertFiniteNumber(value: any, field: string) {
+    const numberValue = Number(value)
+    if (!Number.isFinite(numberValue)) {
+      throw new ErrorWithStatus({ message: `${field} không hợp lệ.`, status: HTTP_STATUS.BAD_REQUEST })
+    }
+    return numberValue
+  }
+
+  private validateCouponPayload(data: any, existingCoupon?: any) {
+    const merged = { ...(existingCoupon || {}), ...data }
+
+    if (!merged.code || typeof merged.code !== 'string' || merged.code.trim().length === 0) {
+      throw new ErrorWithStatus({ message: 'Vui lòng nhập mã coupon.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (!merged.name || typeof merged.name !== 'string' || merged.name.trim().length === 0) {
+      throw new ErrorWithStatus({ message: 'Vui lòng nhập tên coupon.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const allowedTypes: CouponType[] = ['percentage', 'fixed_amount', 'fixed', 'free_shipping']
+    if (!allowedTypes.includes(merged.type)) {
+      throw new ErrorWithStatus({ message: 'Loại coupon không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const type = merged.type === 'fixed' ? 'fixed_amount' : merged.type
+    const value = type === 'free_shipping' ? 0 : this.assertFiniteNumber(merged.value, 'Giá trị giảm')
+    if (type !== 'free_shipping' && value <= 0) {
+      throw new ErrorWithStatus({ message: 'Giá trị giảm phải lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (type === 'percentage' && value > 100) {
+      throw new ErrorWithStatus({ message: 'Coupon phần trăm phải có giá trị từ 1 đến 100.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    if (merged.minOrderAmount !== undefined && merged.minOrderAmount !== null) {
+      const minOrderAmount = this.assertFiniteNumber(merged.minOrderAmount, 'Đơn hàng tối thiểu')
+      if (minOrderAmount < 0) {
+        throw new ErrorWithStatus({ message: 'Đơn hàng tối thiểu không được âm.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+    }
+
+    if (merged.maxDiscountAmount !== undefined && merged.maxDiscountAmount !== null && merged.maxDiscountAmount !== '') {
+      const maxDiscountAmount = this.assertFiniteNumber(merged.maxDiscountAmount, 'Giảm tối đa')
+      if (maxDiscountAmount < 0) {
+        throw new ErrorWithStatus({ message: 'Giảm tối đa không được âm.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+      if (type !== 'percentage' && data.maxDiscountAmount !== undefined) {
+        throw new ErrorWithStatus({ message: 'Giảm tối đa chỉ áp dụng cho coupon phần trăm.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+    }
+
+    if (merged.totalUsageLimit !== undefined && merged.totalUsageLimit !== null) {
+      const totalUsageLimit = this.assertFiniteNumber(merged.totalUsageLimit, 'Tổng lượt dùng')
+      if (!Number.isInteger(totalUsageLimit) || totalUsageLimit < 1) {
+        throw new ErrorWithStatus({ message: 'Tổng lượt dùng phải là số nguyên lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
+      }
+    }
+
+    const perUserLimit = this.assertFiniteNumber(merged.perUserLimit ?? 1, 'Lượt dùng mỗi khách')
+    if (!Number.isInteger(perUserLimit) || perUserLimit < 1) {
+      throw new ErrorWithStatus({ message: 'Lượt dùng mỗi khách phải là số nguyên lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+
+    const startDate = new Date(merged.startDate)
+    const endDate = new Date(merged.endDate)
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      throw new ErrorWithStatus({ message: 'Thời gian hiệu lực coupon không hợp lệ.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    if (startDate >= endDate) {
+      throw new ErrorWithStatus({ message: 'Ngày kết thúc phải sau ngày bắt đầu.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+  }
+
+  private getSelectedCartItems(cartItems: any[], selectedItems?: Array<{ productId: string; unit?: string }>) {
+    if (!selectedItems || selectedItems.length === 0) return cartItems
+
+    return cartItems.filter((cartItem: any) =>
+      selectedItems.some((selectedItem) => {
+        if (selectedItem.productId !== cartItem.productId.toString()) return false
+        return (selectedItem.unit || undefined) === (cartItem.unit || undefined)
+      })
+    )
   }
 
   /**
@@ -136,11 +259,16 @@ class CouponService {
     items?: CouponValidationItem[]
   ): Promise<ValidateCouponResult> {
     const now = new Date()
+    const normalizedCode = typeof code === 'string' ? code.toUpperCase().trim() : ''
+
+    if (!normalizedCode) {
+      return { isValid: false, discountAmount: 0, message: 'Mã giảm giá không tồn tại hoặc đã bị vô hiệu hóa.', discountType: null }
+    }
 
     // 1. Tìm coupon — chỉ filter isActive ở DB, date validation xử lý ở code
     // (tránh BSON type mismatch khi endDate lưu dạng string thay vì Date)
     const coupon = await databaseService.coupons.findOne({
-      code: code.toUpperCase().trim(),
+      code: normalizedCode,
       isActive: true
     })
 
@@ -249,7 +377,7 @@ class CouponService {
     code: string,
     userId: ObjectId,
     sessionId?: string,
-    selectedSubtotal?: number,  // Subtotal của các sản phẩm được chọn từ FE
+    selectedSubtotal?: number,  // Deprecated: BE recomputes subtotal from cart items.
     selectedItems?: Array<{ productId: string; unit?: string }>
   ) {
     // Lấy cart
@@ -270,15 +398,11 @@ class CouponService {
 
     // Ưu tiên dùng selectedSubtotal (sản phẩm được tick chọn trên FE)
     // nếu không có thì fallback về cart.subtotal
-    const subtotalForValidation = (selectedSubtotal !== undefined && selectedSubtotal >= 0)
-      ? selectedSubtotal
-      : cart.subtotal
-    const validationItems = selectedItems && selectedItems.length > 0
-      ? cart.items.filter((cartItem: any) => selectedItems.some((selectedItem) => {
-          if (selectedItem.productId !== cartItem.productId.toString()) return false
-          return (selectedItem.unit || undefined) === (cartItem.unit || undefined)
-        }))
-      : cart.items
+    const validationItems = this.getSelectedCartItems(cart.items, selectedItems)
+    if (selectedItems && selectedItems.length > 0 && validationItems.length === 0) {
+      throw new ErrorWithStatus({ message: 'Không tìm thấy sản phẩm đã chọn trong giỏ hàng.', status: HTTP_STATUS.BAD_REQUEST })
+    }
+    const subtotalForValidation = validationItems.reduce((sum: number, item: any) => sum + Math.max(0, item.totalPrice || 0), 0)
     const hasPrescriptionItemsInSelection = validationItems.some((item: any) => item.prescriptionRequired)
 
     // Validate coupon
@@ -390,6 +514,59 @@ class CouponService {
       .reduce((sum: number, c: any) => sum + c.discountAmount, 0)
 
     const newTotalAmount = Math.max(0, cart.subtotal - totalCouponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0))
+
+    await databaseService.carts.updateOne(
+      { _id: cart._id },
+      {
+        $set: {
+          appliedCoupons,
+          discountAmount: totalCouponDiscount,
+          totalAmount: newTotalAmount,
+          updatedAt: new Date()
+        }
+      }
+    )
+
+    return { appliedCoupons, discountAmount: totalCouponDiscount, totalAmount: newTotalAmount }
+  }
+
+  async revalidateCartCoupons(userId: ObjectId, sessionId?: string) {
+    const cartQuery = userId
+      ? { userId }
+      : sessionId
+        ? { sessionId }
+        : null
+
+    if (!cartQuery) return { appliedCoupons: [], discountAmount: 0, totalAmount: 0 }
+
+    const cart = await databaseService.carts.findOne(cartQuery as any)
+    if (!cart) return { appliedCoupons: [], discountAmount: 0, totalAmount: 0 }
+
+    const items = cart.items || []
+    const subtotal = items.reduce((sum: number, item: any) => sum + Math.max(0, item.totalPrice || 0), 0)
+    const hasPrescriptionItems = items.some((item: any) => item.prescriptionRequired)
+    const appliedCoupons = []
+
+    for (const cartCoupon of cart.appliedCoupons || []) {
+      const validation = await this.validateCoupon(cartCoupon.code, userId, subtotal, hasPrescriptionItems, items)
+      if (!validation.isValid || !validation.coupon) continue
+
+      appliedCoupons.push({
+        code: validation.coupon.code,
+        discountAmount: validation.discountAmount,
+        eligibleSubtotal: validation.eligibleSubtotal,
+        type: validation.coupon.type,
+        name: cartCoupon.name || validation.coupon.name || validation.coupon.code,
+        applicableProductIds: validation.coupon.applicableProductIds || [],
+        applicableCategoryIds: validation.applicableCategoryIds || validation.coupon.applicableCategoryIds || []
+      })
+    }
+
+    const totalCouponDiscount = appliedCoupons
+      .filter((c: any) => c.type !== 'free_shipping')
+      .reduce((sum: number, c: any) => sum + (c.discountAmount || 0), 0)
+
+    const newTotalAmount = Math.max(0, subtotal - totalCouponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0))
 
     await databaseService.carts.updateOne(
       { _id: cart._id },
@@ -530,6 +707,7 @@ class CouponService {
 
   async createCoupon(data: any, adminId: ObjectId) {
     const normalizedData = this.normalizeCouponPayload(data)
+    this.validateCouponPayload(normalizedData)
     // Kiểm tra code trùng
     const existing = await databaseService.coupons.findOne({ code: normalizedData.code.toUpperCase().trim() })
     if (existing) {
@@ -563,6 +741,8 @@ class CouponService {
       createdAt: _at,
       ...updateData
     } = normalizedData
+
+    this.validateCouponPayload(updateData, coupon)
 
     if (
       updateData.totalUsageLimit !== undefined &&
@@ -624,7 +804,7 @@ class CouponService {
     ])
 
     return {
-      coupons,
+      coupons: await this.attachTargetUsers(coupons),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
     }
   }
@@ -634,7 +814,7 @@ class CouponService {
     if (!coupon) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
     }
-    return coupon
+    return (await this.attachTargetUsers([coupon]))[0]
   }
 
   // Lấy danh sách public coupon cho user xem — ✅ CACHED
@@ -652,6 +832,61 @@ class CouponService {
         return now >= start && now <= end
       })
     }, 300) // 5 minutes
+  }
+
+  async getAvailableCouponsForUser(userId: ObjectId) {
+    const now = new Date()
+    const coupons = await databaseService.coupons.find({
+      isActive: true,
+      $or: [
+        { isPublic: true },
+        { targetUserIds: userId },
+        { targetUserIds: userId.toString() }
+      ]
+    }).sort({ createdAt: -1 }).toArray()
+
+    return coupons.filter(coupon => {
+      const start = new Date(coupon.startDate)
+      const end = new Date(coupon.endDate)
+      return now >= start && now <= end
+    })
+  }
+
+  async getMyCoupons(userId: ObjectId) {
+    const now = new Date()
+    const coupons = await databaseService.coupons.find({
+      isActive: true,
+      $or: [
+        { isPublic: true },
+        { targetUserIds: userId },
+        { targetUserIds: userId.toString() }
+      ]
+    }).sort({ createdAt: -1 }).toArray()
+
+    return coupons.map((coupon: any) => {
+      const start = new Date(coupon.startDate)
+      const end = new Date(coupon.endDate)
+      const usedCount = coupon.userUsageCounts?.[userId.toString()] || 0
+      const perUserLimit = coupon.perUserLimit || 1
+      const isUsedUp = usedCount >= perUserLimit
+      const isNotStarted = now < start
+      const isExpired = now > end
+      const isTargeted = (coupon.targetUserIds || []).some((id: ObjectId | string) => id.toString() === userId.toString())
+
+      let status: 'usable' | 'needs_min_order' | 'used_up' | 'expired' | 'not_started' = 'usable'
+      if (isExpired) status = 'expired'
+      else if (isNotStarted) status = 'not_started'
+      else if (isUsedUp) status = 'used_up'
+      else if ((coupon.minOrderAmount || 0) > 0) status = 'needs_min_order'
+
+      return {
+        ...coupon,
+        userCouponStatus: status,
+        userUsageCount: usedCount,
+        userUsageLimit: perUserLimit,
+        isTargeted
+      }
+    })
   }
 
   async toggleCoupon(couponId: ObjectId) {

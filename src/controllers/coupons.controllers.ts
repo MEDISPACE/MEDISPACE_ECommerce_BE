@@ -90,6 +90,24 @@ export const getPublicCouponsController = async (req: Request, res: Response) =>
   })
 }
 
+export const getAvailableCouponsController = async (req: Request, res: Response) => {
+  const userId = new ObjectId(req.decoded_authorization!.userId)
+  const coupons = await couponService.getAvailableCouponsForUser(userId)
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Lay danh sach ma giam gia kha dung thanh cong.',
+    result: coupons
+  })
+}
+
+export const getMyCouponsController = async (req: Request, res: Response) => {
+  const userId = new ObjectId(req.decoded_authorization!.userId)
+  const coupons = await couponService.getMyCoupons(userId)
+  return res.status(HTTP_STATUS.OK).json({
+    message: 'Lay danh sach uu dai cua toi thanh cong.',
+    result: coupons
+  })
+}
+
 // ===== ADMIN =====
 
 // GET /coupons — Admin: Lấy danh sách tất cả coupon
