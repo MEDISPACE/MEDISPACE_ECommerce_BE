@@ -509,6 +509,7 @@ class TypesenseService {
   }
 
   private async reconcileAll(): Promise<void> {
+    if (!TYPESENSE_AUTO_RECONCILE) return
     if (!this.isAvailable || this.isReconciling) return
     this.isReconciling = true
     try {
