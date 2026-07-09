@@ -2,6 +2,7 @@ import * as nodemailer from 'nodemailer'
 import { config } from 'dotenv'
 import {
   getEmailTemplate,
+  getAdminPasswordResetContent,
   getForgotPasswordContent,
   getVerifyEmailContent,
   getOrderConfirmationContent
@@ -60,6 +61,13 @@ class EmailService {
     const resetUrl = `${clientUrl}/reset-password/${forgotPasswordToken}`
     const content = getForgotPasswordContent(resetUrl)
     return this.sendEmail(to, 'Khôi phục mật khẩu MediSpace', content, { throwOnFailure: true })
+  }
+
+  async sendAdminPasswordResetEmail(to: string, forgotPasswordToken: string) {
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+    const resetUrl = `${clientUrl}/reset-password/${forgotPasswordToken}`
+    const content = getAdminPasswordResetContent(resetUrl)
+    return this.sendEmail(to, 'Yêu cầu đặt lại mật khẩu MediSpace', content, { throwOnFailure: true })
   }
 }
 

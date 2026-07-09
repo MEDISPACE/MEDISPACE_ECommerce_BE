@@ -3,11 +3,16 @@ import cacheService from './cache.services'
 import { ObjectId } from 'mongodb'
 import User from '~/models/schemas/User.schema'
 import { hashPassword } from '~/utils/crypto'
-import { UserRole, UserStatus } from '~/constants/enum'
+import { TokenType, UserRole, UserStatus } from '~/constants/enum'
+import HTTP_STATUS from '~/constants/httpStatus'
+import { ErrorWithStatus } from '~/models/Error'
 import { config } from 'dotenv'
 import notificationService from './notifications.services'
 import { getIO } from '~/sockets/chat.socket'
 import orderService from './orders.services'
+import emailService from './email.services'
+import { signToken } from '~/utils/jwt'
+import { ADMIN_MESSAGES } from '~/constants/message'
 
 config()
 
@@ -89,6 +94,90 @@ interface UserListParams {
 }
 
 class AdminService {
+  private signAdminPasswordResetToken({ userId, status }: { userId: string; status: UserStatus }) {
+    return signToken({
+      payload: {
+        userId,
+        tokenType: TokenType.ForgotPasswordToken,
+        verify: status
+      },
+      privateKey: process.env.JWT_SECRET_FORGOT_PASSWORD_TOKEN as string,
+      options: { expiresIn: '15m' }
+    })
+  }
+
+  private async writeAdminAuditLog(action: string, actorAdminId: string, targetUserId: string, metadata?: Record<string, unknown>) {
+    try {
+      await databaseService.adminAuditLogs.insertOne({
+        action,
+        actorAdminId: new ObjectId(actorAdminId),
+        targetUserId: new ObjectId(targetUserId),
+        metadata: metadata || {},
+        createdAt: new Date()
+      })
+    } catch (error) {
+      console.error('[AdminAudit] Failed to write audit log:', error)
+    }
+  }
+
+  private async assertAdminAccountMutationAllowed(
+    targetUserId: string,
+    actorAdminId: string,
+    updateData?: Record<string, unknown>,
+    operation: 'update' | 'delete' = 'update'
+  ) {
+    const isSelf = targetUserId === actorAdminId
+
+    if (operation === 'delete' && isSelf) {
+      throw new ErrorWithStatus({
+        message: 'Bạn không thể xóa tài khoản đang đăng nhập.',
+        status: HTTP_STATUS.FORBIDDEN
+      })
+    }
+
+    if (operation === 'update' && isSelf) {
+      if (updateData?.role !== undefined && Number(updateData.role) !== UserRole.Admin) {
+        throw new ErrorWithStatus({
+          message: 'Bạn không thể thay đổi vai trò của chính mình.',
+          status: HTTP_STATUS.FORBIDDEN
+        })
+      }
+
+      if (updateData?.status !== undefined && Number(updateData.status) !== UserStatus.Verified) {
+        throw new ErrorWithStatus({
+          message: 'Bạn không thể thay đổi trạng thái tài khoản đang đăng nhập.',
+          status: HTTP_STATUS.FORBIDDEN
+        })
+      }
+    }
+
+    const targetUser = await databaseService.users.findOne({ _id: new ObjectId(targetUserId) })
+    if (!targetUser) {
+      throw new ErrorWithStatus({ message: 'User not found', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    const willRemoveActiveAdmin =
+      targetUser.role === UserRole.Admin &&
+      targetUser.status === UserStatus.Verified &&
+      (operation === 'delete' ||
+        (updateData?.role !== undefined && Number(updateData.role) !== UserRole.Admin) ||
+        (updateData?.status !== undefined && Number(updateData.status) !== UserStatus.Verified))
+
+    if (willRemoveActiveAdmin) {
+      const activeAdminCount = await databaseService.users.countDocuments({
+        role: UserRole.Admin,
+        status: UserStatus.Verified
+      })
+
+      if (activeAdminCount <= 1) {
+        throw new ErrorWithStatus({
+          message: 'Hệ thống cần ít nhất một quản trị viên đang hoạt động.',
+          status: HTTP_STATUS.CONFLICT
+        })
+      }
+    }
+  }
+
   /**
    * Get dashboard statistics
    */
@@ -511,6 +600,7 @@ class AdminService {
     firstName: string
     lastName: string
     phoneNumber: string
+    lisenseNumber?: string
     role: number
     gender: number
   }) {
@@ -544,13 +634,15 @@ class AdminService {
   /**
    * Update user
    */
-  async updateUser(userId: string, updateData: Partial<User>) {
+  async updateUser(userId: string, updateData: Partial<User>, actorAdminId?: string) {
     // Remove fields that shouldn't be updated directly
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password, emailVerifyToken, forgotPasswordToken, _id, createdAt, ...safeUpdateData } = updateData as Record<
-      string,
-      unknown
-    >
+    const { password, emailVerifyToken, forgotPasswordToken, forcePasswordChange, _id, createdAt, ...safeUpdateData } =
+      updateData as Record<string, unknown>
+
+    if (actorAdminId) {
+      await this.assertAdminAccountMutationAllowed(userId, actorAdminId, safeUpdateData, 'update')
+    }
 
     const result = await databaseService.users.findOneAndUpdate(
       { _id: new ObjectId(userId) },
@@ -577,7 +669,11 @@ class AdminService {
   /**
    * Delete user
    */
-  async deleteUser(userId: string) {
+  async deleteUser(userId: string, actorAdminId?: string) {
+    if (actorAdminId) {
+      await this.assertAdminAccountMutationAllowed(userId, actorAdminId, undefined, 'delete')
+    }
+
     const result = await databaseService.users.deleteOne({ _id: new ObjectId(userId) })
 
     if (result.deletedCount === 0) {
@@ -590,24 +686,56 @@ class AdminService {
   /**
    * Reset user password (Admin only)
    */
-  async resetUserPassword(userId: string) {
-    // Generate random password
-    const newPassword = Math.random().toString(36).slice(-8)
+  async resetUserPassword(userId: string, actorAdminId: string) {
+    const targetUser = await databaseService.users.findOne({ _id: new ObjectId(userId) })
 
-    await databaseService.users.updateOne(
-      { _id: new ObjectId(userId) },
-      {
-        $set: {
-          password: hashPassword(newPassword),
-          updatedAt: new Date()
+    if (!targetUser) {
+      throw new ErrorWithStatus({ message: 'User not found', status: HTTP_STATUS.NOT_FOUND })
+    }
+
+    const forgotPasswordToken = await this.signAdminPasswordResetToken({ userId, status: targetUser.status })
+    const previousForgotPasswordToken = targetUser.forgotPasswordToken || ''
+    const previousForcePasswordChange = Boolean(targetUser.forcePasswordChange)
+
+    await Promise.all([
+      databaseService.users.updateOne(
+        { _id: new ObjectId(userId) },
+        {
+          $set: {
+            forgotPasswordToken,
+            forcePasswordChange: true
+          },
+          $currentDate: { updatedAt: true }
         }
-      }
-    )
+      ),
+      databaseService.refreshTokens.deleteMany({ userId: new ObjectId(userId) })
+    ])
 
-    // TODO: Send email with new password
+    try {
+      await emailService.sendAdminPasswordResetEmail(targetUser.email, forgotPasswordToken)
+    } catch (error) {
+      await databaseService.users.updateOne(
+        { _id: new ObjectId(userId) },
+        {
+          $set: {
+            forgotPasswordToken: previousForgotPasswordToken,
+            forcePasswordChange: previousForcePasswordChange
+          },
+          $currentDate: { updatedAt: true }
+        }
+      )
+      throw error
+    }
+
+    await this.writeAdminAuditLog('ADMIN_RESET_USER_PASSWORD', actorAdminId, userId, {
+      targetEmail: targetUser.email,
+      delivery: 'email',
+      forcePasswordChange: true,
+      revokedSessions: true
+    })
+
     return {
-      message: 'Password reset successfully',
-      newPassword // In production, send via email instead
+      message: ADMIN_MESSAGES.RESET_USER_PASSWORD_SUCCESS
     }
   }
 

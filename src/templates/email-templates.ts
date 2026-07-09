@@ -62,6 +62,20 @@ export const getForgotPasswordContent = (resetUrl: string) => `
   <p>Link này sẽ hết hạn sau <strong>15 phút</strong>.</p>
 `
 
+export const getAdminPasswordResetContent = (resetUrl: string) => `
+  <h2>Quản trị viên đã yêu cầu đặt lại mật khẩu</h2>
+  <p>Xin chào,</p>
+  <p>Quản trị viên MediSpace vừa tạo yêu cầu đặt lại mật khẩu cho tài khoản của bạn.</p>
+  <p>Các phiên đăng nhập hiện tại của tài khoản đã được thu hồi. Vui lòng đặt mật khẩu mới trước khi tiếp tục sử dụng hệ thống.</p>
+  <div style="text-align: center;">
+    <a href="${resetUrl}" class="button">Đặt mật khẩu mới</a>
+  </div>
+  <p style="margin-top: 30px;">Hoặc copy đường dẫn sau vào trình duyệt:</p>
+  <p><a href="${resetUrl}" style="color: #007bff; word-break: break-all;">${resetUrl}</a></p>
+  <p>Link này sẽ hết hạn sau <strong>15 phút</strong>.</p>
+  <p>Nếu bạn không mong đợi email này, vui lòng liên hệ quản trị viên hoặc bộ phận hỗ trợ MediSpace.</p>
+`
+
 export const getOrderConfirmationContent = (order: any) => {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount)

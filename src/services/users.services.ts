@@ -371,7 +371,10 @@ class UsersService {
     await Promise.all([
       databaseService.users.updateOne(
         { _id: new ObjectId(userId) },
-        { $set: { password: hashPassword(newPassword), forgotPasswordToken: '' }, $currentDate: { updated_at: true } }
+        {
+          $set: { password: hashPassword(newPassword), forgotPasswordToken: '', forcePasswordChange: false },
+          $currentDate: { updated_at: true }
+        }
       ),
       databaseService.refreshTokens.deleteMany({ userId: new ObjectId(userId) })
     ])
@@ -447,7 +450,7 @@ class UsersService {
     await Promise.all([
       databaseService.users.updateOne(
         { _id: new ObjectId(userId) },
-        { $set: { password: hashPassword(newPassword) }, $currentDate: { updated_at: true } }
+        { $set: { password: hashPassword(newPassword), forcePasswordChange: false }, $currentDate: { updated_at: true } }
       ),
       databaseService.refreshTokens.deleteMany({ userId: new ObjectId(userId) })
     ])

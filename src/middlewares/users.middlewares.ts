@@ -213,6 +213,12 @@ export const loginValidator = validate(
                 status: HTTP_STATUS.FORBIDDEN
               })
             }
+            if (user.forcePasswordChange) {
+              throw new ErrorWithStatus({
+                message: USERS_MESSAGES.PASSWORD_RESET_REQUIRED,
+                status: HTTP_STATUS.FORBIDDEN
+              })
+            }
             req.user = user
             return true
           }
@@ -247,7 +253,7 @@ export const accessTokenValidator = validate(
               }
               const user = await databaseService.users.findOne(
                 { _id: new ObjectId(decoded_authorization.userId) },
-                { projection: { role: 1, status: 1 } }
+                { projection: { role: 1, status: 1, forcePasswordChange: 1 } }
               )
               if (!user) {
                 throw new ErrorWithStatus({
@@ -258,6 +264,12 @@ export const accessTokenValidator = validate(
               if (user.status === UserStatus.Banned) {
                 throw new ErrorWithStatus({
                   message: USERS_MESSAGES.USER_BANNED,
+                  status: HTTP_STATUS.FORBIDDEN
+                })
+              }
+              if (user.forcePasswordChange) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.PASSWORD_RESET_REQUIRED,
                   status: HTTP_STATUS.FORBIDDEN
                 })
               }
@@ -331,7 +343,7 @@ export const refreshTokenValidator = validate(
               }
               const user = await databaseService.users.findOne(
                 { _id: new ObjectId(decodedRefreshToken.userId) },
-                { projection: { role: 1, status: 1 } }
+                { projection: { role: 1, status: 1, forcePasswordChange: 1 } }
               )
               if (!user) {
                 throw new ErrorWithStatus({
@@ -342,6 +354,12 @@ export const refreshTokenValidator = validate(
               if (user.status === UserStatus.Banned) {
                 throw new ErrorWithStatus({
                   message: USERS_MESSAGES.USER_BANNED,
+                  status: HTTP_STATUS.FORBIDDEN
+                })
+              }
+              if (user.forcePasswordChange) {
+                throw new ErrorWithStatus({
+                  message: USERS_MESSAGES.PASSWORD_RESET_REQUIRED,
                   status: HTTP_STATUS.FORBIDDEN
                 })
               }
