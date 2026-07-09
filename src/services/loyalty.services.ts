@@ -1,7 +1,8 @@
 import { ObjectId } from 'mongodb'
 import LoyaltyAccount, { LoyaltyTier, TIER_THRESHOLDS, TIER_MULTIPLIERS, TIER_LABELS } from '~/models/schemas/LoyaltyAccount.schema'
-import LoyaltyTransaction from '~/models/schemas/LoyaltyTransaction.schema'
+import LoyaltyTransaction, { LoyaltyPointLotAllocation } from '~/models/schemas/LoyaltyTransaction.schema'
 import LoyaltyProgramConfig, { LoyaltyProgramConfigType, LoyaltyTierRule } from '~/models/schemas/LoyaltyProgramConfig.schema'
+import LoyaltyPointLot from '~/models/schemas/LoyaltyPointLot.schema'
 import databaseService from './database.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
@@ -10,8 +11,8 @@ import HTTP_STATUS from '~/constants/httpStatus'
 const POINTS_PER_VND = parseInt(process.env.POINTS_PER_VND || '1000')
 const POINTS_MAX_REDEEM_RATIO = parseFloat(process.env.POINTS_MAX_REDEEM_RATIO || '0.3')
 const POINTS_EXPIRY_DAYS = parseInt(process.env.POINTS_EXPIRY_DAYS || '365')
-const POINTS_MIN_REDEEM = parseInt(process.env.POINTS_MIN_REDEEM || '10000')
-const POINTS_TO_VND = 1 // 1 điểm = 1 VNĐ khi đổi
+const POINTS_MIN_REDEEM = parseInt(process.env.POINTS_MIN_REDEEM || '0')
+const POINTS_TO_VND = parseFloat(process.env.POINTS_TO_VND || '1')
 
 const DEFAULT_LOYALTY_TIERS: LoyaltyTierRule[] = [
   { code: 'member', label: TIER_LABELS.member, minTotalSpent: TIER_THRESHOLDS.member, multiplier: TIER_MULTIPLIERS.member },
@@ -55,11 +56,11 @@ class LoyaltyService {
       })
     }
 
-    const pointsPerVnd = Math.floor(Number(data?.pointsPerVnd) || DEFAULT_LOYALTY_CONFIG.pointsPerVnd)
-    const pointsToVnd = Number(data?.pointsToVnd) || DEFAULT_LOYALTY_CONFIG.pointsToVnd
-    const maxRedeemRatio = Number(data?.maxRedeemRatio)
-    const minRedeem = Math.floor(Number(data?.minRedeem) || DEFAULT_LOYALTY_CONFIG.minRedeem)
-    const expiryDays = Math.floor(Number(data?.expiryDays) || DEFAULT_LOYALTY_CONFIG.expiryDays)
+    const pointsPerVnd = Math.floor(data?.pointsPerVnd == null ? DEFAULT_LOYALTY_CONFIG.pointsPerVnd : Number(data.pointsPerVnd))
+    const pointsToVnd = data?.pointsToVnd == null ? DEFAULT_LOYALTY_CONFIG.pointsToVnd : Number(data.pointsToVnd)
+    const maxRedeemRatio = data?.maxRedeemRatio == null ? DEFAULT_LOYALTY_CONFIG.maxRedeemRatio : Number(data.maxRedeemRatio)
+    const minRedeem = Math.floor(data?.minRedeem == null ? DEFAULT_LOYALTY_CONFIG.minRedeem : Number(data.minRedeem))
+    const expiryDays = Math.floor(data?.expiryDays == null ? DEFAULT_LOYALTY_CONFIG.expiryDays : Number(data.expiryDays))
 
     if (pointsPerVnd <= 0 || pointsToVnd <= 0 || !Number.isFinite(maxRedeemRatio) || maxRedeemRatio <= 0 || maxRedeemRatio > 1 || minRedeem < 0 || expiryDays <= 0) {
       throw new ErrorWithStatus({
@@ -70,7 +71,7 @@ class LoyaltyService {
 
     return {
       version: Number(data?.version) || 1,
-      status: (data?.status || 'draft') as any,
+      status: 'published',
       pointsPerVnd,
       pointsToVnd,
       maxRedeemRatio,
@@ -91,61 +92,43 @@ class LoyaltyService {
   }
 
   async getAdminProgramConfig() {
-    const [published, draft] = await Promise.all([
-      databaseService.loyaltyProgramConfigs.find({ status: 'published' }).sort({ version: -1 }).limit(1).toArray(),
-      databaseService.loyaltyProgramConfigs.find({ status: 'draft' }).sort({ version: -1 }).limit(1).toArray()
-    ])
+    const published = await databaseService.loyaltyProgramConfigs.find({ status: 'published' }).sort({ version: -1 }).limit(1).toArray()
+    const active = (published[0] as any) || DEFAULT_LOYALTY_CONFIG
 
     return {
-      published: (published[0] as any) || DEFAULT_LOYALTY_CONFIG,
-      draft: draft[0] || null,
+      published: active,
+      config: active,
+      draft: null,
       defaults: DEFAULT_LOYALTY_CONFIG
     }
   }
 
-  async saveDraftProgramConfig(data: any, adminId: ObjectId) {
+  async saveProgramConfig(data: any, adminId: ObjectId) {
     const current = await this.getAdminProgramConfig()
-    const base = current.draft || current.published || DEFAULT_LOYALTY_CONFIG
+    const base = current.published || DEFAULT_LOYALTY_CONFIG
     const latest = await databaseService.loyaltyProgramConfigs.find({}).sort({ version: -1 }).limit(1).toArray()
-    const normalized = this.normalizeConfigPayload({ ...base, ...data, status: 'draft' })
+    const normalized = this.normalizeConfigPayload({ ...base, ...data, status: 'published' })
     const now = new Date()
 
-    if (current.draft?._id) {
+    if (current.published?._id) {
       await databaseService.loyaltyProgramConfigs.updateOne(
-        { _id: current.draft._id },
-        { $set: { ...normalized, status: 'draft', updatedBy: adminId, updatedAt: now } }
+        { _id: current.published._id },
+        { $set: { ...normalized, status: 'published', publishedBy: adminId, publishedAt: now, updatedBy: adminId, updatedAt: now } }
       )
-      return await databaseService.loyaltyProgramConfigs.findOne({ _id: current.draft._id })
+      return await databaseService.loyaltyProgramConfigs.findOne({ _id: current.published._id })
     }
 
-    const draft = new LoyaltyProgramConfig({
+    const config = new LoyaltyProgramConfig({
       ...normalized,
       version: Math.max(1, Number(latest[0]?.version || 0) + 1),
-      status: 'draft',
+      status: 'published',
       createdBy: adminId,
-      updatedBy: adminId
+      updatedBy: adminId,
+      publishedBy: adminId,
+      publishedAt: now
     })
-    await databaseService.loyaltyProgramConfigs.insertOne(draft)
-    return draft
-  }
-
-  async publishDraftProgramConfig(adminId: ObjectId) {
-    const draft = await databaseService.loyaltyProgramConfigs.find({ status: 'draft' }).sort({ version: -1 }).limit(1).toArray()
-    if (!draft[0]) {
-      throw new ErrorWithStatus({ message: 'Không có bản nháp loyalty để publish.', status: HTTP_STATUS.BAD_REQUEST })
-    }
-
-    const now = new Date()
-    await databaseService.loyaltyProgramConfigs.updateMany(
-      { status: 'published' },
-      { $set: { status: 'archived', updatedAt: now, updatedBy: adminId } }
-    )
-    await databaseService.loyaltyProgramConfigs.updateOne(
-      { _id: draft[0]._id },
-      { $set: { status: 'published', publishedBy: adminId, publishedAt: now, updatedBy: adminId, updatedAt: now } }
-    )
-
-    return await databaseService.loyaltyProgramConfigs.findOne({ _id: draft[0]._id })
+    await databaseService.loyaltyProgramConfigs.insertOne(config)
+    return config
   }
 
   private getTierRule(config: LoyaltyProgramConfigType, tier: LoyaltyTier) {
@@ -156,6 +139,181 @@ class LoyaltyService {
     return [...config.tiers]
       .sort((a, b) => b.minTotalSpent - a.minTotalSpent)
       .find((tier) => totalSpent >= tier.minTotalSpent)?.code || 'member'
+  }
+
+  private async createPointLot(params: {
+    userId: ObjectId
+    source: 'earn' | 'admin_adjust' | 'legacy_adjustment'
+    points: number
+    orderId?: ObjectId
+    adminId?: ObjectId
+    expiresAt?: Date
+  }) {
+    if (params.points <= 0 || !databaseService.loyaltyPointLots) return null
+
+    const lot = new LoyaltyPointLot({
+      userId: params.userId,
+      source: params.source,
+      orderId: params.orderId,
+      adminId: params.adminId,
+      pointsOriginal: params.points,
+      pointsRemaining: params.points,
+      expiresAt: params.expiresAt,
+      status: 'active'
+    })
+
+    await databaseService.loyaltyPointLots.insertOne(lot as any)
+    return lot
+  }
+
+  private sortLotsByExpiry(lots: any[]) {
+    return lots.sort((left, right) => {
+      const leftExpiry = left.expiresAt ? new Date(left.expiresAt).getTime() : Number.MAX_SAFE_INTEGER
+      const rightExpiry = right.expiresAt ? new Date(right.expiresAt).getTime() : Number.MAX_SAFE_INTEGER
+      if (leftExpiry !== rightExpiry) return leftExpiry - rightExpiry
+      return new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime()
+    })
+  }
+
+  private async getSpendableLots(userId: ObjectId) {
+    const now = new Date()
+    const lots = await databaseService.loyaltyPointLots.find({
+      userId,
+      status: 'active',
+      pointsRemaining: { $gt: 0 },
+      $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: now } }]
+    }).toArray()
+
+    return this.sortLotsByExpiry(lots)
+  }
+
+  private async consumePointLots(userId: ObjectId, pointsToConsume: number): Promise<LoyaltyPointLotAllocation[]> {
+    if (pointsToConsume <= 0) return []
+    const lots = await this.getSpendableLots(userId)
+    const availableFromLots = lots.reduce((sum, lot: any) => sum + (lot.pointsRemaining || 0), 0)
+
+    if (availableFromLots < pointsToConsume) {
+      const missing = pointsToConsume - availableFromLots
+      const legacyLot = await this.createPointLot({
+        userId,
+        source: 'legacy_adjustment',
+        points: missing
+      })
+      if (legacyLot) lots.push(legacyLot)
+    }
+
+    const allocations: LoyaltyPointLotAllocation[] = []
+    let remaining = pointsToConsume
+
+    for (const lot of this.sortLotsByExpiry(lots)) {
+      if (remaining <= 0) break
+      const currentRemaining = Math.max(0, Number(lot.pointsRemaining || 0))
+      if (currentRemaining <= 0) continue
+
+      const points = Math.min(currentRemaining, remaining)
+      const nextRemaining = currentRemaining - points
+      const updateResult = await databaseService.loyaltyPointLots.updateOne(
+        { _id: lot._id, userId, status: 'active', pointsRemaining: { $gte: points } },
+        {
+          $inc: { pointsRemaining: -points },
+          $set: {
+            status: nextRemaining <= 0 ? 'consumed' : 'active',
+            ...(nextRemaining <= 0 ? { consumedAt: new Date() } : {}),
+            updatedAt: new Date()
+          }
+        }
+      )
+
+      if (updateResult.modifiedCount === 0) {
+        throw new ErrorWithStatus({
+          message: 'Không thể giữ chỗ lô điểm thưởng. Vui lòng thử lại.',
+          status: HTTP_STATUS.CONFLICT
+        })
+      }
+
+      allocations.push({ lotId: lot._id, points })
+      remaining -= points
+    }
+
+    if (remaining > 0) {
+      throw new ErrorWithStatus({
+        message: 'Không đủ điểm còn hiệu lực để đổi.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    return allocations
+  }
+
+  private async restorePointLotAllocations(userId: ObjectId, allocations: LoyaltyPointLotAllocation[] = []) {
+    for (const allocation of allocations) {
+      if (!allocation?.lotId || allocation.points <= 0) continue
+      await databaseService.loyaltyPointLots.updateOne(
+        { _id: new ObjectId(allocation.lotId), userId, status: { $ne: 'revoked' } },
+        {
+          $inc: { pointsRemaining: allocation.points },
+          $set: { status: 'active', updatedAt: new Date() },
+          $unset: { consumedAt: '' }
+        }
+      )
+    }
+  }
+
+  private async rollbackConsumedPointLots(userId: ObjectId, allocations: LoyaltyPointLotAllocation[] = []) {
+    if (!allocations.length) return
+    await this.restorePointLotAllocations(userId, allocations)
+  }
+
+  private async rollbackRestoredPointLots(userId: ObjectId, allocations: LoyaltyPointLotAllocation[] = []) {
+    for (const allocation of allocations) {
+      if (!allocation?.lotId || allocation.points <= 0) continue
+      await databaseService.loyaltyPointLots.updateOne(
+        { _id: new ObjectId(allocation.lotId), userId, pointsRemaining: { $gte: allocation.points } },
+        {
+          $inc: { pointsRemaining: -allocation.points },
+          $set: { updatedAt: new Date() }
+        }
+      )
+    }
+  }
+
+  private async revokePointLotsForOrder(userId: ObjectId, orderId: ObjectId, pointsToRevoke: number) {
+    if (pointsToRevoke <= 0) return []
+    const lots = await databaseService.loyaltyPointLots.find({
+      userId,
+      orderId,
+      source: 'earn',
+      status: 'active',
+      pointsRemaining: { $gt: 0 }
+    }).toArray()
+
+    const allocations: LoyaltyPointLotAllocation[] = []
+    let remaining = pointsToRevoke
+
+    for (const lot of this.sortLotsByExpiry(lots)) {
+      if (remaining <= 0) break
+      const currentRemaining = Math.max(0, Number(lot.pointsRemaining || 0))
+      if (currentRemaining <= 0) continue
+
+      const points = Math.min(currentRemaining, remaining)
+      const nextRemaining = currentRemaining - points
+      const updateResult = await databaseService.loyaltyPointLots.updateOne(
+        { _id: lot._id, userId, orderId, status: 'active', pointsRemaining: { $gte: points } },
+        {
+          $inc: { pointsRemaining: -points },
+          $set: {
+            status: nextRemaining <= 0 ? 'revoked' : 'active',
+            ...(nextRemaining <= 0 ? { revokedAt: new Date() } : {}),
+            updatedAt: new Date()
+          }
+        }
+      )
+      if (updateResult.modifiedCount === 0) break
+      allocations.push({ lotId: lot._id, points })
+      remaining -= points
+    }
+
+    return allocations
   }
 
   // ============================
@@ -264,6 +422,13 @@ class LoyaltyService {
     expiresAt.setDate(expiresAt.getDate() + config.expiryDays)
 
     const newBalance = account.pointsBalance + earnedPoints
+    const lot = await this.createPointLot({
+      userId,
+      source: 'earn',
+      points: earnedPoints,
+      orderId,
+      expiresAt
+    })
 
     // Ghi transaction
     const transaction = new LoyaltyTransaction({
@@ -273,11 +438,13 @@ class LoyaltyService {
       balanceAfter: newBalance,
       orderId,
       description: `Tích ${earnedPoints} điểm từ đơn hàng ${orderNumber}${multiplier > 1 ? ` (x${multiplier} hạng ${tierRule.label})` : ''}`,
-      expiresAt
+      expiresAt,
+      allocations: lot ? [{ lotId: lot._id, points: earnedPoints }] : []
     })
     try {
       await databaseService.loyaltyTransactions.insertOne(transaction as any)
     } catch (error: any) {
+      if (lot?._id) await databaseService.loyaltyPointLots.deleteOne({ _id: lot._id, userId })
       if (error?.code === 11000) return
       throw error
     }
@@ -317,7 +484,7 @@ class LoyaltyService {
     const maxRedeemAmount = Math.min(maxRedeemByRatio, maxRedeemByBalance)
 
     const pointsNeeded = Math.floor(maxRedeemAmount / config.pointsToVnd)
-    const canRedeem = pointsBalance >= config.minRedeem
+    const canRedeem = pointsBalance > 0 && pointsBalance >= config.minRedeem && pointsNeeded > 0
 
     return {
       canRedeem,
@@ -325,6 +492,7 @@ class LoyaltyService {
       pointsNeeded,
       pointsBalance,
       minRedeem: config.minRedeem,
+      pointsToVnd: config.pointsToVnd,
       maxRedeemRatio: config.maxRedeemRatio,
       configVersion: config.version
     }
@@ -388,6 +556,20 @@ class LoyaltyService {
       })
     }
 
+    let allocations: LoyaltyPointLotAllocation[] = []
+    try {
+      allocations = await this.consumePointLots(userId, pointsToRedeem)
+    } catch (error) {
+      await databaseService.loyaltyAccounts.updateOne(
+        { userId },
+        {
+          $inc: { pointsBalance: pointsToRedeem, totalPointsRedeemed: -pointsToRedeem },
+          $set: { updatedAt: new Date() }
+        }
+      )
+      throw error
+    }
+
     // Ghi transaction (balance đã update atomically)
     const transaction = new LoyaltyTransaction({
       userId,
@@ -395,12 +577,21 @@ class LoyaltyService {
       points: -pointsToRedeem,
       balanceAfter: updatedAccount.pointsBalance,
       orderId,
-      description: `Đổi ${pointsToRedeem.toLocaleString('vi-VN')} điểm giảm ${redeemAmount.toLocaleString('vi-VN')}đ cho đơn ${orderNumber}`
+      description: `Đổi ${pointsToRedeem.toLocaleString('vi-VN')} điểm giảm ${redeemAmount.toLocaleString('vi-VN')}đ cho đơn ${orderNumber}`,
+      allocations
     })
     try {
       await databaseService.loyaltyTransactions.insertOne(transaction as any)
     } catch (error: any) {
       if (error?.code === 11000) {
+        await this.rollbackConsumedPointLots(userId, allocations)
+        await databaseService.loyaltyAccounts.updateOne(
+          { userId },
+          {
+            $inc: { pointsBalance: pointsToRedeem, totalPointsRedeemed: -pointsToRedeem },
+            $set: { updatedAt: new Date() }
+          }
+        )
         const existing = await databaseService.loyaltyTransactions.findOne({
           userId,
           orderId,
@@ -409,6 +600,7 @@ class LoyaltyService {
         return existing && existing.points < 0 ? Math.abs(existing.points) * config.pointsToVnd : 0
       }
 
+      await this.rollbackConsumedPointLots(userId, allocations)
       await databaseService.loyaltyAccounts.updateOne(
         { userId },
         {
@@ -457,19 +649,37 @@ class LoyaltyService {
 
     if (!updatedAccount) return
 
+    const allocations = (redeemTx.allocations || []) as LoyaltyPointLotAllocation[]
+    await this.restorePointLotAllocations(userId, allocations)
+
     const transaction = new LoyaltyTransaction({
       userId,
       type: 'adjust',
       points: pointsToRefund,
       balanceAfter: updatedAccount.pointsBalance,
       orderId,
-      description: `Hoàn điểm đã đổi do đơn ${orderNumber} không hoàn tất`
+      description: `Hoàn điểm đã đổi do đơn ${orderNumber} không hoàn tất`,
+      allocations
     })
     try {
       await databaseService.loyaltyTransactions.insertOne(transaction as any)
     } catch (error: any) {
-      if (error?.code === 11000) return
+      if (error?.code === 11000) {
+        await this.rollbackRestoredPointLots(userId, allocations)
+        await databaseService.loyaltyAccounts.updateOne(
+          { userId },
+          {
+            $inc: {
+              pointsBalance: -pointsToRefund,
+              totalPointsRedeemed: pointsToRefund
+            },
+            $set: { updatedAt: new Date() }
+          }
+        )
+        return
+      }
 
+      await this.rollbackRestoredPointLots(userId, allocations)
       await databaseService.loyaltyAccounts.updateOne(
         { userId },
         {
@@ -533,15 +743,58 @@ class LoyaltyService {
       })
     }
 
+    let allocations: LoyaltyPointLotAllocation[] = []
+    if (delta < 0) {
+      try {
+        allocations = await this.consumePointLots(userId, normalizedPoints)
+      } catch (error) {
+        await databaseService.loyaltyAccounts.updateOne(
+          { userId },
+          {
+            $inc: { pointsBalance: normalizedPoints },
+            $set: { updatedAt: new Date() }
+          }
+        )
+        throw error
+      }
+    }
+
     const transaction = new LoyaltyTransaction({
       userId,
       type: 'adjust',
       points: delta,
       balanceAfter: updatedAccount.pointsBalance,
-      description: `${delta > 0 ? 'Cộng' : 'Trừ'} ${normalizedPoints.toLocaleString('vi-VN')} điểm bởi admin ${adminId.toString()}: ${cleanReason}`
+      description: `${delta > 0 ? 'Cộng' : 'Trừ'} ${normalizedPoints.toLocaleString('vi-VN')} điểm bởi admin: ${cleanReason}`,
+      allocations
     })
 
-    await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    try {
+      await databaseService.loyaltyTransactions.insertOne(transaction as any)
+    } catch (error) {
+      if (delta < 0) await this.rollbackConsumedPointLots(userId, allocations)
+      await databaseService.loyaltyAccounts.updateOne(
+        { userId },
+        {
+          $inc: { pointsBalance: -delta },
+          $set: { updatedAt: new Date() }
+        }
+      )
+      throw error
+    }
+
+    if (delta > 0) {
+      const config = await this.getActiveProgramConfig()
+      const expiresAt = new Date()
+      expiresAt.setDate(expiresAt.getDate() + config.expiryDays)
+      await this.createPointLot({
+        userId,
+        source: 'admin_adjust',
+        points: normalizedPoints,
+        adminId,
+        expiresAt
+      })
+    }
+
     return { account: updatedAccount, transaction }
   }
 
@@ -572,10 +825,12 @@ class LoyaltyService {
 
     if (!earnTx) return // Chưa tích thì không cần hoàn
 
-    const revokePoints = Math.min(earnTx.points, account.pointsBalance)
+    const pointsFromReturnedAmount = Math.floor(orderTotal / config.pointsPerVnd)
+    const revokePoints = Math.min(earnTx.points, pointsFromReturnedAmount, account.pointsBalance)
     if (revokePoints <= 0) return
 
     const newBalance = account.pointsBalance - revokePoints
+    const allocations = await this.revokePointLotsForOrder(userId, orderId, revokePoints)
 
     const transaction = new LoyaltyTransaction({
       userId,
@@ -583,12 +838,17 @@ class LoyaltyService {
       points: -revokePoints,
       balanceAfter: newBalance,
       orderId,
-      description: `Thu hồi ${revokePoints} điểm do hoàn trả đơn ${orderNumber}`
+      description: `Thu hồi ${revokePoints} điểm do hoàn trả đơn ${orderNumber}`,
+      allocations
     })
     try {
       await databaseService.loyaltyTransactions.insertOne(transaction as any)
     } catch (error: any) {
-      if (error?.code === 11000) return
+      if (error?.code === 11000) {
+        await this.restorePointLotAllocations(userId, allocations)
+        return
+      }
+      await this.restorePointLotAllocations(userId, allocations)
       throw error
     }
 
@@ -639,6 +899,69 @@ class LoyaltyService {
    */
   async processExpiredPoints(userId: ObjectId) {
     const now = new Date()
+
+    const hasPointLots = await databaseService.loyaltyPointLots.countDocuments({ userId }, { limit: 1 } as any)
+    if (hasPointLots > 0) {
+      const expiredLots = await databaseService.loyaltyPointLots.find({
+        userId,
+        status: 'active',
+        pointsRemaining: { $gt: 0 },
+        expiresAt: { $lte: now }
+      }).toArray()
+
+      if (!expiredLots.length) return
+
+      const account = await this.getOrCreateAccount(userId)
+      let remainingToExpire = Math.min(
+        expiredLots.reduce((sum, lot: any) => sum + (lot.pointsRemaining || 0), 0),
+        account.pointsBalance
+      )
+      if (remainingToExpire <= 0) return
+
+      const allocations: LoyaltyPointLotAllocation[] = []
+      for (const lot of this.sortLotsByExpiry(expiredLots)) {
+        if (remainingToExpire <= 0) break
+        const points = Math.min(lot.pointsRemaining || 0, remainingToExpire)
+        if (points <= 0) continue
+        const nextRemaining = (lot.pointsRemaining || 0) - points
+        await databaseService.loyaltyPointLots.updateOne(
+          { _id: lot._id, userId, status: 'active', pointsRemaining: { $gte: points } },
+          {
+            $inc: { pointsRemaining: -points },
+            $set: {
+              status: nextRemaining <= 0 ? 'expired' : 'active',
+              ...(nextRemaining <= 0 ? { expiredAt: now } : {}),
+              updatedAt: now
+            }
+          }
+        )
+        allocations.push({ lotId: lot._id, points })
+        remainingToExpire -= points
+      }
+
+      const actualExpired = allocations.reduce((sum, allocation) => sum + allocation.points, 0)
+      if (actualExpired <= 0) return
+      const newBalance = Math.max(0, account.pointsBalance - actualExpired)
+
+      const expireTx = new LoyaltyTransaction({
+        userId,
+        type: 'expire',
+        points: -actualExpired,
+        balanceAfter: newBalance,
+        description: `${actualExpired.toLocaleString('vi-VN')} điểm đã hết hạn`,
+        allocations
+      })
+      await databaseService.loyaltyTransactions.insertOne(expireTx as any)
+
+      await databaseService.loyaltyAccounts.updateOne(
+        { userId },
+        {
+          $set: { pointsBalance: newBalance, updatedAt: new Date() },
+          $inc: { totalPointsExpired: actualExpired }
+        }
+      )
+      return
+    }
 
     // Tìm các transaction earn chưa hết hạn nhưng đã quá date
     const expiredTxs = await databaseService.loyaltyTransactions.find({

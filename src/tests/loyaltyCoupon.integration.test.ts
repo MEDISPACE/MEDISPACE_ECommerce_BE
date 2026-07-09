@@ -69,6 +69,78 @@ describe('loyalty/coupon MongoDB integration', () => {
         description: 'redeem retry'
       })
     ).rejects.toMatchObject({ code: 11000 })
+
+    await db.collection('loyalty_transactions').insertMany([
+      {
+        userId,
+        type: 'adjust',
+        points: 1000,
+        balanceAfter: 101000,
+        description: 'admin adjust without order 1'
+      },
+      {
+        userId,
+        type: 'adjust',
+        points: 2000,
+        balanceAfter: 103000,
+        description: 'admin adjust without order 2'
+      },
+      {
+        userId,
+        orderId: null,
+        type: 'adjust',
+        points: 3000,
+        balanceAfter: 106000,
+        description: 'legacy admin adjust with null order 1'
+      },
+      {
+        userId,
+        orderId: null,
+        type: 'adjust',
+        points: 4000,
+        balanceAfter: 110000,
+        description: 'legacy admin adjust with null order 2'
+      }
+    ])
+  })
+
+  it('replaces stale loyalty transaction unique index that also matches null orderId', async () => {
+    await db.collection('loyalty_transactions').deleteMany({})
+    await db.collection('loyalty_transactions').dropIndexes()
+    await db.collection('loyalty_transactions').createIndex(
+      { userId: 1, orderId: 1, type: 1 },
+      {
+        name: 'uniq_loyalty_transaction_order_type',
+        unique: true,
+        partialFilterExpression: {
+          orderId: { $exists: true },
+          type: { $in: ['earn', 'redeem', 'revoke', 'adjust'] }
+        }
+      }
+    )
+
+    await ensureCriticalLoyaltyCouponIndexes(db)
+    await expect(verifyCriticalLoyaltyCouponIndexes(db)).resolves.toEqual({ verifiedCount: 5 })
+
+    const userId = new ObjectId()
+    await db.collection('loyalty_transactions').insertMany([
+      {
+        userId,
+        orderId: null,
+        type: 'adjust',
+        points: 1000,
+        balanceAfter: 1000,
+        description: 'adjust null order 1'
+      },
+      {
+        userId,
+        orderId: null,
+        type: 'adjust',
+        points: 2000,
+        balanceAfter: 3000,
+        description: 'adjust null order 2'
+      }
+    ])
   })
 
   it('backfills coupon userUsageCounts and currentUsageCount from redemptions', async () => {

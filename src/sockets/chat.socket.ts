@@ -1035,30 +1035,37 @@ export const initChatSocket = (httpServer: HTTPServer) => {
       }
 
       if (socket.userId) {
-        // --- FIX 3.4: decrement counter, chỉ set offline khi count về 0 ---
-        const user = await databaseService.users.findOneAndUpdate(
-          { _id: new ObjectId(socket.userId) },
-          {
-            $inc: { onlineCount: -1 },
-            $set: { updatedAt: new Date() }
-          },
-          { returnDocument: 'after' }
-        )
+        try {
+          // --- FIX 3.4: decrement counter, chỉ set offline khi count về 0 ---
+          const user = await databaseService.users.findOneAndUpdate(
+            { _id: new ObjectId(socket.userId) },
+            {
+              $inc: { onlineCount: -1 },
+              $set: { updatedAt: new Date() }
+            },
+            { returnDocument: 'after' }
+          )
 
-        const newCount = user?.onlineCount ?? 0
-        if (newCount <= 0) {
-          if (socket.userRole === 'pharmacist') {
-            await databaseService.users.updateOne(
-              { _id: new ObjectId(socket.userId) },
-              { $set: { onlineCount: 0 } }
-            )
-          } else {
-            await databaseService.users.updateOne(
-              { _id: new ObjectId(socket.userId) },
-              { $set: { isOnline: false, onlineCount: 0 } }
-            )
+          const newCount = user?.onlineCount ?? 0
+          if (newCount <= 0) {
+            if (socket.userRole === 'pharmacist') {
+              await databaseService.users.updateOne(
+                { _id: new ObjectId(socket.userId) },
+                { $set: { onlineCount: 0 } }
+              )
+            } else {
+              await databaseService.users.updateOne(
+                { _id: new ObjectId(socket.userId) },
+                { $set: { isOnline: false, onlineCount: 0 } }
+              )
+            }
+            io.emit('user:offline', { userId: socket.userId })
           }
-          io.emit('user:offline', { userId: socket.userId })
+        } catch (error) {
+          console.warn('[Socket.IO] Failed to update user presence on disconnect:', {
+            userId: socket.userId,
+            message: error instanceof Error ? error.message : String(error)
+          })
         }
       }
     })

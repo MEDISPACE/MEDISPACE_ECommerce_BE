@@ -5,6 +5,10 @@ import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
 import { USERS_MESSAGES } from '~/constants/message'
 
+const isAdminRole = (role: unknown) => role === UserRole.Admin || role === String(UserRole.Admin) || role === 'admin' || role === 'Admin'
+const isPharmacistRole = (role: unknown) =>
+  role === UserRole.Pharmacist || role === String(UserRole.Pharmacist) || role === 'pharmacist' || role === 'Pharmacist'
+
 /**
  * Middleware to check if user has Admin role
  * Must be used after accessTokenValidator
@@ -12,7 +16,7 @@ import { USERS_MESSAGES } from '~/constants/message'
 export const adminRequired = (req: Request, res: Response, next: NextFunction) => {
   const { role } = req.decoded_authorization as TokenPayload
 
-  if (role !== UserRole.Admin) {
+  if (!isAdminRole(role)) {
     throw new ErrorWithStatus({
       message: USERS_MESSAGES.ADMIN_REQUIRED,
       status: HTTP_STATUS.FORBIDDEN
@@ -29,7 +33,7 @@ export const adminRequired = (req: Request, res: Response, next: NextFunction) =
 export const adminOrPharmacistRequired = (req: Request, res: Response, next: NextFunction) => {
   const { role } = req.decoded_authorization as TokenPayload
 
-  if (role !== UserRole.Admin && role !== UserRole.Pharmacist) {
+  if (!isAdminRole(role) && !isPharmacistRole(role)) {
     throw new ErrorWithStatus({
       message: USERS_MESSAGES.ADMIN_OR_PHARMACIST_REQUIRED,
       status: HTTP_STATUS.FORBIDDEN
