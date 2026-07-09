@@ -21,6 +21,26 @@ import paymentTransactionService from './paymentTransactions.services'
 class OrderService {
   private readonly terminalOrderStatuses = new Set(['cancelled', 'delivered', 'returned'])
 
+  private assertCouponStackingRules(appliedCoupons: any[]) {
+    const discountCoupons = appliedCoupons.filter((coupon: any) => coupon.type !== 'free_shipping')
+    const freeShippingCoupons = appliedCoupons.filter((coupon: any) => coupon.type === 'free_shipping')
+    const uniqueCodes = new Set(appliedCoupons.map((coupon: any) => coupon.code))
+
+    if (uniqueCodes.size !== appliedCoupons.length) {
+      throw new ErrorWithStatus({
+        message: 'Mã giảm giá đã được áp dụng trùng lặp.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+
+    if (discountCoupons.length > 1 || freeShippingCoupons.length > 1) {
+      throw new ErrorWithStatus({
+        message: 'Chỉ được dùng tối đa 1 mã giảm giá và 1 mã miễn phí vận chuyển.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
+    }
+  }
+
   private assertProductAvailableForSale(product: any) {
     if (product.isActive === false || product.status !== 'active') {
       throw new ErrorWithStatus({
@@ -476,7 +496,7 @@ class OrderService {
             code: cartCoupon.code,
             discountAmount: validation.discountAmount,
             eligibleSubtotal: validation.eligibleSubtotal,
-            type: cartCoupon.type,
+            type: validation.coupon?.type || cartCoupon.type,
             name: (cartCoupon as any).name || validation.coupon?.name || cartCoupon.code,
             applicableProductIds: validation.coupon?.applicableProductIds || [],
             applicableCategoryIds: validation.applicableCategoryIds || validation.coupon?.applicableCategoryIds || []
@@ -502,11 +522,19 @@ class OrderService {
             applicableProductIds: validation.coupon.applicableProductIds || [],
             applicableCategoryIds: validation.applicableCategoryIds || validation.coupon.applicableCategoryIds || []
           })
+          continue
         }
+
+        throw new ErrorWithStatus({
+          message: `Mã giảm giá ${code} không còn hợp lệ: ${validation.message}`,
+          status: HTTP_STATUS.CONFLICT
+        })
       }
     }
 
     // Tính coupon discount (không tính freeship vào discountAmount)
+    this.assertCouponStackingRules(appliedCoupons)
+
     couponDiscountAmount = appliedCoupons
       .filter((c: any) => c.type !== 'free_shipping')
       .reduce((sum: number, c: any) => sum + (c.discountAmount || 0), 0)
@@ -654,9 +682,7 @@ class OrderService {
           await cartService.removeItemFromCart(new ObjectId(item.productId), userId, sessionId, (item as any).unit)
         }
         // Xóa applied coupons sau khi đặt hàng (chỉ coupons đã dùng)
-        await databaseService.carts.updateOne(userId ? { userId } : { sessionId }, {
-          $set: { appliedCoupons: [], discountAmount: 0, updatedAt: new Date() }
-        })
+        await couponService.revalidateCartCoupons(userId, sessionId)
       } else {
         // Clear entire cart
         await cartService.clearCart(userId, sessionId)
