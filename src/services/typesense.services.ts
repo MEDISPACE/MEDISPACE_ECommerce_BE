@@ -25,7 +25,7 @@ const ARTICLES_COLLECTION = 'articles'
 const BRANDS_COLLECTION = 'brands'
 const CATEGORIES_COLLECTION = 'categories'
 const QUERY_SUGGESTIONS_COLLECTION = 'query_suggestions'
-const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE !== 'false'
+const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE === 'true'
 const TYPESENSE_EMBEDDING_ENABLED = process.env.TYPESENSE_EMBEDDING_ENABLED !== 'false'
 
 const productSchema = {

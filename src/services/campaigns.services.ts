@@ -24,16 +24,6 @@ export interface CampaignPriceResult {
 }
 
 class CampaignService {
-  private async syncSearchPrices(reason: string): Promise<void> {
-    try {
-      const typesenseModule = await import('./typesense.services.js')
-      const typesenseService = (typesenseModule.default as any)?.default ?? typesenseModule.default
-      await typesenseService.requestReconciliation(reason)
-    } catch (err) {
-      console.error('[Campaign] Could not request Typesense reconciliation:', (err as Error)?.message)
-    }
-  }
-
   // ============================
   // CORE: Tính giá sale cho 1 sản phẩm
   // ============================
@@ -417,7 +407,6 @@ class CampaignService {
 
     const result = await databaseService.campaigns.insertOne(campaign as any)
     await this.invalidateCampaignCache()
-    void this.syncSearchPrices(`campaign created: ${result.insertedId.toString()}`)
     return { ...campaign, _id: result.insertedId }
   }
 
@@ -467,8 +456,6 @@ class CampaignService {
 
     await databaseService.campaigns.updateOne({ _id: campaignId }, updateOp)
     await this.invalidateCampaignCache()
-    void this.syncSearchPrices(`campaign updated: ${campaignId.toString()}`)
-
     return databaseService.campaigns.findOne({ _id: campaignId })
   }
 
@@ -478,7 +465,6 @@ class CampaignService {
       throw new ErrorWithStatus({ message: 'Không tìm thấy chiến dịch.', status: HTTP_STATUS.NOT_FOUND })
     }
     await this.invalidateCampaignCache()
-    void this.syncSearchPrices(`campaign deleted: ${campaignId.toString()}`)
     return { message: 'Đã xóa chiến dịch.' }
   }
 
@@ -524,8 +510,6 @@ class CampaignService {
       { $set: { status: newStatus as any, updatedAt: new Date() } }
     )
     await this.invalidateCampaignCache()
-    void this.syncSearchPrices(`campaign toggled: ${campaignId.toString()}`)
-
     return databaseService.campaigns.findOne({ _id: campaignId })
   }
 }
