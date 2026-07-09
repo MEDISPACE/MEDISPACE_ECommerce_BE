@@ -27,6 +27,7 @@ const CATEGORIES_COLLECTION = 'categories'
 const QUERY_SUGGESTIONS_COLLECTION = 'query_suggestions'
 const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE === 'true'
 const TYPESENSE_EMBEDDING_ENABLED = process.env.TYPESENSE_EMBEDDING_ENABLED !== 'false'
+const LEGACY_CAMPAIGN_RECONCILIATION_ERROR = "Cannot find module '/app/dist/services/campaigns.services'"
 
 const productSchema = {
   name: PRODUCTS_COLLECTION,
@@ -995,7 +996,24 @@ class TypesenseService {
         })
       )
     ])
-    return { healthy: true, dirty: Boolean(state?.dirty), counts: Object.fromEntries(collections), lastReconciledAt: state?.reconciledAt }
+    return { healthy: true, dirty: Boolean(state?.dirty), reason: state?.reason, counts: Object.fromEntries(collections), lastReconciledAt: state?.reconciledAt }
+  }
+
+  isLegacyCampaignReconciliationDirty(consistency: Record<string, unknown>): boolean {
+    return (
+      !TYPESENSE_AUTO_RECONCILE &&
+      consistency.dirty === true &&
+      typeof consistency.reason === 'string' &&
+      consistency.reason.includes(LEGACY_CAMPAIGN_RECONCILIATION_ERROR)
+    )
+  }
+
+  async clearLegacyCampaignReconciliationDirty(): Promise<void> {
+    if (TYPESENSE_AUTO_RECONCILE) return
+    await databaseService.typesenseSyncState.updateOne(
+      { key: 'global', dirty: true, reason: { $regex: LEGACY_CAMPAIGN_RECONCILIATION_ERROR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') } },
+      { $set: { dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } }
+    )
   }
 }
 
