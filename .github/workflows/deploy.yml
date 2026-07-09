@@ -129,6 +129,51 @@ jobs:
               echo "Pinned $service to image tag $requested_tag"
             }
 
+            image_repo_for() {
+              case "$1" in
+                backend) echo "${{ secrets.DOCKERHUB_USERNAME }}/medispace-be" ;;
+                frontend) echo "${{ secrets.DOCKERHUB_USERNAME }}/medispace-fe" ;;
+                ocr-service) echo "${{ secrets.DOCKERHUB_USERNAME }}/medispace-ocr" ;;
+                ml-service) echo "${{ secrets.DOCKERHUB_USERNAME }}/medispace-ml" ;;
+                chat-ai-service) echo "${{ secrets.DOCKERHUB_USERNAME }}/medispace-chat-ai" ;;
+                *) echo "Unknown service: $1" >&2; exit 1 ;;
+              esac
+            }
+
+            prune_old_service_images() {
+              service="$1"
+              repo="$(image_repo_for "$service")"
+              tag_var="$(tag_var_for "$service")"
+              current_tag="$(get_tag "$tag_var")"
+              previous_tag="$(get_tag "${tag_var}_PREVIOUS")"
+
+              # If a service has never been pinned, docker compose falls back to latest.
+              if [ -z "$current_tag" ]; then
+                current_tag="latest"
+              fi
+
+              echo "Keeping $repo:$current_tag${previous_tag:+ and $repo:$previous_tag}"
+
+              docker image ls "$repo" --format '{{.Repository}}:{{.Tag}}' | while read -r image_ref; do
+                tag="${image_ref##*:}"
+                case "$tag" in
+                  "$current_tag") continue ;;
+                  "$previous_tag") [ -n "$previous_tag" ] && continue ;;
+                esac
+
+                echo "Removing old image $image_ref"
+                docker image rm "$image_ref" || true
+              done
+            }
+
+            prune_old_medispace_images() {
+              prune_old_service_images backend
+              prune_old_service_images frontend
+              prune_old_service_images ocr-service
+              prune_old_service_images ml-service
+              prune_old_service_images chat-ai-service
+            }
+
             export_tags() {
               set -a
               . "./$TAG_FILE"
@@ -160,8 +205,12 @@ jobs:
             echo "🏥 Status:"
             compose ps
 
-            echo "🧹 Cleaning up dangling images..."
+            echo "🧹 Keeping only current and previous MediSpace images..."
+            prune_old_medispace_images || true
+
+            echo "🧹 Cleaning up dangling images and old build cache..."
             docker image prune -f || true
+            docker builder prune -f --filter "until=24h" || true
           REMOTE
 
       - name: Cleanup SSH
