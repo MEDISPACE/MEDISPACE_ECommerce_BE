@@ -468,7 +468,7 @@ async function main() {
         POINTS_PER_VND,
         POINTS_MAX_REDEEM_RATIO: parseFloat(process.env.POINTS_MAX_REDEEM_RATIO || '0.3'),
         POINTS_EXPIRY_DAYS: parseInt(process.env.POINTS_EXPIRY_DAYS || '365'),
-        POINTS_MIN_REDEEM: parseInt(process.env.POINTS_MIN_REDEEM || '10000'),
+        POINTS_MIN_REDEEM: parseInt(process.env.POINTS_MIN_REDEEM || '0'),
         E2E_PRODUCT_PRICE_1,
         E2E_PRODUCT_PRICE_2,
       },

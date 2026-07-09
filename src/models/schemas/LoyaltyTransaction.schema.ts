@@ -2,6 +2,11 @@ import { ObjectId } from 'mongodb'
 
 export type TransactionType = 'earn' | 'redeem' | 'expire' | 'revoke' | 'adjust'
 
+export interface LoyaltyPointLotAllocation {
+  lotId: ObjectId
+  points: number
+}
+
 export interface LoyaltyTransactionType {
   _id?: ObjectId
   userId: ObjectId
@@ -16,6 +21,7 @@ export interface LoyaltyTransactionType {
   // Hết hạn (chỉ áp dụng cho type='earn')
   expiresAt?: Date        // Ngày hết hạn của số điểm này
   isExpired?: boolean     // Đã hết hạn chưa
+  allocations?: LoyaltyPointLotAllocation[] // Các lô điểm bị trừ/hoàn theo giao dịch
 
   createdAt?: Date
 }
@@ -30,6 +36,7 @@ export default class LoyaltyTransaction {
   description: string
   expiresAt?: Date
   isExpired: boolean
+  allocations: LoyaltyPointLotAllocation[]
   createdAt: Date
 
   constructor(tx: LoyaltyTransactionType) {
@@ -42,6 +49,7 @@ export default class LoyaltyTransaction {
     this.description = tx.description
     this.expiresAt = tx.expiresAt ? new Date(tx.expiresAt) : undefined
     this.isExpired = tx.isExpired || false
+    this.allocations = tx.allocations || []
     this.createdAt = tx.createdAt || new Date()
   }
 }

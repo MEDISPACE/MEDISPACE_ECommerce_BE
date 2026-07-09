@@ -179,22 +179,12 @@ export const getAdminLoyaltyProgramConfigController = async (req: Request, res: 
   })
 }
 
-// PUT /loyalty/admin/program-config/draft — Admin lưu bản nháp cấu hình loyalty
-export const saveAdminLoyaltyProgramDraftController = async (req: Request, res: Response) => {
+// PUT /loyalty/admin/program-config — Admin lưu trực tiếp cấu hình loyalty đang áp dụng
+export const saveAdminLoyaltyProgramConfigController = async (req: Request, res: Response) => {
   const adminId = new ObjectId(req.decoded_authorization!.userId)
-  const result = await loyaltyService.saveDraftProgramConfig(req.body, adminId)
+  const result = await loyaltyService.saveProgramConfig(req.body, adminId)
   return res.status(HTTP_STATUS.OK).json({
-    message: 'Đã lưu bản nháp cấu hình loyalty.',
-    result
-  })
-}
-
-// POST /loyalty/admin/program-config/publish — Admin publish bản nháp cấu hình loyalty
-export const publishAdminLoyaltyProgramConfigController = async (req: Request, res: Response) => {
-  const adminId = new ObjectId(req.decoded_authorization!.userId)
-  const result = await loyaltyService.publishDraftProgramConfig(adminId)
-  return res.status(HTTP_STATUS.OK).json({
-    message: 'Đã publish cấu hình loyalty.',
+    message: 'Đã lưu cấu hình loyalty.',
     result
   })
 }

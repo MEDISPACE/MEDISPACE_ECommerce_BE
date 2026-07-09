@@ -564,16 +564,18 @@ class OrderService {
     if (payload.pointsToRedeem && payload.pointsToRedeem > 0 && userId) {
       // Cap điểm: loyalty + coupon không được vượt subtotal
       const remainingAfterCoupon = Math.max(0, subtotal - discountAmount)
-      const maxPointsVnd = Math.min(payload.pointsToRedeem, remainingAfterCoupon)
-      if (maxPointsVnd > 0) {
+      const loyaltyConfig = await loyaltyService.getActiveProgramConfig()
+      const maxPointsByRemaining = Math.floor(remainingAfterCoupon / loyaltyConfig.pointsToVnd)
+      const pointsToUse = Math.min(payload.pointsToRedeem, maxPointsByRemaining)
+      if (pointsToUse > 0) {
         pointsRedeemAmount = await loyaltyService.redeemPoints(
           userId,
           orderId,
-          maxPointsVnd, // điểm = VNĐ (1:1)
+          pointsToUse,
           remainingAfterCoupon,
           orderNumber
         )
-        pointsRedeemed = maxPointsVnd
+        pointsRedeemed = pointsToUse
       }
     }
 

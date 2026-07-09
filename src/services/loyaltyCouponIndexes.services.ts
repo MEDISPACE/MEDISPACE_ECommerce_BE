@@ -86,6 +86,15 @@ export async function ensureCriticalLoyaltyCouponIndexes(db: Db) {
       continue
     }
 
+    const expectedName = typeof definition.options?.name === 'string' ? definition.options.name : null
+    const staleIndex = expectedName
+      ? indexes.find((index) => index.name === expectedName && !indexMatches(index, definition))
+      : null
+
+    if (staleIndex?.name) {
+      await db.collection(definition.collection).dropIndex(staleIndex.name)
+    }
+
     await db.collection(definition.collection).createIndex(definition.keys, {
       background: true,
       ...definition.options
