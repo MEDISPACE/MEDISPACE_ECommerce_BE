@@ -7,8 +7,7 @@ import {
   getAdminLoyaltyAccountsController,
   adjustAdminLoyaltyPointsController,
   getAdminLoyaltyProgramConfigController,
-  saveAdminLoyaltyProgramDraftController,
-  publishAdminLoyaltyProgramConfigController
+  saveAdminLoyaltyProgramConfigController
 } from '~/controllers/loyalty.controllers'
 import { accessTokenValidator, verifiedUserValidator } from '~/middlewares/users.middlewares'
 import { adminRequired } from '~/middlewares/admin.middlewares'
@@ -97,19 +96,11 @@ loyaltyRouter.get(
 )
 
 loyaltyRouter.put(
-  '/admin/program-config/draft',
+  '/admin/program-config',
   accessTokenValidator,
   verifiedUserValidator,
   adminRequired,
-  wrapRequestHandler(saveAdminLoyaltyProgramDraftController)
-)
-
-loyaltyRouter.post(
-  '/admin/program-config/publish',
-  accessTokenValidator,
-  verifiedUserValidator,
-  adminRequired,
-  wrapRequestHandler(publishAdminLoyaltyProgramConfigController)
+  wrapRequestHandler(saveAdminLoyaltyProgramConfigController)
 )
 
 export default loyaltyRouter

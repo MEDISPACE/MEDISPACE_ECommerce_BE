@@ -21,6 +21,10 @@ const mockTransactionFindOne = vi.fn()
 const mockTransactionInsertOne = vi.fn()
 const mockTransactionUpdateOne = vi.fn()
 const mockTransactionFind = vi.fn()
+const mockLotFind = vi.fn()
+const mockLotInsertOne = vi.fn()
+const mockLotUpdateOne = vi.fn()
+const mockLotCountDocuments = vi.fn()
 const mockProgramFind = vi.fn()
 const mockProgramFindOne = vi.fn()
 const mockProgramInsertOne = vi.fn()
@@ -48,6 +52,12 @@ vi.mock('~/services/database.services', () => {
         insertOne: mockTransactionInsertOne,
         updateOne: mockTransactionUpdateOne,
         find: mockTransactionFind
+      },
+      loyaltyPointLots: {
+        find: mockLotFind,
+        insertOne: mockLotInsertOne,
+        updateOne: mockLotUpdateOne,
+        countDocuments: mockLotCountDocuments
       },
       loyaltyProgramConfigs: {
         find: mockProgramFind,
@@ -87,6 +97,10 @@ describe('LoyaltyService', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockProgramFind.mockReturnValue(mockProgramFindResult([]))
+    mockLotFind.mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) })
+    mockLotInsertOne.mockResolvedValue({ insertedId: new ObjectId() })
+    mockLotUpdateOne.mockResolvedValue({ modifiedCount: 1 })
+    mockLotCountDocuments.mockResolvedValue(0)
   })
 
   describe('getOrCreateAccount()', () => {
@@ -209,7 +223,39 @@ describe('LoyaltyService', () => {
       )
     })
 
-    it('Không rollback điểm nếu insert redeem transaction bị duplicate do retry', async () => {
+    it('Trừ điểm theo lô sắp hết hạn trước', async () => {
+      const earlyLot = {
+        _id: new ObjectId(),
+        userId: new ObjectId(USER_ID),
+        pointsRemaining: 30000,
+        status: 'active',
+        expiresAt: new Date('2026-08-01T00:00:00.000Z'),
+        createdAt: new Date('2026-01-01T00:00:00.000Z')
+      }
+      const laterLot = {
+        _id: new ObjectId(),
+        userId: new ObjectId(USER_ID),
+        pointsRemaining: 50000,
+        status: 'active',
+        expiresAt: new Date('2026-12-01T00:00:00.000Z'),
+        createdAt: new Date('2026-02-01T00:00:00.000Z')
+      }
+      mockLotFind.mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([laterLot, earlyLot]) })
+      mockAccountFindOneAndUpdate.mockResolvedValueOnce({ ...makeAccount(), pointsBalance: 30000 })
+
+      await loyaltyService.redeemPoints(new ObjectId(USER_ID), new ObjectId(ORDER_ID), 50000, 200000, 'ORD-123')
+
+      expect(mockLotUpdateOne.mock.calls[0][0]).toMatchObject({ _id: earlyLot._id })
+      expect(mockLotUpdateOne.mock.calls[0][1]).toMatchObject({ $inc: { pointsRemaining: -30000 } })
+      expect(mockLotUpdateOne.mock.calls[1][0]).toMatchObject({ _id: laterLot._id })
+      expect(mockLotUpdateOne.mock.calls[1][1]).toMatchObject({ $inc: { pointsRemaining: -20000 } })
+      expect(mockTransactionInsertOne.mock.calls[0][0].allocations).toEqual([
+        { lotId: earlyLot._id, points: 30000 },
+        { lotId: laterLot._id, points: 20000 }
+      ])
+    })
+
+    it('Rollback điểm tạm nếu insert redeem transaction bị duplicate do retry', async () => {
       const acc = makeAccount({ pointsBalance: 50000 })
       mockTransactionFindOne
         .mockResolvedValueOnce(null)
@@ -223,7 +269,13 @@ describe('LoyaltyService', () => {
       )
 
       expect(res).toBe(50000)
-      expect(mockAccountUpdateOne).not.toHaveBeenCalled()
+      expect(mockAccountUpdateOne).toHaveBeenCalledWith(
+        { userId: new ObjectId(USER_ID) },
+        {
+          $inc: { pointsBalance: 50000, totalPointsRedeemed: -50000 },
+          $set: { updatedAt: expect.any(Date) }
+        }
+      )
     })
 
     it('Rollback điểm nếu insert redeem transaction lỗi thật không phải duplicate', async () => {
@@ -275,12 +327,12 @@ describe('LoyaltyService', () => {
       expect(result.configVersion).toBe(2)
     })
 
-    it('publish bản nháp sẽ archive config published cũ và publish draft mới', async () => {
+    it('lưu cấu hình loyalty sẽ cập nhật trực tiếp published config, không cần draft', async () => {
       const adminId = new ObjectId()
-      const draft = {
+      const published = {
         _id: new ObjectId(),
-        version: 3,
-        status: 'draft',
+        version: 2,
+        status: 'published',
         pointsPerVnd: 1000,
         pointsToVnd: 1,
         maxRedeemRatio: 0.3,
@@ -293,21 +345,22 @@ describe('LoyaltyService', () => {
           { code: 'platinum', label: 'Bạch kim', minTotalSpent: 50000000, multiplier: 2 }
         ]
       }
-      mockProgramFind.mockReturnValueOnce(mockProgramFindResult([draft]))
-      mockProgramFindOne.mockResolvedValueOnce({ ...draft, status: 'published' })
+      mockProgramFind
+        .mockReturnValueOnce(mockProgramFindResult([published]))
+        .mockReturnValueOnce(mockProgramFindResult([published]))
+      mockProgramFindOne.mockResolvedValueOnce({ ...published, pointsPerVnd: 800 })
 
-      const result = await loyaltyService.publishDraftProgramConfig(adminId)
+      const result = await loyaltyService.saveProgramConfig({ pointsPerVnd: 800 }, adminId)
 
-      expect(mockProgramUpdateMany).toHaveBeenCalledWith(
-        { status: 'published' },
-        expect.objectContaining({ $set: expect.objectContaining({ status: 'archived', updatedBy: adminId }) })
-      )
+      expect(mockProgramUpdateMany).not.toHaveBeenCalled()
       expect(mockProgramUpdateOne).toHaveBeenCalledWith(
-        { _id: draft._id },
+        { _id: published._id },
         expect.objectContaining({ $set: expect.objectContaining({ status: 'published', publishedBy: adminId }) })
       )
       expect(result?.status).toBe('published')
+      expect(result?.pointsPerVnd).toBe(800)
     })
+
   })
 
   describe('revokePointsForReturn()', () => {
@@ -384,7 +437,7 @@ describe('LoyaltyService', () => {
       expect(mockTransactionInsertOne).not.toHaveBeenCalled()
     })
 
-    it('Không rollback điểm nếu insert adjust bị duplicate do retry', async () => {
+    it('Rollback hoàn điểm tạm nếu insert adjust bị duplicate do retry', async () => {
       const acc = makeAccount({ pointsBalance: 20000, totalPointsRedeemed: 50000 })
       mockTransactionFindOne
         .mockResolvedValueOnce({ type: 'redeem', points: -50000 })
@@ -399,7 +452,16 @@ describe('LoyaltyService', () => {
       )
 
       expect(mockAccountFindOneAndUpdate).toHaveBeenCalledTimes(1)
-      expect(mockAccountUpdateOne).not.toHaveBeenCalled()
+      expect(mockAccountUpdateOne).toHaveBeenCalledWith(
+        { userId: new ObjectId(USER_ID) },
+        {
+          $inc: {
+            pointsBalance: -50000,
+            totalPointsRedeemed: 50000
+          },
+          $set: { updatedAt: expect.any(Date) }
+        }
+      )
     })
 
     it('Rollback hoàn điểm nếu insert adjust lỗi thật không phải duplicate', async () => {
@@ -425,6 +487,41 @@ describe('LoyaltyService', () => {
           },
           $set: { updatedAt: expect.any(Date) }
         }
+      )
+    })
+  })
+
+  describe('processExpiredPoints()', () => {
+    it('Chỉ trừ phần pointsRemaining của lot đã hết hạn', async () => {
+      const expiredLot = {
+        _id: new ObjectId(),
+        userId: new ObjectId(USER_ID),
+        pointsOriginal: 50000,
+        pointsRemaining: 12000,
+        status: 'active',
+        expiresAt: new Date('2026-01-01T00:00:00.000Z')
+      }
+      mockLotCountDocuments.mockResolvedValueOnce(1)
+      mockLotFind.mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([expiredLot]) })
+      mockAccountFindOne.mockResolvedValueOnce(makeAccount({ pointsBalance: 30000, totalPointsExpired: 0 }))
+
+      await loyaltyService.processExpiredPoints(new ObjectId(USER_ID))
+
+      expect(mockLotUpdateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: expiredLot._id, pointsRemaining: { $gte: 12000 } }),
+        expect.objectContaining({ $inc: { pointsRemaining: -12000 } })
+      )
+      expect(mockTransactionInsertOne.mock.calls[0][0]).toMatchObject({
+        type: 'expire',
+        points: -12000,
+        balanceAfter: 18000
+      })
+      expect(mockAccountUpdateOne).toHaveBeenCalledWith(
+        { userId: new ObjectId(USER_ID) },
+        expect.objectContaining({
+          $set: expect.objectContaining({ pointsBalance: 18000 }),
+          $inc: { totalPointsExpired: 12000 }
+        })
       )
     })
   })

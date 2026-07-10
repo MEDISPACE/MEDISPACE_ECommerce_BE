@@ -30,7 +30,7 @@ export const CRITICAL_LOYALTY_COUPON_INDEXES: CriticalIndexDefinition[] = [
       name: 'uniq_loyalty_transaction_order_type',
       unique: true,
       partialFilterExpression: {
-        orderId: { $exists: true },
+        orderId: { $type: 'objectId' },
         type: { $in: ['earn', 'redeem', 'revoke', 'adjust'] }
       }
     }
@@ -84,6 +84,15 @@ export async function ensureCriticalLoyaltyCouponIndexes(db: Db) {
     const indexes = await listCollectionIndexes(db, definition.collection)
     if (indexes.some((index) => indexMatches(index, definition))) {
       continue
+    }
+
+    const expectedName = typeof definition.options?.name === 'string' ? definition.options.name : null
+    const staleIndex = expectedName
+      ? indexes.find((index) => index.name === expectedName && !indexMatches(index, definition))
+      : null
+
+    if (staleIndex?.name) {
+      await db.collection(definition.collection).dropIndex(staleIndex.name)
     }
 
     await db.collection(definition.collection).createIndex(definition.keys, {
