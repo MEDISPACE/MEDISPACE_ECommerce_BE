@@ -31,8 +31,9 @@ services:
       NODE_ENV: development
       TYPESENSE_HOST: typesense
       TYPESENSE_PORT: 8108
-      TYPESENSE_AUTO_RECONCILE: "false"
-      TYPESENSE_EMBEDDING_ENABLED: "false"
+      TYPESENSE_AUTO_RECONCILE: "true"
+      TYPESENSE_EMBEDDING_ENABLED: "true"
+      TYPESENSE_RECREATE_ON_SCHEMA_MISMATCH: "false"
       OCR_SERVICE_URL: http://ocr-service:8001
       PRESCRIPTION_OCR_MODE: ${PRESCRIPTION_OCR_MODE:-parallel}
       PRESCRIPTION_OCR_SCAN_TIMEOUT_MS: ${PRESCRIPTION_OCR_SCAN_TIMEOUT_MS:-220000}
@@ -144,6 +145,9 @@ services:
       # █ Khi chạy trong Docker, dùng service name thay vì localhost
       TYPESENSE_URL: http://typesense:8108
       TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-medispace-ts-secret}
+      TYPESENSE_PRODUCTS_COLLECTION: products
+      TYPESENSE_ARTICLES_COLLECTION: articles
+      TYPESENSE_VECTOR_SEARCH: "true"
     volumes:
       - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/src:/app/src       # Hot-reload guardrails/agents
       - ../MEDISPACE_Python_Services/MEDISPACE_Chat_AI_Service/tests:/app/tests   # Sync test files

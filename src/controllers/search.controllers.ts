@@ -291,11 +291,8 @@ export const searchStatusController = async (_req: Request, res: Response) => {
   const mismatchedCollections = Object.entries(mongoCountMap)
     .filter(([name, count]) => typesenseCounts[name] !== undefined && typesenseCounts[name] !== count)
     .map(([name]) => name)
-  const canClearLegacyDirty = typesenseService.isLegacyCampaignReconciliationDirty(consistency) && mismatchedCollections.length === 0
-  if (canClearLegacyDirty) {
-    await typesenseService.clearLegacyCampaignReconciliationDirty()
-    consistency.dirty = false
-    delete consistency.reason
+  if (mismatchedCollections.length > 0) {
+    await typesenseService.requestReconciliation(`count mismatch: ${mismatchedCollections.join(', ')}`)
   }
 
   return res.json({

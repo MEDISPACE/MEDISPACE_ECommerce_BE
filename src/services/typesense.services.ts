@@ -25,9 +25,9 @@ const ARTICLES_COLLECTION = 'articles'
 const BRANDS_COLLECTION = 'brands'
 const CATEGORIES_COLLECTION = 'categories'
 const QUERY_SUGGESTIONS_COLLECTION = 'query_suggestions'
-const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE === 'true'
+const TYPESENSE_AUTO_RECONCILE = process.env.TYPESENSE_AUTO_RECONCILE !== 'false'
 const TYPESENSE_EMBEDDING_ENABLED = process.env.TYPESENSE_EMBEDDING_ENABLED !== 'false'
-const LEGACY_CAMPAIGN_RECONCILIATION_ERROR = "Cannot find module '/app/dist/services/campaigns.services'"
+const TYPESENSE_RECREATE_ON_SCHEMA_MISMATCH = process.env.TYPESENSE_RECREATE_ON_SCHEMA_MISMATCH === 'true'
 
 const productSchema = {
   name: PRODUCTS_COLLECTION,
@@ -480,10 +480,29 @@ class TypesenseService {
             missingFields.length ? `missing fields: ${missingFields.join(', ')}` : '',
             incompatibleFields.length ? `incompatible fields: ${incompatibleFields.join(', ')}` : ''
           ].filter(Boolean)
-          console.log(`[Typesense] Collection "${name}" schema ${reasons.join('; ')}. Recreating.`)
-          await client.collections(name).delete()
-          await client.collections().create(schema as any)
-          console.log(`[Typesense] Recreated collection "${name}".`)
+          const reason = `schema mismatch in "${name}": ${reasons.join('; ')}`
+          console.warn(`[Typesense] Collection ${reason}.`)
+
+          if (missingFields.length > 0) {
+            const fieldsToAdd = (schema.fields || []).filter((field: any) => missingFields.includes(field.name))
+            try {
+              await client.collections(name).update({ fields: fieldsToAdd } as any)
+              console.log(`[Typesense] Added missing fields to collection "${name}": ${missingFields.join(', ')}.`)
+            } catch (err) {
+              console.error(`[Typesense] Could not add missing fields to "${name}":`, (err as Error)?.message)
+            }
+          }
+
+          if (incompatibleFields.length > 0 && TYPESENSE_RECREATE_ON_SCHEMA_MISMATCH) {
+            console.warn(`[Typesense] Recreating "${name}" because TYPESENSE_RECREATE_ON_SCHEMA_MISMATCH=true.`)
+            await client.collections(name).delete()
+            await client.collections().create(schema as any)
+            console.log(`[Typesense] Recreated collection "${name}".`)
+          } else if (incompatibleFields.length > 0) {
+            console.warn(`[Typesense] Keeping "${name}" online. Set TYPESENSE_RECREATE_ON_SCHEMA_MISMATCH=true only during a planned reindex.`)
+          }
+
+          await this.markDirty(reason)
           needsReconciliation = true
           continue
         }
@@ -590,8 +609,8 @@ class TypesenseService {
     try {
       await client.health.retrieve()
       this.isAvailable = true
-      await this.ensureCollections()
-      this.scheduleReconciliation(true)
+      const needsReconciliation = await this.ensureCollections()
+      this.scheduleReconciliation(needsReconciliation)
       await this.flushRetries()
     } catch {
       this.isAvailable = false
@@ -999,22 +1018,6 @@ class TypesenseService {
     return { healthy: true, dirty: Boolean(state?.dirty), reason: state?.reason, counts: Object.fromEntries(collections), lastReconciledAt: state?.reconciledAt }
   }
 
-  isLegacyCampaignReconciliationDirty(consistency: Record<string, unknown>): boolean {
-    return (
-      !TYPESENSE_AUTO_RECONCILE &&
-      consistency.dirty === true &&
-      typeof consistency.reason === 'string' &&
-      consistency.reason.includes(LEGACY_CAMPAIGN_RECONCILIATION_ERROR)
-    )
-  }
-
-  async clearLegacyCampaignReconciliationDirty(): Promise<void> {
-    if (TYPESENSE_AUTO_RECONCILE) return
-    await databaseService.typesenseSyncState.updateOne(
-      { key: 'global', dirty: true, reason: { $regex: LEGACY_CAMPAIGN_RECONCILIATION_ERROR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') } },
-      { $set: { dirty: false, reconciledAt: new Date() }, $unset: { reason: '', campaignFingerprint: '' } }
-    )
-  }
 }
 
 const typesenseService = new TypesenseService()
