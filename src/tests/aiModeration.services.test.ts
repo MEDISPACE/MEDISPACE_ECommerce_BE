@@ -311,4 +311,228 @@ describe('AiModerationService', () => {
       expect.objectContaining({ $set: expect.objectContaining({ status: 'hidden' }) })
     )
   })
+
+  it('policy sends high-confidence toxic personal attacks to human review', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'medium',
+              categories: ['toxic'],
+              confidence: 0.95,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Công kích cá nhân.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('Mày dốt thì đừng có lên đây hỏi bậy bạ, làm phiền người khác')
+
+    expect(result).toMatchObject({
+      severity: 'medium',
+      categories: expect.arrayContaining(['toxic']),
+      shouldHide: false,
+      requiresHumanReview: true,
+      suggestedAction: 'review'
+    })
+  })
+
+  it('policy hides protected-group attacks even when the LLM is too lenient', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'medium',
+              categories: ['toxic'],
+              confidence: 0.95,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Miệt thị nhóm người.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('Dân tộc X toàn người lười biếng, bảo sao nghèo')
+
+    expect(result).toMatchObject({
+      severity: 'high',
+      categories: expect.arrayContaining(['toxic', 'harassment']),
+      shouldHide: true,
+      requiresHumanReview: true,
+      suggestedAction: 'hide'
+    })
+  })
+
+  it('policy sends authority-based medical misinformation to human review', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'low',
+              categories: [],
+              confidence: 0.9,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Không phát hiện vi phạm.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('Bác sĩ Bệnh viện Bạch Mai đã xác nhận với tôi riêng là vắc xin này có hại')
+
+    expect(result).toMatchObject({
+      severity: 'medium',
+      categories: expect.arrayContaining(['unsafe_advice']),
+      shouldHide: false,
+      requiresHumanReview: true,
+      suggestedAction: 'review'
+    })
+  })
+
+  it('policy sends serious pharmacy accusations to human review without auto-hiding', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'medium',
+              categories: ['spam', 'unsafe_advice'],
+              confidence: 0.9,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Cảnh báo về nhà thuốc.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('Nhà thuốc Long Châu bán thuốc giả, tôi mua phải hàng dỏm ở đó, mọi người cẩn thận')
+
+    expect(result).toMatchObject({
+      severity: 'medium',
+      categories: expect.arrayContaining(['other']),
+      shouldHide: false,
+      requiresHumanReview: true,
+      suggestedAction: 'review'
+    })
+  })
+
+  it('policy sends described report-abuse patterns to human review', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'low',
+              categories: ['other'],
+              confidence: 0.9,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Mô tả hành vi báo cáo.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('User A report hàng loạt 20 bài hợp lệ của User B trong 5 phút để trù dập cá nhân')
+
+    expect(result).toMatchObject({
+      severity: 'medium',
+      categories: expect.arrayContaining(['other']),
+      shouldHide: false,
+      requiresHumanReview: true,
+      suggestedAction: 'review'
+    })
+  })
+
+  it('policy sends sexual medicine advice questions to human review', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'medium',
+              categories: ['unsafe_advice', 'spam'],
+              confidence: 0.9,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Hỏi kinh nghiệm thuốc kích dục.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('Ai có kinh nghiệm dùng thuốc kích dục không, chỉ mình với 😏')
+
+    expect(result).toMatchObject({
+      severity: 'medium',
+      categories: expect.arrayContaining(['unsafe_advice']),
+      shouldHide: false,
+      requiresHumanReview: true,
+      suggestedAction: 'review'
+    })
+  })
+
+  it('policy hides sexual medicine purchase or private-sale intent', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              severity: 'medium',
+              categories: ['unsafe_advice'],
+              confidence: 0.9,
+              shouldHide: false,
+              requiresHumanReview: false,
+              reason: 'Hỏi mua thuốc sinh lý.',
+              suggestedAction: 'none'
+            })
+          }
+        }]
+      }
+    })
+
+    const result = await aiModerationService.reviewText('Mình muốn thuốc làm chuyện ấy sung hơn, ai có loại mạnh chỉ mình riêng nha')
+
+    expect(result).toMatchObject({
+      severity: 'high',
+      categories: expect.arrayContaining(['spam', 'unsafe_advice']),
+      shouldHide: true,
+      requiresHumanReview: true,
+      suggestedAction: 'hide'
+    })
+  })
 })
