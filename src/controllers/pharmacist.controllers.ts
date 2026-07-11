@@ -295,12 +295,13 @@ export const createPharmacistOrderController = async (req: Request, res: Respons
 // Get orders with filters
 export const getOrdersController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const { page, limit, status, paymentStatus, search } = req.query as {
+  const { page, limit, status, paymentStatus, search, scope } = req.query as {
     page?: string
     limit?: string
     status?: string
     paymentStatus?: string
     search?: string
+    scope?: string
   }
 
   const result = await pharmacistService.getOrders({
@@ -309,7 +310,8 @@ export const getOrdersController = async (req: Request, res: Response) => {
     limit: limit ? Number(limit) : undefined,
     status,
     paymentStatus,
-    search
+    search,
+    scope
   })
 
   return res.status(HTTP_STATUS.OK).json({
@@ -351,7 +353,7 @@ export const updateOrderStatusController = async (req: Request<{ orderId: string
 // Get order statistics
 export const getOrderStatisticsController = async (req: Request, res: Response) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const { startDate, endDate } = req.query as { startDate?: string; endDate?: string }
+  const { startDate, endDate, scope } = req.query as { startDate?: string; endDate?: string; scope?: string }
 
   const dateRange =
     startDate && endDate
@@ -361,7 +363,7 @@ export const getOrderStatisticsController = async (req: Request, res: Response) 
         }
       : undefined
 
-  const result = await pharmacistService.getOrderStatistics(new ObjectId(userId), dateRange)
+  const result = await pharmacistService.getOrderStatistics(new ObjectId(userId), dateRange, scope)
 
   return res.status(HTTP_STATUS.OK).json({
     message: PHARMACIST_MESSAGES.GET_ORDER_STATS_SUCCESS,

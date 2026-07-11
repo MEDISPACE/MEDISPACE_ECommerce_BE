@@ -24,6 +24,9 @@ const DASHBOARD_STATS_CACHE_MS = Number(process.env.PHARMACIST_DASHBOARD_STATS_C
 const DRUG_DATABASE_CACHE_TTL_SECONDS = Number(process.env.PHARMACIST_DRUG_DATABASE_CACHE_TTL_SECONDS || 60)
 const ORDER_STATUSES = new Set(Object.values(OrderStatus))
 const PAYMENT_STATUSES = new Set(['pending', 'paid', 'failed', 'refunded', 'partially_refunded'])
+type PharmacistOrderScope = 'queue' | 'mine' | 'completed' | 'returns'
+const PHARMACIST_ORDER_SCOPES = new Set<PharmacistOrderScope>(['queue', 'mine', 'completed', 'returns'])
+const ACTIVE_RETURN_STATUSES = ['requested', 'approved', 'awaiting_return', 'received', 'refund_processing', 'completed']
 const IN_STORE_PAYMENT_METHODS = new Set<string>([
   PaymentMethod.Cash,
   PaymentMethod.CreditCard_POS,
@@ -393,19 +396,63 @@ class PharmacistService {
   }
 
   private getPharmacistOrderScope(pharmacistId: ObjectId) {
-    const unassignedOrderClause = {
+    return {
+      $or: [
+        this.getMineOrderClause(pharmacistId),
+        this.getQueueOrderClause()
+      ]
+    }
+  }
+
+  private getQueueOrderClause() {
+    return {
       $and: [
         { $or: [{ assignedPharmacistId: { $exists: false } }, { assignedPharmacistId: null }] },
         { $or: [{ createdBy: { $exists: false } }, { createdBy: null }] },
         { orderStatus: { $nin: [OrderStatus.Delivered, OrderStatus.Cancelled, OrderStatus.Returned] } }
       ]
     }
+  }
+
+  private getMineOrderClause(pharmacistId: ObjectId) {
+    return {
+      $or: [{ createdBy: pharmacistId }, { assignedPharmacistId: pharmacistId }]
+    }
+  }
+
+  private getPharmacistOrderQueryByScope(pharmacistId: ObjectId, scope?: string) {
+    const normalizedScope = PHARMACIST_ORDER_SCOPES.has(scope as PharmacistOrderScope)
+      ? (scope as PharmacistOrderScope)
+      : 'queue'
+
+    if (normalizedScope === 'queue') return this.getQueueOrderClause()
+
+    const mineClause = this.getMineOrderClause(pharmacistId)
+
+    if (normalizedScope === 'completed') {
+      return {
+        $and: [mineClause, { orderStatus: OrderStatus.Delivered }]
+      }
+    }
+
+    if (normalizedScope === 'returns') {
+      return {
+        $and: [
+          mineClause,
+          {
+            $or: [
+              { orderStatus: OrderStatus.Returned },
+              { returnStatus: { $in: ACTIVE_RETURN_STATUSES } }
+            ]
+          }
+        ]
+      }
+    }
 
     return {
-      $or: [
-        { createdBy: pharmacistId },
-        { assignedPharmacistId: pharmacistId },
-        unassignedOrderClause
+      $and: [
+        mineClause,
+        { orderStatus: { $nin: [OrderStatus.Delivered, OrderStatus.Cancelled, OrderStatus.Returned] } }
       ]
     }
   }
@@ -1472,13 +1519,16 @@ class PharmacistService {
     status?: string
     paymentStatus?: string
     search?: string
+    scope?: string
   }) {
     const page = filters.page || 1
     const limit = filters.limit || 20
     const skip = (page - 1) * limit
 
     const query: Record<string, unknown> = {}
-    const andConditions: Record<string, unknown>[] = [this.getPharmacistOrderScope(filters.pharmacistId)]
+    const andConditions: Record<string, unknown>[] = [
+      this.getPharmacistOrderQueryByScope(filters.pharmacistId, filters.scope)
+    ]
 
     // Filter by order status
     if (filters.status) {
@@ -1612,8 +1662,8 @@ class PharmacistService {
   }
 
   // Get order statistics
-  async getOrderStatistics(pharmacistId: ObjectId, dateRange?: { startDate: Date; endDate: Date }) {
-    const query: Record<string, unknown> = this.getPharmacistOrderScope(pharmacistId)
+  async getOrderStatistics(pharmacistId: ObjectId, dateRange?: { startDate: Date; endDate: Date }, scope?: string) {
+    const query: Record<string, unknown> = this.getPharmacistOrderQueryByScope(pharmacistId, scope)
 
     if (dateRange) {
       query.createdAt = {
@@ -1622,7 +1672,51 @@ class PharmacistService {
       }
     }
 
-    const [statusCounts, paymentCounts, totalRevenue] = await Promise.all([
+    const withDateRange = (baseQuery: Record<string, unknown>) => {
+      if (!dateRange) return baseQuery
+      return {
+        ...baseQuery,
+        createdAt: {
+          $gte: dateRange.startDate,
+          $lte: dateRange.endDate
+        }
+      }
+    }
+
+    const queueQuery = withDateRange(this.getQueueOrderClause())
+    const mineQuery = withDateRange(this.getMineOrderClause(pharmacistId))
+    const mineActiveQuery = withDateRange({
+      $and: [
+        this.getMineOrderClause(pharmacistId),
+        { orderStatus: { $nin: [OrderStatus.Delivered, OrderStatus.Cancelled, OrderStatus.Returned] } }
+      ]
+    })
+    const completedQuery = withDateRange({
+      $and: [this.getMineOrderClause(pharmacistId), { orderStatus: OrderStatus.Delivered }]
+    })
+    const returnsQuery = withDateRange({
+      $and: [
+        this.getMineOrderClause(pharmacistId),
+        {
+          $or: [
+            { orderStatus: OrderStatus.Returned },
+            { returnStatus: { $in: ACTIVE_RETURN_STATUSES } }
+          ]
+        }
+      ]
+    })
+
+    const [
+      statusCounts,
+      paymentCounts,
+      totalRevenue,
+      queueTotal,
+      mineTotal,
+      mineActiveTotal,
+      completedTotal,
+      returnsTotal,
+      mineRevenue
+    ] = await Promise.all([
       // Count orders by status
       databaseService.orders
         .aggregate([
@@ -1655,24 +1749,71 @@ class PharmacistService {
           {
             $match: {
               ...query,
-              orderStatus: { $in: ['confirmed', 'shipped', 'delivered'] },
+              orderStatus: { $ne: 'cancelled' },
               paymentStatus: 'paid'
             }
           },
           {
             $group: {
               _id: null,
-              total: { $sum: '$totalAmount' }
+              total: { $sum: '$totalAmount' },
+              count: { $sum: 1 }
+            }
+          }
+        ])
+        .toArray(),
+      databaseService.orders.countDocuments(queueQuery),
+      databaseService.orders.countDocuments(mineQuery),
+      databaseService.orders.countDocuments(mineActiveQuery),
+      databaseService.orders.countDocuments(completedQuery),
+      databaseService.orders.countDocuments(returnsQuery),
+      databaseService.orders
+        .aggregate([
+          {
+            $match: {
+              ...mineQuery,
+              orderStatus: { $ne: 'cancelled' },
+              paymentStatus: 'paid'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: '$totalAmount' },
+              count: { $sum: 1 }
             }
           }
         ])
         .toArray()
     ])
 
+    const countByStatus = statusCounts.reduce<Record<string, number>>((acc, item) => {
+      acc[item._id || 'unknown'] = item.count || 0
+      return acc
+    }, {})
+
     return {
       ordersByStatus: statusCounts,
       ordersByPayment: paymentCounts,
-      totalRevenue: totalRevenue[0]?.total || 0
+      totalOrders: statusCounts.reduce((sum, item) => sum + (item.count || 0), 0),
+      pendingOrders: countByStatus.pending || 0,
+      processingOrders: (countByStatus.processing || 0) + (countByStatus.shipped || 0),
+      completedOrders: countByStatus.delivered || 0,
+      cancelledOrders: countByStatus.cancelled || 0,
+      returnedOrders: countByStatus.returned || 0,
+      totalRevenue: totalRevenue[0]?.total || 0,
+      revenueOrderCount: totalRevenue[0]?.count || 0,
+      averageOrderValue: totalRevenue[0]?.count ? (totalRevenue[0].total || 0) / totalRevenue[0].count : 0,
+      workflow: {
+        queueTotal,
+        mineTotal,
+        mineActiveTotal,
+        completedTotal,
+        returnsTotal,
+        mineRevenue: mineRevenue[0]?.total || 0,
+        mineRevenueOrderCount: mineRevenue[0]?.count || 0,
+        mineAverageOrderValue: mineRevenue[0]?.count ? (mineRevenue[0].total || 0) / mineRevenue[0].count : 0
+      }
     }
   }
 
