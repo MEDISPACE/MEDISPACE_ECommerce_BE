@@ -200,6 +200,138 @@ function uniqueValues(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
 }
 
+function normalizeForPolicy(text: string) {
+  return (text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function ensureCategories(categories: AiModerationCategory[], additions: AiModerationCategory[]) {
+  return uniqueValues([...categories, ...additions]) as AiModerationCategory[]
+}
+
+function minSeverity(current: AiModerationSeverity, minimum: AiModerationSeverity): AiModerationSeverity {
+  const currentIndex = SEVERITY_VALUES.indexOf(current)
+  const minimumIndex = SEVERITY_VALUES.indexOf(minimum)
+  return currentIndex >= minimumIndex ? current : minimum
+}
+
+function applyReviewPolicy(
+  result: AiModerationResult,
+  params: { severity?: AiModerationSeverity; categories?: AiModerationCategory[]; reason?: string }
+): AiModerationResult {
+  return {
+    ...result,
+    severity: params.severity ? minSeverity(result.severity, params.severity) : result.severity,
+    categories: params.categories ? ensureCategories(result.categories, params.categories) : result.categories,
+    shouldHide: false,
+    requiresHumanReview: true,
+    suggestedAction: 'review',
+    reason: params.reason || result.reason
+  }
+}
+
+function applyHidePolicy(
+  result: AiModerationResult,
+  params: { severity?: AiModerationSeverity; categories?: AiModerationCategory[]; reason?: string }
+): AiModerationResult {
+  return {
+    ...result,
+    severity: params.severity ? minSeverity(result.severity, params.severity) : result.severity,
+    categories: params.categories ? ensureCategories(result.categories, params.categories) : result.categories,
+    shouldHide: true,
+    requiresHumanReview: true,
+    suggestedAction: 'hide',
+    reason: params.reason || result.reason
+  }
+}
+
+function applyModerationPolicy(result: AiModerationResult, content: string): AiModerationResult {
+  const text = normalizeForPolicy(content)
+  const hasToxic = result.categories.includes('toxic') || result.categories.includes('harassment')
+
+  const protectedGroupAttack =
+    /\b(dan toc|nguoi dan toc|lgbt|dong tinh|chuyen gioi|ton giao|khuyet tat)\b/.test(text) &&
+    /\b(toan|bon|b[o0]n|ban|b[aă]n|luoi|ngheo|cuc|cut|bien|do|rac|kinh|ghe)\b/.test(text)
+
+  if (protectedGroupAttack) {
+    return applyHidePolicy(result, {
+      severity: 'high',
+      categories: ['toxic', 'harassment'],
+      reason: 'Nội dung có dấu hiệu miệt thị hoặc công kích một nhóm được bảo vệ.'
+    })
+  }
+
+  const authorityMisinformation =
+    /\b(bac si|duoc si|benh vien|chuyen gia)\b/.test(text) &&
+    /\b(xac nhan|khang dinh|noi rieng|bao rieng)\b/.test(text) &&
+    /(vac xin|vaccine|thuoc|ung thu|chua khoi|100%)/.test(text) &&
+    /(co hai|hai|lua|lua dao|chua khoi|100%)/.test(text)
+
+  if (authorityMisinformation) {
+    return applyReviewPolicy(result, {
+      severity: 'medium',
+      categories: ['unsafe_advice'],
+      reason: 'Nội dung viện dẫn chuyên môn y tế để đưa ra tuyên bố y tế chưa được kiểm chứng.'
+    })
+  }
+
+  const commercialDefamation =
+    /\b(nha thuoc|phong kham|benh vien|long chau|pharmacity|ankhang|an khang)\b/.test(text) &&
+    /\b(ban thuoc gia|thuoc gia|hang gia|hang dom|lua dao|kem chat luong)\b/.test(text)
+
+  if (commercialDefamation) {
+    return applyReviewPolicy(result, {
+      severity: 'medium',
+      categories: ['other'],
+      reason: 'Nội dung có cáo buộc nghiêm trọng về tổ chức hoặc nhà thuốc và cần điều phối viên xác minh.'
+    })
+  }
+
+  const reportAbuseDescription =
+    /\b(report|bao cao)\b/.test(text) &&
+    /\b(hang loat|tru dap|brigading|nhieu tai khoan|cung report|tat ca bai)\b/.test(text)
+
+  if (reportAbuseDescription) {
+    return applyReviewPolicy(result, {
+      severity: 'medium',
+      categories: ['other'],
+      reason: 'Nội dung mô tả dấu hiệu lạm dụng báo cáo hàng loạt và cần điều phối viên xem xét.'
+    })
+  }
+
+  const sexualMedicine = /\b(thuoc kich duc|kich duc|tang cuong sinh ly|cuong duong|sung hon|loai manh)\b/.test(text)
+  const commercialIntent = /\b(mua|ban|can gap|inbox|ib|chi minh rieng|gia|ship|zalo|lh)\b/.test(text)
+
+  if (sexualMedicine && commercialIntent) {
+    return applyHidePolicy(result, {
+      severity: 'high',
+      categories: ['spam', 'unsafe_advice'],
+      reason: 'Nội dung có dấu hiệu tìm mua hoặc quảng bá thuốc kích dục/sinh lý không an toàn.'
+    })
+  }
+
+  if (sexualMedicine && result.categories.includes('unsafe_advice') && result.confidence >= 0.8) {
+    return applyReviewPolicy(result, {
+      severity: 'medium',
+      categories: ['unsafe_advice'],
+      reason: 'Nội dung hỏi về thuốc kích dục/sinh lý và cần điều phối viên xem xét an toàn y tế.'
+    })
+  }
+
+  if (hasToxic && result.confidence >= 0.85 && !result.shouldHide && !result.requiresHumanReview) {
+    return applyReviewPolicy(result, {
+      severity: 'medium',
+      reason: 'Nội dung có ngôn từ xúc phạm hoặc công kích người khác và cần điều phối viên xem xét.'
+    })
+  }
+
+  return result
+}
+
 function moderationEndpointCandidates(baseUrl: string, path: 'chat/completions' | 'completions') {
   const base = baseUrl.replace(/\/$/, '')
   const withoutV1 = base.replace(/\/v1$/, '')
@@ -538,9 +670,12 @@ class AiModerationService {
       'Categories allowed: pii, spam, toxic, medical_harm, harassment, unsafe_advice, self_harm, other.',
       'Severity allowed: low, medium, high, critical.',
       'Set shouldHide=true when the message contains PII/contact sharing, self-harm intent, dangerous medical advice, advice to delay/avoid emergency care for severe symptoms, prescription/drug misuse, overdose intent, or medicine-sale spam.',
+      'Set requiresHumanReview=true for toxic personal attacks, harassment, unverified accusations against clinics/pharmacies, suspected report abuse, or medical claims that cite doctors/hospitals without verifiable evidence.',
+      'Set shouldHide=true for attacks against protected groups such as ethnicity, religion, disability, gender identity, or sexual orientation.',
       'Use self_harm for intent to die, not wake up, overdose, or consume sleeping pills/medicine for self-harm.',
       'Use medical_harm and unsafe_advice for advice that could endanger health, including telling someone with chest pain, breathing trouble, stroke symptoms, seizure, loss of consciousness, or heavy bleeding not to seek emergency care.',
       'Use spam for commercial promotion, medicine-sale links/domains, wholesale pricing, inbox-for-price, or suspicious pharmacy sales.',
+      'Use toxic or harassment for insults, commands to leave the group, slurs, or hostile language toward a person or protected group.',
       'Safe general health questions should be severity=low, shouldHide=false.',
       'Return JSON with keys: severity, categories, confidence, shouldHide, requiresHumanReview, reason, suggestedAction.',
       'The reason value must be one concise Vietnamese sentence for moderators. Never write reason in English.',
@@ -572,7 +707,7 @@ class AiModerationService {
         )
         const rawContent = response.data?.choices?.[0]?.message?.content
         if (!rawContent) continue
-        return normalizeResult(JSON.parse(pickJson(rawContent)))
+        return applyModerationPolicy(normalizeResult(JSON.parse(pickJson(rawContent))), content)
       } catch (error) {
         lastError = error
         if (!shouldTryNextEndpoint(error)) throw error
@@ -604,7 +739,7 @@ class AiModerationService {
     if (!rawContent) throw new Error('AI moderation returned an empty response')
 
     try {
-      return normalizeResult(JSON.parse(pickJson(rawContent)))
+      return applyModerationPolicy(normalizeResult(JSON.parse(pickJson(rawContent))), content)
     } catch (error) {
       if (lastError) throw lastError
       throw error
