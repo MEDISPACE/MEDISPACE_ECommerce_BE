@@ -23,6 +23,11 @@ Express API + Socket.IO
         +-- LiveKit: video health events
 ```
 
+## Authors
+
+- Tran Nguyen Quoc Bao
+- Nguyen Huu Thong
+
 ## Main Features
 
 - Authentication and user management: email/password, Google OAuth, JWT access/refresh tokens, email verification, password reset, roles, and profile data.
