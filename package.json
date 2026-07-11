@@ -27,7 +27,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Node.js/TypeScript backend for the MediSpace digital pharmacy platform.",
   "devDependencies": {
     "@eslint/js": "^9.35.0",
     "@types/cookie-parser": "^1.4.10",
