@@ -195,7 +195,7 @@ class AdminService {
 
     try {
       // Revenue calculations using aggregation for better performance
-      const [todayRevenue, monthRevenue, yearRevenue, lastMonthRevenue] = await Promise.all([
+      const [todayRevenue, monthRevenue, yearRevenue, lastMonthRevenue, todayOrdersCount] = await Promise.all([
         databaseService.orders
           .aggregate([
             {
@@ -260,11 +260,11 @@ class AdminService {
               }
             }
           ])
-          .toArray()
+          .toArray(),
+        databaseService.orders.countDocuments({ createdAt: { $gte: today } })
       ])
 
       const todayRevenueValue = todayRevenue[0]?.total || 0
-      const todayOrderCount = todayRevenue[0]?.count || 0
       const monthRevenueValue = monthRevenue[0]?.total || 0
       const yearRevenueValue = yearRevenue[0]?.total || 0
       const lastMonthRevenueValue = lastMonthRevenue[0]?.total || 0
@@ -345,7 +345,7 @@ class AdminService {
           processing: processingOrders,
           completed: completedOrders,
           cancelled: cancelledOrders,
-          todayCount: todayOrderCount
+          todayCount: todayOrdersCount
         },
         users: {
           total: totalUsers,
@@ -794,11 +794,12 @@ class AdminService {
     }
 
     if (params.search) {
+      const safeSearch = params.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       matchConditions.$or = [
-        { orderNumber: { $regex: params.search, $options: 'i' } },
-        { 'shippingAddress.firstName': { $regex: params.search, $options: 'i' } },
-        { 'shippingAddress.lastName': { $regex: params.search, $options: 'i' } },
-        { 'shippingAddress.phone': { $regex: params.search, $options: 'i' } }
+        { orderNumber: { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.firstName': { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.lastName': { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.phone': { $regex: safeSearch, $options: 'i' } }
       ]
     }
 
@@ -903,26 +904,78 @@ class AdminService {
     }
   }
 
-  async getOrderStats() {
-    return cacheService.getOrSet('admin:order-stats', async () => {
+  async getOrderStats(params: {
+    status?: string
+    paymentStatus?: string
+    search?: string
+    dateFrom?: string
+    dateTo?: string
+  } = {}) {
+    const matchConditions: Record<string, unknown> = {}
+
+    if (params.status && params.status !== 'all') {
+      matchConditions.orderStatus = params.status
+    }
+
+    if (params.paymentStatus && params.paymentStatus !== 'all') {
+      matchConditions.paymentStatus = params.paymentStatus
+    }
+
+    if (params.search) {
+      const safeSearch = params.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      matchConditions.$or = [
+        { orderNumber: { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.firstName': { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.lastName': { $regex: safeSearch, $options: 'i' } },
+        { 'shippingAddress.phone': { $regex: safeSearch, $options: 'i' } }
+      ]
+    }
+
+    if (params.dateFrom || params.dateTo) {
+      const typedMatch = matchConditions as { createdAt?: { $gte?: Date; $lte?: Date } }
+      typedMatch.createdAt = {}
+      if (params.dateFrom) typedMatch.createdAt.$gte = new Date(params.dateFrom)
+      if (params.dateTo) {
+        const dateTo = new Date(params.dateTo)
+        dateTo.setHours(23, 59, 59, 999)
+        typedMatch.createdAt.$lte = dateTo
+      }
+    }
+
+    const cacheKey = `admin:order-stats:${JSON.stringify(params || {})}`
+    return cacheService.getOrSet(cacheKey, async () => {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
+      const statusMatch = (status: string) =>
+        params.status && params.status !== 'all' && params.status !== status
+          ? { ...matchConditions, orderStatus: '__no_matching_status__' }
+          : { ...matchConditions, orderStatus: status }
+      const paymentAllowsRevenue = !params.paymentStatus || params.paymentStatus === 'all' || params.paymentStatus === 'paid'
+      const revenueMatch =
+        !paymentAllowsRevenue
+          ? { ...matchConditions, paymentStatus: '__no_revenue_payment__' }
+          : params.status && params.status !== 'all'
+          ? params.status === 'cancelled'
+            ? { ...matchConditions, orderStatus: '__no_revenue_status__', paymentStatus: 'paid' }
+            : { ...matchConditions, paymentStatus: 'paid' }
+          : { ...matchConditions, orderStatus: { $ne: 'cancelled' }, paymentStatus: 'paid' }
 
       // ✅ FIX: Use aggregation + countDocuments instead of loading ALL orders into RAM
-      const [total, pending, processing, shipped, delivered, cancelled, revenueResult, todayOrders] = await Promise.all([
-        databaseService.orders.countDocuments(),
-        databaseService.orders.countDocuments({ orderStatus: 'pending' }),
-        databaseService.orders.countDocuments({ orderStatus: 'processing' }),
-        databaseService.orders.countDocuments({ orderStatus: 'shipped' }),
-        databaseService.orders.countDocuments({ orderStatus: 'delivered' }),
-        databaseService.orders.countDocuments({ orderStatus: 'cancelled' }),
+      const [total, pending, processing, shipped, delivered, cancelled, returned, revenueResult, todayOrders] = await Promise.all([
+        databaseService.orders.countDocuments(matchConditions),
+        databaseService.orders.countDocuments(statusMatch('pending')),
+        databaseService.orders.countDocuments(statusMatch('processing')),
+        databaseService.orders.countDocuments(statusMatch('shipped')),
+        databaseService.orders.countDocuments(statusMatch('delivered')),
+        databaseService.orders.countDocuments(statusMatch('cancelled')),
+        databaseService.orders.countDocuments(statusMatch('returned')),
         databaseService.orders
           .aggregate([
-            { $match: { orderStatus: { $ne: 'cancelled' }, paymentStatus: 'paid' } },
-            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+            { $match: revenueMatch },
+            { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
           ])
           .toArray(),
-        databaseService.orders.countDocuments({ createdAt: { $gte: today } })
+        databaseService.orders.countDocuments({ ...matchConditions, createdAt: { $gte: today } })
       ])
 
       return {
@@ -932,7 +985,10 @@ class AdminService {
         shipped,
         delivered,
         cancelled,
+        returned,
         revenue: revenueResult[0]?.total || 0,
+        revenueOrderCount: revenueResult[0]?.count || 0,
+        averageOrderValue: revenueResult[0]?.count ? (revenueResult[0].total || 0) / revenueResult[0].count : 0,
         todayOrders
       }
     }, 60) // Cache 60 seconds

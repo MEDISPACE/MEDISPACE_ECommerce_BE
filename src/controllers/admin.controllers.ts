@@ -256,7 +256,14 @@ export const getAllOrdersController = async (req: Request, res: Response, next: 
 // Headers: { Authorization: Bearer <access_token> } (Admin)
 export const getOrderStatsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await adminService.getOrderStats()
+    const { status, paymentStatus, search, dateFrom, dateTo } = req.query
+    const result = await adminService.getOrderStats({
+      status: status as string,
+      paymentStatus: paymentStatus as string,
+      search: search as string,
+      dateFrom: dateFrom as string,
+      dateTo: dateTo as string
+    })
     return res.json({ result })
   } catch (error) {
     next(error)
