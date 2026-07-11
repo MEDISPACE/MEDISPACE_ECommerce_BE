@@ -25,7 +25,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
-  "author": "",
+  "author": "Tran Nguyen Quoc Bao, Nguyen Huu Thong",
   "license": "ISC",
   "description": "Node.js/TypeScript backend for the MediSpace digital pharmacy platform.",
   "devDependencies": {
