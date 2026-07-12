@@ -17,6 +17,7 @@ import paymentService from './payment.services'
 import typesenseService from './typesense.services'
 import cacheService from './cache.services'
 import shippingService from './shipping.services'
+import paymentTransactionService from './paymentTransactions.services'
 
 const VIETNAM_TIMEZONE_OFFSET_MINUTES = 7 * 60
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD || 30)
@@ -1362,11 +1363,25 @@ class PharmacistService {
     }
 
     const persistedOrder = { ...order, _id: result.insertedId }
+    if (isPaidAtCounter) {
+      await paymentTransactionService.markPaymentPaid({
+        order: persistedOrder,
+        providerMessage: 'Paid at counter when pharmacist order was created'
+      })
+    } else {
+      await paymentTransactionService.ensurePaymentTransaction({
+        order: persistedOrder,
+        status: orderData.paymentMethod === PaymentMethod.COD ? 'pending_collection' : 'pending'
+      })
+    }
+
     let paymentUrl: string | undefined
     let paymentUrlError = false
     if (ONLINE_PAYMENT_METHODS.has(orderData.paymentMethod)) {
       try {
-        paymentUrl = await paymentService.createPaymentUrl(persistedOrder as any, orderData.req)
+        const paymentRequest = await paymentService.createPaymentRequest(persistedOrder as any, orderData.req)
+        await paymentTransactionService.attachPaymentRequest(persistedOrder, paymentRequest)
+        paymentUrl = paymentRequest.paymentUrl
       } catch {
         paymentUrlError = true
       }
@@ -1508,7 +1523,9 @@ class PharmacistService {
 
   async createPaymentUrlForPharmacistOrder(order: any, req?: any) {
     if (!order || order.paymentStatus === 'paid' || !ONLINE_PAYMENT_METHODS.has(order.paymentMethod)) return undefined
-    return paymentService.createPaymentUrl(order, req)
+    const paymentRequest = await paymentService.createPaymentRequest(order, req)
+    await paymentTransactionService.attachPaymentRequest(order, paymentRequest)
+    return paymentRequest.paymentUrl
   }
 
   // Get orders list for pharmacist with filters
