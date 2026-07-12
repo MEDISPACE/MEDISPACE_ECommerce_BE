@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb'
 import { Server as SocketIOServer } from 'socket.io'
+import { UserRole, UserStatus } from '~/constants/enum'
 import Notification, { NotificationTypeEnum, NotificationTargetRole } from '~/models/schemas/Notification.schema'
 import databaseService from './database.services'
 
@@ -53,14 +54,16 @@ class NotificationService {
   }
 
   async getPreferences(userId: ObjectId): Promise<NotificationPreferences> {
-    const user = await databaseService.users.findOne(
-      { _id: userId },
-      { projection: { notificationPreferences: 1 } }
+    const user = await databaseService.users.findOne({ _id: userId }, { projection: { notificationPreferences: 1 } })
+    return this.normalizePreferences(
+      (user as any)?.notificationPreferences as Partial<NotificationPreferences> | undefined
     )
-    return this.normalizePreferences((user as any)?.notificationPreferences as Partial<NotificationPreferences> | undefined)
   }
 
-  async updatePreferences(userId: ObjectId, preferences: Partial<NotificationPreferences>): Promise<NotificationPreferences> {
+  async updatePreferences(
+    userId: ObjectId,
+    preferences: Partial<NotificationPreferences>
+  ): Promise<NotificationPreferences> {
     const normalized = this.normalizePreferences(preferences)
     await databaseService.users.updateOne(
       { _id: userId },
@@ -87,7 +90,7 @@ class NotificationService {
       actionUrl: payload.actionUrl,
       metadata: payload.metadata,
       targetRole: payload.targetRole || 'customer',
-      eventKey: payload.eventKey,
+      eventKey: payload.eventKey
     })
 
     if (payload.eventKey) {
@@ -137,9 +140,9 @@ class NotificationService {
     payload: Omit<CreateNotificationPayload, 'userId' | 'targetRole'>,
     io?: SocketIOServer
   ): Promise<void> {
-    const dbRole = role === 'admin' ? 2 : 1
+    const dbRole = role === 'admin' ? UserRole.Admin : UserRole.Pharmacist
     const users = await databaseService.users
-      .find({ role: dbRole }, { projection: { _id: 1 } })
+      .find({ role: dbRole, status: { $ne: UserStatus.Banned } }, { projection: { _id: 1 } })
       .toArray()
 
     if (users.length > 0) {
@@ -176,15 +179,49 @@ class NotificationService {
     }
   }
 
+  async broadcastToCustomers(
+    payload: Omit<CreateNotificationPayload, 'userId' | 'targetRole'>,
+    io?: SocketIOServer,
+    targetUserIds?: ObjectId[]
+  ): Promise<void> {
+    const query: Record<string, unknown> = {
+      role: UserRole.Customer,
+      status: UserStatus.Verified
+    }
+
+    if (targetUserIds && targetUserIds.length > 0) {
+      query._id = { $in: targetUserIds }
+    }
+
+    const users = await databaseService.users.find(query, { projection: { _id: 1 } }).toArray()
+    if (users.length === 0) return
+
+    const created = await Promise.all(
+      users.map((u) =>
+        this.createNotification({
+          userId: u._id!,
+          type: payload.type,
+          title: payload.title,
+          message: payload.message,
+          actionUrl: payload.actionUrl,
+          metadata: payload.metadata,
+          targetRole: 'customer',
+          eventKey: payload.eventKey
+        })
+      )
+    )
+
+    if (io) {
+      created.filter(Boolean).forEach((notification) => {
+        io.to(`user:${notification!.userId.toString()}`).emit('notification:new', notification)
+      })
+    }
+  }
+
   /**
    * Get paginated notifications for a specific user
    */
-  async getByUserId(
-    userId: ObjectId,
-    page = 1,
-    limit = 20,
-    filter?: NotificationFilter
-  ) {
+  async getByUserId(userId: ObjectId, page = 1, limit = 20, filter?: NotificationFilter) {
     const skip = (page - 1) * limit
     const query: Record<string, unknown> = { userId }
 
@@ -195,13 +232,8 @@ class NotificationService {
     }
 
     const [notifications, total] = await Promise.all([
-      databaseService.notifications
-        .find(query)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .toArray(),
-      databaseService.notifications.countDocuments(query),
+      databaseService.notifications.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+      databaseService.notifications.countDocuments(query)
     ])
 
     return {
@@ -210,8 +242,8 @@ class NotificationService {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit),
-      },
+        totalPages: Math.ceil(total / limit)
+      }
     }
   }
 
@@ -266,7 +298,7 @@ class NotificationService {
       processing: 'Đang chuẩn bị',
       shipped: 'Đang giao hàng',
       delivered: 'Đã giao thành công',
-      cancelled: 'Đã hủy',
+      cancelled: 'Đã hủy'
     }
 
     const label = statusLabels[newStatus]
@@ -395,7 +427,7 @@ class NotificationService {
         message: `Đơn hàng ${orderNumber} (${formattedAmount}) vừa được đặt.`,
         actionUrl: '/admin/orders',
         metadata: { orderNumber, totalAmount },
-        eventKey: `order:${orderNumber}:admin:new`,
+        eventKey: `order:${orderNumber}:admin:new`
       },
       io
     )
@@ -441,16 +473,16 @@ class NotificationService {
     const statusMap: Record<string, { title: string; message: string }> = {
       approved: {
         title: 'Yêu cầu hoàn hàng được chấp thuận',
-        message: `Yêu cầu hoàn hàng ${requestNumber} của bạn đã được chấp thuận.`,
+        message: `Yêu cầu hoàn hàng ${requestNumber} của bạn đã được chấp thuận.`
       },
       rejected: {
         title: 'Yêu cầu hoàn hàng bị từ chối',
-        message: `Yêu cầu hoàn hàng ${requestNumber} chưa đáp ứng điều kiện.`,
+        message: `Yêu cầu hoàn hàng ${requestNumber} chưa đáp ứng điều kiện.`
       },
       completed: {
         title: 'Hoàn hàng hoàn tất',
-        message: `Yêu cầu hoàn hàng ${requestNumber} đã hoàn tất xử lý.`,
-      },
+        message: `Yêu cầu hoàn hàng ${requestNumber} đã hoàn tất xử lý.`
+      }
     }
 
     const content = statusMap[status]
@@ -474,12 +506,7 @@ class NotificationService {
   /**
    * Trigger: Low stock alert → notify all admins (threshold: 30)
    */
-  async notifyLowStock(
-    productId: ObjectId,
-    productName: string,
-    stockQuantity: number,
-    io?: SocketIOServer
-  ) {
+  async notifyLowStock(productId: ObjectId, productName: string, stockQuantity: number, io?: SocketIOServer) {
     const payload = {
       type: 'system' as NotificationTypeEnum,
       title: 'Cảnh báo tồn kho thấp',
@@ -491,6 +518,48 @@ class NotificationService {
       this.broadcastToRole('admin', { ...payload, actionUrl: '/admin/inventory' }, io),
       this.broadcastToRole('pharmacist', { ...payload, actionUrl: '/pharmacist/inventory' }, io)
     ])
+  }
+
+  async notifyCouponAvailable(coupon: Record<string, any>, io?: SocketIOServer): Promise<void> {
+    const couponId = coupon._id?.toString?.()
+    if (!couponId || !coupon.isActive) return
+
+    const now = new Date()
+    const startDate = new Date(coupon.startDate)
+    const endDate = new Date(coupon.endDate)
+    if (now < startDate || now > endDate) return
+
+    const targetUserIds = (coupon.targetUserIds || [])
+      .filter((id: ObjectId | string) => id && ObjectId.isValid(id.toString()))
+      .map((id: ObjectId | string) => new ObjectId(id.toString()))
+
+    if (!coupon.isPublic && targetUserIds.length === 0) return
+
+    const valueLabel =
+      coupon.type === 'percentage'
+        ? `giảm ${coupon.value}%`
+        : coupon.type === 'free_shipping'
+          ? 'miễn phí vận chuyển'
+          : `giảm ${Number(coupon.value || 0).toLocaleString('vi-VN')}đ`
+
+    await this.broadcastToCustomers(
+      {
+        type: 'promotion',
+        title: 'Ưu đãi mới dành cho bạn',
+        message: `Mã ${coupon.code} ${valueLabel}. Áp dụng đến ${endDate.toLocaleDateString('vi-VN')}.`,
+        actionUrl: '/account/coupons',
+        metadata: {
+          couponId,
+          code: coupon.code,
+          type: coupon.type,
+          value: coupon.value,
+          endDate: endDate.toISOString()
+        },
+        eventKey: `coupon:${couponId}:available`
+      },
+      io,
+      coupon.isPublic ? undefined : targetUserIds
+    )
   }
 
   /**
@@ -505,7 +574,7 @@ class NotificationService {
         message: `Yêu cầu hoàn hàng ${requestNumber} cần được xử lý.`,
         actionUrl: '/admin/returns',
         metadata: { requestNumber },
-        eventKey: `return:${requestNumber}:admin:new`,
+        eventKey: `return:${requestNumber}:admin:new`
       },
       io
     )
@@ -571,7 +640,7 @@ class NotificationService {
           reviewId: reviewId.toString(),
           productName,
           moderationStatus: newStatus,
-          moderationNotes: moderationNotes || null,
+          moderationNotes: moderationNotes || null
         },
         targetRole: 'customer',
         eventKey: `review:${reviewId.toString()}:moderation:${newStatus}`
@@ -580,7 +649,12 @@ class NotificationService {
     )
   }
 
-  async notifyVideoEventReminder(userId: ObjectId, eventTitle: string, eventId: string, io?: SocketIOServer): Promise<void> {
+  async notifyVideoEventReminder(
+    userId: ObjectId,
+    eventTitle: string,
+    eventId: string,
+    io?: SocketIOServer
+  ): Promise<void> {
     await this.createAndPush(
       {
         userId,

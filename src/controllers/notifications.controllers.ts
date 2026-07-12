@@ -4,6 +4,9 @@ import { ObjectId } from 'mongodb'
 import { TokenPayload } from '~/models/requests/User.request'
 import HTTP_STATUS from '~/constants/httpStatus'
 import notificationService from '~/services/notifications.services'
+import type { NotificationTypeEnum } from '~/models/schemas/Notification.schema'
+
+type NotificationFilter = 'all' | 'unread' | NotificationTypeEnum
 
 // GET /notifications?page=1&limit=20&filter=all
 export const getNotificationsController = async (req: Request<ParamsDictionary, unknown, unknown>, res: Response) => {
@@ -12,17 +15,12 @@ export const getNotificationsController = async (req: Request<ParamsDictionary, 
   const limit = parseInt(req.query.limit as string) || 20
   const filter = (req.query.filter as string) || 'all'
 
-  const result = await notificationService.getByUserId(
-    new ObjectId(userId),
-    page,
-    limit,
-    filter as 'all' | 'unread' | 'order' | 'prescription' | 'promotion' | 'system' | 'reminder' | 'review'
-  )
+  const result = await notificationService.getByUserId(new ObjectId(userId), page, limit, filter as NotificationFilter)
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Get notifications successfully',
     result: result.notifications,
-    pagination: result.pagination,
+    pagination: result.pagination
   })
 }
 
@@ -33,7 +31,7 @@ export const getUnreadCountController = async (req: Request<ParamsDictionary, un
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Get unread count successfully',
-    result: { count },
+    result: { count }
   })
 }
 
@@ -47,7 +45,7 @@ export const getNotificationPreferencesController = async (
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Get notification preferences successfully',
-    result: preferences,
+    result: preferences
   })
 }
 
@@ -57,11 +55,14 @@ export const updateNotificationPreferencesController = async (
   res: Response
 ) => {
   const { userId } = req.decoded_authorization as TokenPayload
-  const preferences = await notificationService.updatePreferences(new ObjectId(userId), req.body as Parameters<typeof notificationService.updatePreferences>[1])
+  const preferences = await notificationService.updatePreferences(
+    new ObjectId(userId),
+    req.body as Parameters<typeof notificationService.updatePreferences>[1]
+  )
 
   return res.status(HTTP_STATUS.OK).json({
     message: 'Notification preferences updated',
-    result: preferences,
+    result: preferences
   })
 }
 
@@ -71,7 +72,7 @@ export const markAllAsReadController = async (req: Request<ParamsDictionary, unk
   await notificationService.markAllAsRead(new ObjectId(userId))
 
   return res.status(HTTP_STATUS.OK).json({
-    message: 'All notifications marked as read',
+    message: 'All notifications marked as read'
   })
 }
 
@@ -83,7 +84,7 @@ export const markAsReadController = async (req: Request<ParamsDictionary, unknow
   await notificationService.markAsRead(notificationId, new ObjectId(userId))
 
   return res.status(HTTP_STATUS.OK).json({
-    message: 'Notification marked as read',
+    message: 'Notification marked as read'
   })
 }
 
@@ -95,6 +96,6 @@ export const deleteNotificationController = async (req: Request<ParamsDictionary
   await notificationService.deleteNotification(notificationId, new ObjectId(userId))
 
   return res.status(HTTP_STATUS.OK).json({
-    message: 'Notification deleted',
+    message: 'Notification deleted'
   })
 }

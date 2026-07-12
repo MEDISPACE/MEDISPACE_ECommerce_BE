@@ -304,45 +304,82 @@ class ReviewService {
    * @param userId - ID of the user
    * @returns User's reviews with product information
    */
-  async getReviewsByUserId(userId: ObjectId) {
-    const reviews = await databaseService.reviews
-      .aggregate([
-        { $match: { userId: userId } },
-        { $sort: { createdAt: -1 } },
-        // Lookup product information
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'productId',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
-        // Project fields
-        {
-          $project: {
-            _id: 1,
-            productId: 1,
-            rating: 1,
-            title: 1,
-            comment: 1,
-            images: 1,
-            isVerifiedPurchase: 1,
-            helpfulCount: 1,
-            status: 1,
-            moderationNotes: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            productName: '$product.name',
-            productImage: '$product.featuredImage',
-            productSlug: '$product.slug'
-          }
-        }
-      ])
-      .toArray()
+  async getReviewsByUserId(
+    userId: ObjectId,
+    options?: {
+      page?: number
+      limit?: number
+      status?: ReviewStatus
+    }
+  ) {
+    const page = Math.max(options?.page || 1, 1)
+    const limit = Math.min(Math.max(options?.limit || 10, 1), 50)
+    const skip = (page - 1) * limit
+    const query = {
+      userId,
+      ...(options?.status ? { status: options.status } : {})
+    }
 
-    return reviews
+    const reviewPipeline = [
+      { $match: query },
+      { $sort: { createdAt: -1 as const } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'productId',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          productId: 1,
+          orderId: 1,
+          rating: 1,
+          title: 1,
+          comment: 1,
+          images: 1,
+          isVerifiedPurchase: 1,
+          helpfulCount: 1,
+          status: 1,
+          moderationNotes: 1,
+          autoApproved: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          productName: '$product.name',
+          productImage: '$product.featuredImage',
+          productSlug: '$product.slug'
+        }
+      }
+    ]
+
+    const [reviews, total, pending, approved, rejected] = await Promise.all([
+      databaseService.reviews.aggregate(reviewPipeline).toArray(),
+      databaseService.reviews.countDocuments(query),
+      databaseService.reviews.countDocuments({ userId, status: ReviewStatus.Pending }),
+      databaseService.reviews.countDocuments({ userId, status: ReviewStatus.Approved }),
+      databaseService.reviews.countDocuments({ userId, status: ReviewStatus.Rejected })
+    ])
+
+    return {
+      reviews,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      },
+      statusCounts: {
+        all: pending + approved + rejected,
+        pending,
+        approved,
+        rejected
+      }
+    }
   }
 
   /**
@@ -614,7 +651,7 @@ class ReviewService {
           moderatedBy: moderatorId,
           moderatedAt: new Date(),
           moderationNotes: notes,
-          aiFlag: false,           // Admin reviewed → clear AI flag
+          aiFlag: false, // Admin reviewed → clear AI flag
           updatedAt: new Date()
         }
       },
@@ -630,16 +667,17 @@ class ReviewService {
     // - SKIP when auto-approved (customer already got success toast on submit)
     if (status === ReviewStatus.Rejected || status === ReviewStatus.Approved) {
       try {
-        const product = await databaseService.products.findOne(
-          { _id: review.productId },
-          { projection: { name: 1 } }
-        )
+        const product = await databaseService.products.findOne({ _id: review.productId }, { projection: { name: 1 } })
         const productName = product?.name ?? 'sản phẩm'
 
         // Graceful degradation: getIO() throws if socket not initialized (e.g. during tests)
         // In that case, notification is still persisted in DB — real-time push is skipped
         let io: SocketIOServer | undefined
-        try { io = getIO() } catch { io = undefined }
+        try {
+          io = getIO()
+        } catch {
+          io = undefined
+        }
 
         await notificationService.notifyReviewModerated(
           review.userId,
@@ -931,7 +969,11 @@ class ReviewService {
     try {
       // Graceful degradation: getIO() throws if socket not initialized
       let io: SocketIOServer | undefined
-      try { io = getIO() } catch { io = undefined }
+      try {
+        io = getIO()
+      } catch {
+        io = undefined
+      }
 
       // Fetch product names once (deduplicated by productId)
       const productDocs = await databaseService.products
