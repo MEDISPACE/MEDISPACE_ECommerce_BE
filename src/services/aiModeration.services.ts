@@ -205,6 +205,7 @@ function normalizeForPolicy(text: string) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -252,6 +253,19 @@ function applyHidePolicy(
 function applyModerationPolicy(result: AiModerationResult, content: string): AiModerationResult {
   const text = normalizeForPolicy(content)
   const hasToxic = result.categories.includes('toxic') || result.categories.includes('harassment')
+
+  const severeToxicAttack =
+    /\b(du ma|du me|dit me|dcm|dkm|dm|oc cho|suc vat|con cho)\b/.test(text) ||
+    /\b(may|m)\b.*\b(di chet|chet di|chet me|con me may)\b/.test(text) ||
+    /\b(di chet|chet me may|con me may)\b/.test(text)
+
+  if (severeToxicAttack && (hasToxic || result.severity === 'high' || result.severity === 'critical')) {
+    return applyHidePolicy(result, {
+      severity: 'high',
+      categories: ['toxic', 'harassment'],
+      reason: 'Nội dung có ngôn từ xúc phạm nghiêm trọng hoặc công kích người khác.'
+    })
+  }
 
   const protectedGroupAttack =
     /\b(dan toc|nguoi dan toc|lgbt|dong tinh|chuyen gioi|ton giao|khuyet tat)\b/.test(text) &&
