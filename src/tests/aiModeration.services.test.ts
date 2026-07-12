@@ -344,6 +344,41 @@ describe('AiModerationService', () => {
     })
   })
 
+  it('policy hides severe profanity and death-wish harassment', async () => {
+    process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
+    process.env.AI_MODERATION_MODEL = 'test-model'
+
+    for (const content of ['đụ má', 'óc chó', 'mày đi chết con mẹ mày đi']) {
+      vi.mocked(axios.post).mockResolvedValueOnce({
+        data: {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                severity: 'high',
+                categories: ['toxic'],
+                confidence: 0.95,
+                shouldHide: false,
+                requiresHumanReview: true,
+                reason: 'Công kích nghiêm trọng.',
+                suggestedAction: 'review'
+              })
+            }
+          }]
+        }
+      })
+
+      const result = await aiModerationService.reviewText(content)
+
+      expect(result).toMatchObject({
+        severity: 'high',
+        categories: expect.arrayContaining(['toxic', 'harassment']),
+        shouldHide: true,
+        requiresHumanReview: true,
+        suggestedAction: 'hide'
+      })
+    }
+  })
+
   it('policy hides protected-group attacks even when the LLM is too lenient', async () => {
     process.env.AI_MODERATION_BASE_URL = 'http://ai.local/v1'
     process.env.AI_MODERATION_MODEL = 'test-model'

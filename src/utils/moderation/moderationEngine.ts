@@ -93,8 +93,11 @@ export function moderateTextRuleBased(rawText: string): ModerationResult {
   }
 
   // Toxic (minimal keyword list; expand later)
-  const toxicKeywords = ['đồ ngu', 'ngu quá', 'óc chó', 'cút', 'đ*', 'dm', 'dmm', 'clm']
-  if (toxicKeywords.some((k) => text.includes(k))) {
+  const severeToxicKeywords = ['đụ má', 'đụ mẹ', 'địt mẹ', 'đcm', 'dkm', 'óc chó', 'súc vật', 'con chó']
+  const severeToxicPatterns = [/mày.*(đi chết|chết đi|chết mẹ|con mẹ mày)/, /(đi chết|chết mẹ mày|con mẹ mày)/]
+  const toxicKeywords = ['đồ ngu', 'ngu quá', 'não để đâu', 'cút', 'đ*', 'dm', 'dmm', 'clm']
+  const hasSevereToxic = severeToxicKeywords.some((k) => text.includes(k)) || severeToxicPatterns.some((pattern) => pattern.test(text))
+  if (hasSevereToxic || toxicKeywords.some((k) => text.includes(k))) {
     categories.add('toxic')
     reasons.push('Ngôn từ có dấu hiệu xúc phạm/quấy rối.')
   }
@@ -126,7 +129,10 @@ export function moderateTextRuleBased(rawText: string): ModerationResult {
     severity = 'medium'
     confidence = 'medium'
   }
-  if (categories.has('toxic') && severity === 'low') {
+  if (categories.has('toxic') && hasSevereToxic) {
+    severity = 'high'
+    confidence = 'high'
+  } else if (categories.has('toxic') && severity === 'low') {
     severity = 'medium'
     confidence = 'medium'
   }
