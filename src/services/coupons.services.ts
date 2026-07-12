@@ -5,6 +5,8 @@ import databaseService from './database.services'
 import cacheService from './cache.services'
 import { ErrorWithStatus } from '~/models/Error'
 import HTTP_STATUS from '~/constants/httpStatus'
+import notificationService from './notifications.services'
+import { getIO } from '~/sockets/chat.socket'
 
 export interface ValidateCouponResult {
   isValid: boolean
@@ -27,6 +29,22 @@ class CouponService {
   // ============================
   // VALIDATION & APPLICATION
   // ============================
+
+  private pushCouponNotification(coupon: any) {
+    let io
+    try {
+      io = getIO()
+    } catch {
+      io = undefined
+    }
+    Promise.resolve((notificationService as any).notifyCouponAvailable?.(coupon, io)).catch(() => {})
+  }
+
+  private isCouponCurrentlyVisible(coupon: any) {
+    if (!coupon?.isActive) return false
+    const now = new Date()
+    return now >= new Date(coupon.startDate) && now <= new Date(coupon.endDate)
+  }
 
   private toIdSet(ids?: Array<ObjectId | string>) {
     return new Set((ids || []).map((id) => id.toString()))
@@ -52,10 +70,7 @@ class CouponService {
     const categories = await databaseService.categories
       .find(
         {
-          $or: [
-            { _id: { $in: targetCategoryIds } },
-            ...descendantQueries
-          ]
+          $or: [{ _id: { $in: targetCategoryIds } }, ...descendantQueries]
         },
         { projection: { _id: 1 } }
       )
@@ -71,7 +86,7 @@ class CouponService {
     applicableCategoryIdSet?: Set<string>
   ) {
     const hasProductTarget = coupon.applicableProductIds && coupon.applicableProductIds.length > 0
-    const categoryIds = applicableCategoryIdSet || await this.getApplicableCategoryIdSet(coupon)
+    const categoryIds = applicableCategoryIdSet || (await this.getApplicableCategoryIdSet(coupon))
     const hasCategoryTarget = categoryIds.size > 0
 
     if (!hasProductTarget && !hasCategoryTarget) {
@@ -110,16 +125,16 @@ class CouponService {
 
   private normalizeIdArray(ids?: Array<ObjectId | string>) {
     if (!Array.isArray(ids)) return undefined
-    return ids
-      .filter((id) => id && ObjectId.isValid(id.toString()))
-      .map((id) => new ObjectId(id.toString()))
+    return ids.filter((id) => id && ObjectId.isValid(id.toString())).map((id) => new ObjectId(id.toString()))
   }
 
   private normalizeCouponPayload(data: any) {
     const normalized = { ...data }
     if ('targetUserIds' in normalized) normalized.targetUserIds = this.normalizeIdArray(normalized.targetUserIds)
-    if ('applicableProductIds' in normalized) normalized.applicableProductIds = this.normalizeIdArray(normalized.applicableProductIds)
-    if ('applicableCategoryIds' in normalized) normalized.applicableCategoryIds = this.normalizeIdArray(normalized.applicableCategoryIds)
+    if ('applicableProductIds' in normalized)
+      normalized.applicableProductIds = this.normalizeIdArray(normalized.applicableProductIds)
+    if ('applicableCategoryIds' in normalized)
+      normalized.applicableCategoryIds = this.normalizeIdArray(normalized.applicableCategoryIds)
     if (normalized.totalUsageLimit === null || normalized.totalUsageLimit === '') normalized.totalUsageLimit = undefined
     if (normalized.type === 'fixed') normalized.type = 'fixed_amount'
     return normalized
@@ -141,16 +156,17 @@ class CouponService {
     const uniqueProductIds = Array.from(new Map(applicableProductIds.map((id) => [id.toString(), id])).values())
     const [users, products] = await Promise.all([
       uniqueUserIds.length > 0
-        ? databaseService.users.find(
-            { _id: { $in: uniqueUserIds } },
-            { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, phoneNumber: 1 } }
-          ).toArray()
+        ? databaseService.users
+            .find(
+              { _id: { $in: uniqueUserIds } },
+              { projection: { _id: 1, firstName: 1, lastName: 1, email: 1, phoneNumber: 1 } }
+            )
+            .toArray()
         : [],
       uniqueProductIds.length > 0
-        ? databaseService.products.find(
-            { _id: { $in: uniqueProductIds } },
-            { projection: { _id: 1, name: 1, sku: 1 } }
-          ).toArray()
+        ? databaseService.products
+            .find({ _id: { $in: uniqueProductIds } }, { projection: { _id: 1, name: 1, sku: 1 } })
+            .toArray()
         : []
     ])
     const userMap = new Map(users.map((user: any) => [user._id.toString(), user]))
@@ -158,10 +174,12 @@ class CouponService {
 
     return coupons.map((coupon) => ({
       ...coupon,
-      targetUsers: (coupon.targetUserIds || [])
-        .map((id: ObjectId | string) => userMap.get(id.toString()) || { _id: id.toString(), missing: true }),
-      applicableProducts: (coupon.applicableProductIds || [])
-        .map((id: ObjectId | string) => productMap.get(id.toString()) || { _id: id.toString(), missing: true })
+      targetUsers: (coupon.targetUserIds || []).map(
+        (id: ObjectId | string) => userMap.get(id.toString()) || { _id: id.toString(), missing: true }
+      ),
+      applicableProducts: (coupon.applicableProductIds || []).map(
+        (id: ObjectId | string) => productMap.get(id.toString()) || { _id: id.toString(), missing: true }
+      )
     }))
   }
 
@@ -194,7 +212,10 @@ class CouponService {
       throw new ErrorWithStatus({ message: 'Giá trị giảm phải lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
     }
     if (type === 'percentage' && value > 100) {
-      throw new ErrorWithStatus({ message: 'Coupon phần trăm phải có giá trị từ 1 đến 100.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'Coupon phần trăm phải có giá trị từ 1 đến 100.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
 
     if (merged.minOrderAmount !== undefined && merged.minOrderAmount !== null) {
@@ -204,26 +225,39 @@ class CouponService {
       }
     }
 
-    if (merged.maxDiscountAmount !== undefined && merged.maxDiscountAmount !== null && merged.maxDiscountAmount !== '') {
+    if (
+      merged.maxDiscountAmount !== undefined &&
+      merged.maxDiscountAmount !== null &&
+      merged.maxDiscountAmount !== ''
+    ) {
       const maxDiscountAmount = this.assertFiniteNumber(merged.maxDiscountAmount, 'Giảm tối đa')
       if (maxDiscountAmount < 0) {
         throw new ErrorWithStatus({ message: 'Giảm tối đa không được âm.', status: HTTP_STATUS.BAD_REQUEST })
       }
       if (type !== 'percentage' && data.maxDiscountAmount !== undefined) {
-        throw new ErrorWithStatus({ message: 'Giảm tối đa chỉ áp dụng cho coupon phần trăm.', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({
+          message: 'Giảm tối đa chỉ áp dụng cho coupon phần trăm.',
+          status: HTTP_STATUS.BAD_REQUEST
+        })
       }
     }
 
     if (merged.totalUsageLimit !== undefined && merged.totalUsageLimit !== null) {
       const totalUsageLimit = this.assertFiniteNumber(merged.totalUsageLimit, 'Tổng lượt dùng')
       if (!Number.isInteger(totalUsageLimit) || totalUsageLimit < 1) {
-        throw new ErrorWithStatus({ message: 'Tổng lượt dùng phải là số nguyên lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
+        throw new ErrorWithStatus({
+          message: 'Tổng lượt dùng phải là số nguyên lớn hơn 0.',
+          status: HTTP_STATUS.BAD_REQUEST
+        })
       }
     }
 
     const perUserLimit = this.assertFiniteNumber(merged.perUserLimit ?? 1, 'Lượt dùng mỗi khách')
     if (!Number.isInteger(perUserLimit) || perUserLimit < 1) {
-      throw new ErrorWithStatus({ message: 'Lượt dùng mỗi khách phải là số nguyên lớn hơn 0.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'Lượt dùng mỗi khách phải là số nguyên lớn hơn 0.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
 
     const startDate = new Date(merged.startDate)
@@ -262,7 +296,12 @@ class CouponService {
     const normalizedCode = typeof code === 'string' ? code.toUpperCase().trim() : ''
 
     if (!normalizedCode) {
-      return { isValid: false, discountAmount: 0, message: 'Mã giảm giá không tồn tại hoặc đã bị vô hiệu hóa.', discountType: null }
+      return {
+        isValid: false,
+        discountAmount: 0,
+        message: 'Mã giảm giá không tồn tại hoặc đã bị vô hiệu hóa.',
+        discountType: null
+      }
     }
 
     // 1. Tìm coupon — chỉ filter isActive ở DB, date validation xử lý ở code
@@ -273,14 +312,24 @@ class CouponService {
     })
 
     if (!coupon) {
-      return { isValid: false, discountAmount: 0, message: 'Mã giảm giá không tồn tại hoặc đã bị vô hiệu hóa.', discountType: null }
+      return {
+        isValid: false,
+        discountAmount: 0,
+        message: 'Mã giảm giá không tồn tại hoặc đã bị vô hiệu hóa.',
+        discountType: null
+      }
     }
 
     // 2. Kiểm tra thời gian hiệu lực — cast sang Date để xử lý cả string lẫn Date từ DB
     const startDate = new Date(coupon.startDate)
     const endDate = new Date(coupon.endDate)
     if (now < startDate || now > endDate) {
-      return { isValid: false, discountAmount: 0, message: 'Mã giảm giá đã hết hạn hoặc chưa đến thời gian áp dụng.', discountType: null }
+      return {
+        isValid: false,
+        discountAmount: 0,
+        message: 'Mã giảm giá đã hết hạn hoặc chưa đến thời gian áp dụng.',
+        discountType: null
+      }
     }
 
     const applicableCategoryIdSet = await this.getApplicableCategoryIdSet(coupon)
@@ -324,20 +373,35 @@ class CouponService {
     // userUsageCounts là source of truth sau migration/backfill; couponRedemptions chỉ là audit trail.
     const userUsageCount = coupon.userUsageCounts?.[userId.toString()] || 0
     if (userUsageCount >= coupon.perUserLimit) {
-      return { isValid: false, discountAmount: 0, message: `Bạn đã sử dụng mã này ${coupon.perUserLimit} lần (đã đạt giới hạn).`, discountType: null }
+      return {
+        isValid: false,
+        discountAmount: 0,
+        message: `Bạn đã sử dụng mã này ${coupon.perUserLimit} lần (đã đạt giới hạn).`,
+        discountType: null
+      }
     }
 
     // 6. Kiểm tra đối tượng mục tiêu
     if (coupon.targetUserIds && coupon.targetUserIds.length > 0) {
       const isTargeted = coupon.targetUserIds.some((id: ObjectId) => id.toString() === userId.toString())
       if (!isTargeted) {
-        return { isValid: false, discountAmount: 0, message: 'Mã giảm giá này không áp dụng cho tài khoản của bạn.', discountType: null }
+        return {
+          isValid: false,
+          discountAmount: 0,
+          message: 'Mã giảm giá này không áp dụng cho tài khoản của bạn.',
+          discountType: null
+        }
       }
     }
 
     // 7. Kiểm tra thuốc kê đơn
     if (coupon.excludePrescriptionItems && hasPrescriptionItems) {
-      return { isValid: false, discountAmount: 0, message: 'Mã giảm giá không áp dụng cho đơn hàng có thuốc kê đơn.', discountType: null }
+      return {
+        isValid: false,
+        discountAmount: 0,
+        message: 'Mã giảm giá không áp dụng cho đơn hàng có thuốc kê đơn.',
+        discountType: null
+      }
     }
 
     // 8. Tính discount amount
@@ -377,15 +441,11 @@ class CouponService {
     code: string,
     userId: ObjectId,
     sessionId?: string,
-    selectedSubtotal?: number,  // Deprecated: BE recomputes subtotal from cart items.
+    selectedSubtotal?: number, // Deprecated: BE recomputes subtotal from cart items.
     selectedItems?: Array<{ productId: string; unit?: string }>
   ) {
     // Lấy cart
-    const cartQuery = userId
-      ? { userId }
-      : sessionId
-        ? { sessionId }
-        : null
+    const cartQuery = userId ? { userId } : sessionId ? { sessionId } : null
 
     if (!cartQuery) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy giỏ hàng.', status: HTTP_STATUS.BAD_REQUEST })
@@ -400,9 +460,15 @@ class CouponService {
     // nếu không có thì fallback về cart.subtotal
     const validationItems = this.getSelectedCartItems(cart.items, selectedItems)
     if (selectedItems && selectedItems.length > 0 && validationItems.length === 0) {
-      throw new ErrorWithStatus({ message: 'Không tìm thấy sản phẩm đã chọn trong giỏ hàng.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'Không tìm thấy sản phẩm đã chọn trong giỏ hàng.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
-    const subtotalForValidation = validationItems.reduce((sum: number, item: any) => sum + Math.max(0, item.totalPrice || 0), 0)
+    const subtotalForValidation = validationItems.reduce(
+      (sum: number, item: any) => sum + Math.max(0, item.totalPrice || 0),
+      0
+    )
     const hasPrescriptionItemsInSelection = validationItems.some((item: any) => item.prescriptionRequired)
 
     // Validate coupon
@@ -465,7 +531,14 @@ class CouponService {
       .filter((c: any) => c.type !== 'free_shipping')
       .reduce((sum: number, c: any) => sum + c.discountAmount, 0)
 
-    const newTotalAmount = Math.max(0, cart.subtotal - totalCouponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0))
+    const newTotalAmount = Math.max(
+      0,
+      cart.subtotal -
+        totalCouponDiscount -
+        (cart.loyaltyDiscount || 0) +
+        (cart.taxAmount || 0) +
+        (cart.shippingFee || 0)
+    )
 
     await databaseService.carts.updateOne(
       { _id: cart._id },
@@ -491,11 +564,7 @@ class CouponService {
    * Xoá coupon khỏi cart
    */
   async removeCouponFromCart(code: string, userId: ObjectId, sessionId?: string) {
-    const cartQuery = userId
-      ? { userId }
-      : sessionId
-        ? { sessionId }
-        : null
+    const cartQuery = userId ? { userId } : sessionId ? { sessionId } : null
 
     if (!cartQuery) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy giỏ hàng.', status: HTTP_STATUS.BAD_REQUEST })
@@ -513,7 +582,14 @@ class CouponService {
       .filter((c: any) => c.type !== 'free_shipping')
       .reduce((sum: number, c: any) => sum + c.discountAmount, 0)
 
-    const newTotalAmount = Math.max(0, cart.subtotal - totalCouponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0))
+    const newTotalAmount = Math.max(
+      0,
+      cart.subtotal -
+        totalCouponDiscount -
+        (cart.loyaltyDiscount || 0) +
+        (cart.taxAmount || 0) +
+        (cart.shippingFee || 0)
+    )
 
     await databaseService.carts.updateOne(
       { _id: cart._id },
@@ -531,11 +607,7 @@ class CouponService {
   }
 
   async revalidateCartCoupons(userId: ObjectId, sessionId?: string) {
-    const cartQuery = userId
-      ? { userId }
-      : sessionId
-        ? { sessionId }
-        : null
+    const cartQuery = userId ? { userId } : sessionId ? { sessionId } : null
 
     if (!cartQuery) return { appliedCoupons: [], discountAmount: 0, totalAmount: 0 }
 
@@ -566,7 +638,10 @@ class CouponService {
       .filter((c: any) => c.type !== 'free_shipping')
       .reduce((sum: number, c: any) => sum + (c.discountAmount || 0), 0)
 
-    const newTotalAmount = Math.max(0, subtotal - totalCouponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0))
+    const newTotalAmount = Math.max(
+      0,
+      subtotal - totalCouponDiscount - (cart.loyaltyDiscount || 0) + (cart.taxAmount || 0) + (cart.shippingFee || 0)
+    )
 
     await databaseService.carts.updateOne(
       { _id: cart._id },
@@ -587,12 +662,7 @@ class CouponService {
    * Ghi nhận việc dùng coupon sau khi order được tạo thành công.
    * ATOMIC: dùng findOneAndUpdate để tránh race condition 2 request đồng thời.
    */
-  async recordCouponRedemption(
-    couponCode: string,
-    userId: ObjectId,
-    orderId: ObjectId,
-    discountAmount: number
-  ) {
+  async recordCouponRedemption(couponCode: string, userId: ObjectId, orderId: ObjectId, discountAmount: number) {
     const upperCode = couponCode.toUpperCase()
     const userUsagePath = `userUsageCounts.${userId.toString()}`
 
@@ -621,10 +691,7 @@ class CouponService {
           },
           {
             $expr: {
-              $lt: [
-                { $ifNull: [`$${userUsagePath}`, 0] },
-                '$perUserLimit'
-              ]
+              $lt: [{ $ifNull: [`$${userUsagePath}`, 0] }, '$perUserLimit']
             }
           }
         ]
@@ -654,18 +721,15 @@ class CouponService {
     try {
       await databaseService.couponRedemptions.insertOne(redemption)
     } catch (error: any) {
-      await databaseService.coupons.updateOne(
-        { _id: coupon._id },
-        [
-          {
-            $set: {
-              currentUsageCount: { $max: [0, { $subtract: ['$currentUsageCount', 1] }] },
-              [userUsagePath]: { $max: [0, { $subtract: [{ $ifNull: [`$${userUsagePath}`, 0] }, 1] }] },
-              updatedAt: new Date()
-            }
+      await databaseService.coupons.updateOne({ _id: coupon._id }, [
+        {
+          $set: {
+            currentUsageCount: { $max: [0, { $subtract: ['$currentUsageCount', 1] }] },
+            [userUsagePath]: { $max: [0, { $subtract: [{ $ifNull: [`$${userUsagePath}`, 0] }, 1] }] },
+            updatedAt: new Date()
           }
-        ] as any
-      )
+        }
+      ] as any)
 
       if (error?.code === 11000) return
       throw error
@@ -682,18 +746,15 @@ class CouponService {
 
     for (const redemption of redemptions) {
       const userUsagePath = `userUsageCounts.${redemption.userId.toString()}`
-      await databaseService.coupons.updateOne(
-        { _id: redemption.couponId },
-        [
-          {
-            $set: {
-              currentUsageCount: { $max: [0, { $subtract: ['$currentUsageCount', 1] }] },
-              [userUsagePath]: { $max: [0, { $subtract: [{ $ifNull: [`$${userUsagePath}`, 0] }, 1] }] },
-              updatedAt: new Date()
-            }
+      await databaseService.coupons.updateOne({ _id: redemption.couponId }, [
+        {
+          $set: {
+            currentUsageCount: { $max: [0, { $subtract: ['$currentUsageCount', 1] }] },
+            [userUsagePath]: { $max: [0, { $subtract: [{ $ifNull: [`$${userUsagePath}`, 0] }, 1] }] },
+            updatedAt: new Date()
           }
-        ] as any
-      )
+        }
+      ] as any)
     }
 
     const result = await databaseService.couponRedemptions.deleteMany({ orderId })
@@ -711,7 +772,10 @@ class CouponService {
     // Kiểm tra code trùng
     const existing = await databaseService.coupons.findOne({ code: normalizedData.code.toUpperCase().trim() })
     if (existing) {
-      throw new ErrorWithStatus({ message: 'Mã coupon đã tồn tại. Vui lòng chọn mã khác.', status: HTTP_STATUS.BAD_REQUEST })
+      throw new ErrorWithStatus({
+        message: 'Mã coupon đã tồn tại. Vui lòng chọn mã khác.',
+        status: HTTP_STATUS.BAD_REQUEST
+      })
     }
 
     const coupon = new Coupon({
@@ -722,7 +786,9 @@ class CouponService {
 
     const result = await databaseService.coupons.insertOne(coupon as any)
     await cacheService.invalidate('coupons:*')
-    return { ...coupon, _id: result.insertedId }
+    const createdCoupon = { ...coupon, _id: result.insertedId }
+    this.pushCouponNotification(createdCoupon)
+    return createdCoupon
   }
 
   async updateCoupon(couponId: ObjectId, data: any) {
@@ -755,13 +821,15 @@ class CouponService {
       })
     }
 
-    await databaseService.coupons.updateOne(
-      { _id: couponId },
-      { $set: { ...updateData, updatedAt: new Date() } }
-    )
+    const wasVisible = this.isCouponCurrentlyVisible(coupon)
+    await databaseService.coupons.updateOne({ _id: couponId }, { $set: { ...updateData, updatedAt: new Date() } })
     await cacheService.invalidate('coupons:*')
 
-    return databaseService.coupons.findOne({ _id: couponId })
+    const updatedCoupon = await databaseService.coupons.findOne({ _id: couponId })
+    if (updatedCoupon && this.isCouponCurrentlyVisible(updatedCoupon) && !wasVisible) {
+      this.pushCouponNotification(updatedCoupon)
+    }
+    return updatedCoupon
   }
 
   async deleteCoupon(couponId: ObjectId) {
@@ -819,33 +887,39 @@ class CouponService {
 
   // Lấy danh sách public coupon cho user xem — ✅ CACHED
   async getPublicCoupons() {
-    return cacheService.getOrSet('coupons:public', async () => {
-      const now = new Date()
-      const all = await databaseService.coupons.find({
-        isPublic: true,
-        isActive: true
-      }).sort({ createdAt: -1 }).toArray()
+    return cacheService.getOrSet(
+      'coupons:public',
+      async () => {
+        const now = new Date()
+        const all = await databaseService.coupons
+          .find({
+            isPublic: true,
+            isActive: true
+          })
+          .sort({ createdAt: -1 })
+          .toArray()
 
-      return all.filter(c => {
-        const start = new Date(c.startDate)
-        const end = new Date(c.endDate)
-        return now >= start && now <= end
-      })
-    }, 300) // 5 minutes
+        return all.filter((c) => {
+          const start = new Date(c.startDate)
+          const end = new Date(c.endDate)
+          return now >= start && now <= end
+        })
+      },
+      300
+    ) // 5 minutes
   }
 
   async getAvailableCouponsForUser(userId: ObjectId) {
     const now = new Date()
-    const coupons = await databaseService.coupons.find({
-      isActive: true,
-      $or: [
-        { isPublic: true },
-        { targetUserIds: userId },
-        { targetUserIds: userId.toString() }
-      ]
-    }).sort({ createdAt: -1 }).toArray()
+    const coupons = await databaseService.coupons
+      .find({
+        isActive: true,
+        $or: [{ isPublic: true }, { targetUserIds: userId }, { targetUserIds: userId.toString() }]
+      })
+      .sort({ createdAt: -1 })
+      .toArray()
 
-    return coupons.filter(coupon => {
+    return coupons.filter((coupon) => {
       const start = new Date(coupon.startDate)
       const end = new Date(coupon.endDate)
       return now >= start && now <= end
@@ -854,14 +928,13 @@ class CouponService {
 
   async getMyCoupons(userId: ObjectId) {
     const now = new Date()
-    const coupons = await databaseService.coupons.find({
-      isActive: true,
-      $or: [
-        { isPublic: true },
-        { targetUserIds: userId },
-        { targetUserIds: userId.toString() }
-      ]
-    }).sort({ createdAt: -1 }).toArray()
+    const coupons = await databaseService.coupons
+      .find({
+        isActive: true,
+        $or: [{ isPublic: true }, { targetUserIds: userId }, { targetUserIds: userId.toString() }]
+      })
+      .sort({ createdAt: -1 })
+      .toArray()
 
     return coupons.map((coupon: any) => {
       const start = new Date(coupon.startDate)
@@ -871,7 +944,9 @@ class CouponService {
       const isUsedUp = usedCount >= perUserLimit
       const isNotStarted = now < start
       const isExpired = now > end
-      const isTargeted = (coupon.targetUserIds || []).some((id: ObjectId | string) => id.toString() === userId.toString())
+      const isTargeted = (coupon.targetUserIds || []).some(
+        (id: ObjectId | string) => id.toString() === userId.toString()
+      )
 
       let status: 'usable' | 'needs_min_order' | 'used_up' | 'expired' | 'not_started' = 'usable'
       if (isExpired) status = 'expired'
@@ -894,12 +969,16 @@ class CouponService {
     if (!coupon) {
       throw new ErrorWithStatus({ message: 'Không tìm thấy mã giảm giá.', status: HTTP_STATUS.NOT_FOUND })
     }
+    const nextIsActive = !coupon.isActive
     await databaseService.coupons.updateOne(
       { _id: couponId },
-      { $set: { isActive: !coupon.isActive, updatedAt: new Date() } }
+      { $set: { isActive: nextIsActive, updatedAt: new Date() } }
     )
     await cacheService.invalidate('coupons:*')
-    return { isActive: !coupon.isActive }
+    if (nextIsActive) {
+      this.pushCouponNotification({ ...coupon, isActive: nextIsActive, updatedAt: new Date() })
+    }
+    return { isActive: nextIsActive }
   }
 }
 

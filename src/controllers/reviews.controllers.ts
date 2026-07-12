@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb'
 import reviewService from '~/services/reviews.services'
 import { TokenPayload } from '~/models/requests/User.request'
 import { REVIEWS_MESSAGES } from '~/constants/message'
+import { ReviewStatus } from '~/constants/enum'
 
 /**
  * Review Controllers for Medical E-commerce
@@ -86,12 +87,21 @@ export const getProductReviewStatsController = async (req: Request, res: Respons
 export const getUserReviewsController = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.decoded_authorization as TokenPayload
+    const { page, limit, status } = req.query
+    const hasPaginationQuery = Boolean(page || limit || status)
+    const reviewStatus = Object.values(ReviewStatus).includes(status as ReviewStatus)
+      ? (status as ReviewStatus)
+      : undefined
 
-    const reviews = await reviewService.getReviewsByUserId(new ObjectId(userId))
+    const result = await reviewService.getReviewsByUserId(new ObjectId(userId), {
+      page: page ? Number(page) : hasPaginationQuery ? 1 : undefined,
+      limit: limit ? Number(limit) : hasPaginationQuery ? 10 : 1000,
+      status: reviewStatus
+    })
 
     return res.status(200).json({
       message: REVIEWS_MESSAGES.GET_USER_REVIEWS_SUCCESS,
-      data: reviews
+      data: hasPaginationQuery ? result : result.reviews
     })
   } catch (error) {
     next(error)
