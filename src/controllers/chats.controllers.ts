@@ -86,7 +86,7 @@ async function loadMedicalContext(userId: string): Promise<Record<string, any> |
 
 async function loadCommerceContext(userId: string): Promise<Record<string, any>> {
   const userObjectId = new ObjectId(userId)
-  const [orders, loyalty] = await Promise.all([
+  const [orders, loyalty, returnRequests] = await Promise.all([
     databaseService.orders
       .find(
         { userId: userObjectId },
@@ -107,7 +107,32 @@ async function loadCommerceContext(userId: string): Promise<Record<string, any>>
       .limit(3)
       .toArray()
       .catch(() => []),
-    loyaltyService.getAccountInfo(userObjectId).catch(() => null)
+    loyaltyService.getAccountInfo(userObjectId).catch(() => null),
+    databaseService.returnRequests
+      .find(
+        { userId: userObjectId },
+        {
+          projection: {
+            requestNumber: 1,
+            orderNumber: 1,
+            status: 1,
+            type: 1,
+            reason: 1,
+            requestedAmount: 1,
+            approvedAmount: 1,
+            refundedAmount: 1,
+            refundTransactionId: 1,
+            refundedAt: 1,
+            items: 1,
+            createdAt: 1,
+            updatedAt: 1
+          }
+        }
+      )
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray()
+      .catch(() => [])
   ])
 
   const context: Record<string, any> = {}
@@ -152,6 +177,32 @@ async function loadCommerceContext(userId: string): Promise<Record<string, any>>
       amountToNextTier: loyalty.amountToNextTier,
       progressToNextTier: loyalty.progressToNextTier
     }
+  }
+
+  if (returnRequests.length > 0) {
+    context.returnRequests = returnRequests.map((request: any) => ({
+      _id: request._id?.toString(),
+      requestNumber: request.requestNumber,
+      orderNumber: request.orderNumber,
+      status: request.status,
+      type: request.type,
+      reason: request.reason,
+      requestedAmount: request.requestedAmount,
+      approvedAmount: request.approvedAmount,
+      refundedAmount: request.refundedAmount,
+      refundTransactionId: request.refundTransactionId,
+      refundedAt: request.refundedAt,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+      items: (request.items || []).slice(0, 5).map((item: any) => ({
+        name: item.productName,
+        quantity: item.quantity,
+        unit: item.unit,
+        returnReason: item.returnReason
+      }))
+    }))
+  } else {
+    context.noReturnRequestsFound = true
   }
   return context
 }
