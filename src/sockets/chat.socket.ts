@@ -83,14 +83,19 @@ const ORDER_KEYWORDS = [
   'đến đâu', 'bao giờ giao', 'tình trạng đơn', 'trạng thái đơn',
   'đã mua', 'lịch sử mua', 'mua gì', 'mua ngày', 'hóa đơn'
 ]
+const RETURN_KEYWORDS = [
+  'đổi trả', 'trả hàng', 'hoàn trả', 'hoàn tiền', 'refund', 'return',
+  'ret-', 'yêu cầu trả', 'đơn hoàn', 'đã hoàn trả', 'đã hoàn tiền'
+]
 const LOYALTY_KEYWORDS = [
   'điểm thưởng', 'điểm tích lũy', 'hạng thành viên', 'thành viên',
   'hạng bạc', 'hạng vàng', 'hạng kim', 'loyalty', 'tích điểm',
   'bao nhiêu điểm', 'còn điểm', 'điểm của tôi'
 ]
 
-function detectContextIntent(message: string): 'order' | 'loyalty' | null {
+function detectContextIntent(message: string): 'order' | 'loyalty' | 'return' | null {
   const lower = message.toLowerCase()
+  if (RETURN_KEYWORDS.some(kw => lower.includes(kw))) return 'return'
   if (ORDER_KEYWORDS.some(kw => lower.includes(kw))) return 'order'
   if (LOYALTY_KEYWORDS.some(kw => lower.includes(kw))) return 'loyalty'
   return null
@@ -103,10 +108,15 @@ function extractOrderNumbers(message: string): string[] {
   return [...new Set(matches.map(m => m.toUpperCase()))]
 }
 
+function extractReturnRequestNumbers(message: string): string[] {
+  const matches = message.match(/RET[-\w]+/gi) || []
+  return [...new Set(matches.map(m => m.toUpperCase()))]
+}
+
 // ── Fetch real user data từ MongoDB để inject vào AI context ──────────────────
 async function fetchUserContextData(
   userId: string,
-  intent: 'order' | 'loyalty',
+  intent: 'order' | 'loyalty' | 'return',
   message: string = ''
 ): Promise<Record<string, any> | null> {
   try {
@@ -202,6 +212,63 @@ async function fetchUserContextData(
           tier: account.tier || 'member',
           totalSpent: account.totalSpent || 0
         }
+      }
+    }
+
+    if (intent === 'return') {
+      const mentionedRequestNumbers = extractReturnRequestNumbers(message)
+      const recentReturns = await databaseService.returnRequests
+        .find({ userId: new ObjectId(userId) })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray()
+
+      let mentionedReturns: any[] = []
+      if (mentionedRequestNumbers.length > 0) {
+        mentionedReturns = await databaseService.returnRequests
+          .find({
+            requestNumber: { $in: mentionedRequestNumbers },
+            userId: new ObjectId(userId)
+          })
+          .toArray()
+      }
+
+      const allReturns = [...mentionedReturns]
+      for (const request of recentReturns) {
+        if (!allReturns.find((item: any) => item._id?.toString() === request._id?.toString())) {
+          allReturns.push(request)
+        }
+      }
+
+      if (!allReturns.length) {
+        return { returnRequests: [], noReturnRequestsFound: true }
+      }
+
+      return {
+        returnRequests: allReturns.slice(0, 5).map((request: any) => ({
+          _id: request._id?.toString(),
+          requestNumber: request.requestNumber,
+          orderNumber: request.orderNumber,
+          status: request.status,
+          type: request.type,
+          reason: request.reason,
+          requestedAmount: request.requestedAmount || 0,
+          approvedAmount: request.approvedAmount,
+          refundedAmount: request.refundedAmount,
+          refundTransactionId: request.refundTransactionId,
+          refundedAt: request.refundedAt
+            ? new Date(request.refundedAt).toLocaleDateString('vi-VN')
+            : undefined,
+          createdAt: request.createdAt
+            ? new Date(request.createdAt).toLocaleDateString('vi-VN')
+            : 'N/A',
+          items: (request.items || []).slice(0, 3).map((item: any) => ({
+            name: item.productName || 'Sản phẩm',
+            quantity: item.quantity || 1,
+            unit: item.unit,
+            returnReason: item.returnReason
+          }))
+        }))
       }
     }
   } catch (err) {
