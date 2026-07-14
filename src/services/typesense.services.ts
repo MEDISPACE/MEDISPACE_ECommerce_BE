@@ -233,7 +233,7 @@ function toProductDocument(product: any): Record<string, unknown> {
       }))
     ),
     maxOrderQuantity: product.maxOrderQuantity || 10,
-    searchTextNormalized: normalizeVietnamese(searchableText),
+    searchTextNormalized: buildNormalizedSearchText(searchableText),
     rating: product.rating || 0,
     reviewCount: product.reviewCount || 0,
     featuredImage: product.featuredImage || '',
@@ -255,6 +255,29 @@ function normalizeVietnamese(value: string): string {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[đĐ]/g, 'd')
     .toLowerCase()
+}
+
+function buildCompactSearchAliases(value: string): string {
+  const tokens = normalizeVietnamese(value)
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+
+  const aliases = new Set<string>()
+  for (let index = 0; index < tokens.length; index += 1) {
+    for (const size of [2, 3]) {
+      const phrase = tokens.slice(index, index + size)
+      if (phrase.length === size) aliases.add(phrase.join(''))
+    }
+  }
+
+  return Array.from(aliases).join(' ')
+}
+
+function buildNormalizedSearchText(value: string): string {
+  const normalized = normalizeVietnamese(value)
+  const compactAliases = buildCompactSearchAliases(value)
+  return [normalized, compactAliases].filter(Boolean).join(' ')
 }
 
 function getSearchTokens(value: string): string[] {
