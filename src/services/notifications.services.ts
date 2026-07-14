@@ -42,6 +42,13 @@ const DEFAULT_NOTIFICATION_PREFERENCES = {
 type NotificationPreferences = typeof DEFAULT_NOTIFICATION_PREFERENCES
 const ALWAYS_ON_TYPES: NotificationTypeEnum[] = ['order', 'payment', 'shipping', 'prescription', 'return', 'security']
 
+const compactUndefined = <T extends Record<string, unknown>>(value: T): T => {
+  Object.keys(value).forEach((key) => {
+    if (value[key] === undefined) delete value[key]
+  })
+  return value
+}
+
 class NotificationService {
   /**
    * Create and persist a single notification to DB
@@ -82,7 +89,7 @@ class NotificationService {
   async createNotification(payload: CreateNotificationPayload): Promise<Notification | null> {
     if (!(await this.shouldCreateInAppNotification(payload))) return null
 
-    const notification = new Notification({
+    const notification = compactUndefined(new Notification({
       userId: payload.userId,
       type: payload.type,
       title: payload.title,
@@ -91,7 +98,7 @@ class NotificationService {
       metadata: payload.metadata,
       targetRole: payload.targetRole || 'customer',
       eventKey: payload.eventKey
-    })
+    }) as unknown as Record<string, unknown>) as Notification
 
     if (payload.eventKey) {
       const result = await databaseService.notifications.findOneAndUpdate(
